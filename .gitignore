@@ -1,2 +1,13 @@
 .o
 run
+.h5
+Output
+*.log
+*.out
+*.aux
+*.toc
+*.gz
+*.lof
+*.lot
+*.fls
+*.fdb_latexmks

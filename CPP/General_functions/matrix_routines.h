@@ -7,8 +7,9 @@
 #include <vector>
 #include <numeric>
 #include <algorithm>
-#include "mkl.h"
-#include "mkl_dss.h"
+#include <lapacke.h>
+//#include "mkl.h"
+//#include "mkl_dss.h"
 
 #include "templates.h"
 #include "../error_management.h"
@@ -37,18 +38,18 @@ std::complex<double> determinant(std::complex<double>* A, int N);
  * The logic in this function follows exactly that listed in
  * https://scc.ustc.edu.cn/zlsc/sugon/intel/mkl/mkl_manual/GUID-24A41D50-4D0A-471B-9722-EA59E443ABC8.htm*/
 void solve_MM_sparse(double*  A_val_array,
-					 MKL_INT* A_idx_row_array,
-					 MKL_INT* A_idx_col_array,
-					 MKL_INT  A_nnz,
+					 int* A_idx_row_array,
+					 int* A_idx_col_array,
+					 int  A_nnz,
 					 double*  B_val_array,
-					 MKL_INT  mat_dim,
+					 int  mat_dim,
 					 double*  sol_val_array);
 void solve_MM_sparse(std::complex<double>*  A_val_array,
-					 MKL_INT* A_idx_row_array,
-					 MKL_INT* A_idx_col_array,
-					 MKL_INT  A_nnz,
+					 int* A_idx_row_array,
+					 int* A_idx_col_array,
+					 int  A_nnz,
 					 std::complex<double>*  B_val_array,
-					 MKL_INT  mat_dim,
+					 int  mat_dim,
 					 std::complex<double>*  sol_val_array);
 
 void simple_transpose_matrix_routine(double* mat_array, int mat_dim);

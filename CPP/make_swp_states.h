@@ -4,11 +4,12 @@
 #include <iostream>
 #include <math.h>
 #include <complex>
-#include "mkl.h"
+//#include "mkl.h"
 
 #include "constants.h"
 #include "type_defs.h"
 #include "error_management.h"
+#include <lapacke.h>
 #include "disk_io_routines.h"
 #include "make_pw_symm_states.h"
 #include "General_functions/kinetic_conversion.h"

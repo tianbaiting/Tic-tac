@@ -7,7 +7,7 @@
 #include <math.h>
 #include <complex>
 #include <algorithm> // std::max, std::min
-#include "mkl.h"
+//#include "mkl.h"
 #include <fstream>
 #include <time.h>
 #include <omp.h>
@@ -121,13 +121,13 @@ double calculate_P123_element_in_WP_basis_mod (double* Gtilde_subarray,
 											   double* cos_phi_subarray,
 											   double* wphi_subarray);
 
-void generate_Ptilde_new(double *P123_store, MKL_INT64 Pdim,
-                         MKL_INT64 N_p, double *p,
-                         MKL_INT64 N_q, double *q,
-                         MKL_INT64 N_x, double *x, double *wx,
-                         MKL_INT64 Jj_dim, double pmax, double qmax,
+void generate_Ptilde_new(double *P123_store, long long Pdim,
+                         long long N_p, double *p,
+                         long long N_q, double *q,
+                         long long N_x, double *x, double *wx,
+                         long long Jj_dim, double pmax, double qmax,
                          int *L12_Jj, int *l3_Jj, int *J12_Jj, int *two_j3_Jj, int *S12_Jj, int *T12_Jj,
-                         MKL_INT64 Lmax, MKL_INT64 max_L12, MKL_INT64 max_l3, MKL_INT64 two_J, MKL_INT64 two_T,
+                         long long Lmax, long long max_L12, long long max_l3, long long two_J, long long two_T,
                          double *SixJ_array, int two_jmax_SixJ, double* Gtilde_store);
 
 /* Function defined for WPCD method, adapted simply from generate_Ptilde_new */

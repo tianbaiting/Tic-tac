@@ -1,5 +1,28 @@
-
 #include "solve_faddeev.h"
+#include <cblas.h>
+#include <cstring>
+
+// Helper function for in-place matrix transpose
+void inplace_transpose(double* A, int rows, int cols) {
+    if (rows == cols) { // Square matrix
+        for (int i = 0; i < rows; ++i) {
+            for (int j = i + 1; j < cols; ++j) {
+                double temp = A[i * cols + j];
+                A[i * cols + j] = A[j * cols + i];
+                A[j * cols + i] = temp;
+            }
+        }
+    } else { // Non-square matrix, requires a temporary buffer
+        double* B = new double[rows * cols];
+        for (int i = 0; i < rows; ++i) {
+            for (int j = 0; j < cols; ++j) {
+                B[j * rows + i] = A[i * cols + j];
+            }
+        }
+        memcpy(A, B, rows * cols * sizeof(double));
+        delete[] B;
+    }
+}
 
 void calculate_PVC_col(double*  col_array,
 					   size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
@@ -93,46 +116,6 @@ void calculate_CPVC_col(double*  col_array,
 	double* CT_subarray_row = NULL;
 	double* PVC_subcol 		= NULL;
 
-	///*  Looping based on matrix-vector product */
-	//double* CPVC_subcol 	= NULL;
-	//for (size_t idx_alpha_r=0; idx_alpha_r<Nalpha; idx_alpha_r++){
-	//	/* Beginning of inner-product loops (index "i") */
-	//	for (size_t idx_alpha_i=0; idx_alpha_i<Nalpha; idx_alpha_i++){
-	//		size_t idx_CT_2N_block = idx_alpha_r*Nalpha + idx_alpha_i;
-	//		CT_subarray = CT_RM_array[idx_CT_2N_block];
-	//		/* Only do inner-product if CT is not zero due to conservation laws */
-	//		if (CT_subarray!=NULL){
-	//			for (size_t idx_q_r=0; idx_q_r<Nq_WP; idx_q_r++){
-	//				PVC_subcol  = &PVC_col[idx_alpha_i*Nq_WP*Np_WP + idx_q_r*Np_WP];
-	//				CPVC_subcol = &col_array[idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP];
-	//				/* Do inner-product over momentum p */
-	//				dot_MV(CT_subarray, PVC_subcol, CPVC_subcol, Np_WP, Np_WP);
-	//			}
-	//		}
-	//	}
-	//}
-
-	///*  Looping based on first nnz-lookup of PVC elements */
-	//for (size_t idx_alpha_i=0; idx_alpha_i<Nalpha; idx_alpha_i++){
-	//	for (size_t idx_q_r=0; idx_q_r<Nq_WP; idx_q_r++){
-	//		for (size_t idx_p_i=0; idx_p_i<Np_WP; idx_p_i++){
-	//			double PVC_element = PVC_col[idx_alpha_i*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_i];
-	//			if (PVC_element!=0){
-	//				for (size_t idx_alpha_r=0; idx_alpha_r<Nalpha; idx_alpha_r++){
-	//					size_t idx_CT_2N_block = idx_alpha_r*Nalpha + idx_alpha_i;
-	//					CT_subarray = CT_RM_array[idx_CT_2N_block];
-	//					if (CT_subarray!=NULL){
-	//						for (size_t idx_p_r=0; idx_p_r<Np_WP; idx_p_r++){
-	//							double prod = PVC_element  * CT_subarray[idx_p_r*Np_WP + idx_p_i];
-	//							size_t idx_CPVC = idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_r;
-	//							col_array[idx_CPVC] += prod;
-	//						}
-	//					}
-	//				}
-	//			}
-	//		}
-	//	}
-	//}
 	
 	/*  Looping based on first nnz-lookup of CT-matrices */
 	/* Loop over rows of col_array */
@@ -157,13 +140,6 @@ void calculate_CPVC_col(double*  col_array,
 								//if (prod!=0){
 									auto idx_CPVC = idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_r;
 									col_array[idx_CPVC] += PVC_element  * CT_subarray[idx_p_r*Np_WP + idx_p_i];
-									//int nnz_idx = row_to_nnz_array[idx_CPVC];
-									//if (nnz_idx==-1){
-									//	row_to_nnz_array[idx_CPVC] = num_nnz;
-									//	nnz_to_row_array[num_nnz]  = idx_CPVC;
-									//	nnz_idx = num_nnz;
-									//	num_nnz += 1;
-									//}
 								//}
 							}
 						}
@@ -369,16 +345,7 @@ void faddeev_dense_solver(cdouble*  U_array,
 									   P123_sparse_dim);
 
     	    		for (size_t row_idx=0; row_idx<dense_dim; row_idx++){
-					//int row_idx = 0;
-					//for (size_t nnz_idx=0; nnz_idx<CPVC_num_nnz; nnz_idx++){
-					//	row_idx = CPVC_nnz_to_row_array[nnz_idx];
-
-    	    		    //L_array[row_idx*dense_dim + col_idx] = -K_array[row*n + col];
-						//L_array[row_idx*dense_dim + col_idx] = -CPVC_col_array[nnz_idx]*G_array[j*dense_dim + col_idx];
 						L_array[row_idx*dense_dim + col_idx] = -CPVC_col_array[row_idx]*G_array[j*dense_dim + col_idx];
-
-    	    		    //R_array[row_idx*dense_dim + col_idx] =  A_array[row*n + col];
-						//R_array[row_idx*dense_dim + col_idx] =  CPVC_col_array[nnz_idx];
 						R_array[row_idx*dense_dim + col_idx] =  CPVC_col_array[row_idx];
     	    		}
 
@@ -426,7 +393,7 @@ void faddeev_dense_solver(cdouble*  U_array,
 				/* Set U-matrix element equal "best" PA */
 				U_array[idx_NDOS] = U_val;
 
-				printf("   - U-matrix element for alpha'=%d, alpha=%d, q=%d: %.10e + %.10ei \n", idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, U_array[idx_NDOS].real(), U_array[idx_NDOS].imag());
+				printf("   - U-matrix element for alpha'=%ld, alpha=%ld, q=%ld: %.10e + %.10ei \n", idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, U_array[idx_NDOS].real(), U_array[idx_NDOS].imag());
 			}
 		}
 	}
@@ -473,7 +440,7 @@ void pade_method_solve(cdouble*  U_array,
 	auto timestamp_end   = std::chrono::system_clock::now();
 
 	/* Use as many threads as possible in MKL-GEMM */
-	mkl_set_num_threads(omp_get_max_threads());
+	omp_set_num_threads(omp_get_max_threads());
 
 	/* Number of on-shell nucleon-deuteron channels (deuteron states can mix, hence ^2) */
 	size_t num_on_shell_A_rows = num_deuteron_states * num_q_com;
@@ -586,9 +553,6 @@ void pade_method_solve(cdouble*  U_array,
 	
 	/* Precalculate kernel CPVC and keep in computer memory, if the option is selected
 	 * !!! WARNING: EXTREMELY MEMORY INTENSIVE !!! */
-	/* ################################################################################################################### */
-	/* ################################################################################################################### */
-	/* ################################################################################################################### */
 	if (keep_CPVC_in_mem){
 		printf("     - Precalculating CPVC-kernel in CSR-sparse format \n"); fflush(stdout);
 
@@ -740,12 +704,7 @@ void pade_method_solve(cdouble*  U_array,
 		printf("         - Time spent:     %.6f \n", time_CPVC_consolidation.count()); fflush(stdout);
 		printf("         - Done. \n"); fflush(stdout);
 
-		std::string filename = "kernel.h5";   //P123_folder + "/CPVC_"
-						 				   //+ to_string(two_J_3N) + "_" + to_string(P_3N)
-						 				   //+ "_Np_" + to_string(Np_WP) + "_Nq_" + to_string(Nq_WP)
-						 				   //+ "_J2max_" + to_string(J_2N_max) + "_TFC_" + to_string(thread_idx)
-						 				   //+ "_" + to_string(current_TFC) + ".h5";
-
+		std::string filename = "kernel.h5";
 		/* Store sparse CPVC-array to file */
 		printf("       - Writing kernel to h5 ... \n"); fflush(stdout);
 		timestamp_start = std::chrono::system_clock::now();
@@ -786,9 +745,6 @@ void pade_method_solve(cdouble*  U_array,
 
 		printf("       - Done. \n"); fflush(stdout);
 	}
-	/* ################################################################################################################### */
-	/* ################################################################################################################### */
-	/* ################################################################################################################### */
 
 	/* Set initial values for A_Kn_row_array, where K^n=1 for n=0 */
 	printf("     - Working on Pade approximant P[N,M] for N=%d, M=%d \n",0,0); fflush(stdout);
@@ -858,7 +814,7 @@ void pade_method_solve(cdouble*  U_array,
 				neumann_store_array[idx_NDOS] = a_coeff;
 				
 				if (print_neumann_terms){
-					printf("         - Neumann term %d for alpha'=%d, alpha=%d, q=%d: %.16e + %.16ei \n", 0, idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, a_coeff.real(), a_coeff.imag());
+					printf("         - Neumann term %d for alpha'=%ld, alpha=%ld, q=%ld: %.16e + %.16ei \n", 0, idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, a_coeff.real(), a_coeff.imag());
 					fflush(stdout);
 				}
 			}
@@ -924,7 +880,7 @@ void pade_method_solve(cdouble*  U_array,
 		}
 
 		if (NM!=0){
-			printf("     - Working on Pade approximant P[N,M] for N=%d, M=%d \n",NM,NM); fflush(stdout);
+			printf("     - Working on Pade approximant P[N,M] for N=%ld, M=%ld \n",NM,NM); fflush(stdout);
 		}
 		
 		size_t counter_array [100];
@@ -1071,12 +1027,12 @@ void pade_method_solve(cdouble*  U_array,
 
 					double beta  = 0;
 					double alpha = 1;
-					MKL_INT M    = num_non_conv_rows;// num_on_shell_A_rows
-					MKL_INT N    = cols_in_chunk;// max_num_cols_in_mem;
-					MKL_INT K    = dense_dim;
-					MKL_INT lda  = dense_dim;
-					MKL_INT ldb  = dense_dim;//max_num_cols_in_mem;
-					MKL_INT ldc  = dense_dim;
+					int M    = num_non_conv_rows;// num_on_shell_A_rows
+					int N    = cols_in_chunk;// max_num_cols_in_mem;
+					int K    = dense_dim;
+					int lda  = dense_dim;
+					int ldb  = dense_dim;//max_num_cols_in_mem;
+					int ldc  = dense_dim;
 					double* re_A = &re_A_An_row_array_comp[0];
 					double* im_A = &im_A_An_row_array_comp[0];
 					double* B 	 = &CPVC_cols_array[0];
@@ -1096,14 +1052,14 @@ void pade_method_solve(cdouble*  U_array,
 				const char   trans 	  = 'T';
 				const double alpha 	  = 1.0;
 				/* Transpose An before sparse multiplication */
-				mkl_dimatcopy(ordering, trans, num_non_conv_rows, dense_dim, alpha, re_A_An_row_array_comp, dense_dim, num_non_conv_rows);
-				mkl_dimatcopy(ordering, trans, num_non_conv_rows, dense_dim, alpha, im_A_An_row_array_comp, dense_dim, num_non_conv_rows);
+				inplace_transpose(re_A_An_row_array_comp, num_non_conv_rows, dense_dim);
+				inplace_transpose(im_A_An_row_array_comp, num_non_conv_rows, dense_dim);
 				/* Multiply CPVC with An using sparse multiplication */
 				//dot_MM_sparse(CPVC_v_array, CPVC_c_array_LL, CPVC_csc_array_LL, re_A_An_row_array_comp, re_A_An_row_array_prod, dense_dim, dense_dim, num_non_conv_rows, true);
 				//dot_MM_sparse(CPVC_v_array, CPVC_c_array_LL, CPVC_csc_array_LL, re_A_An_row_array_comp, im_A_An_row_array_prod, dense_dim, dense_dim, num_non_conv_rows, true);
 				/* Transpose An+1 after sparse multiplication */
-				mkl_dimatcopy(ordering, trans, dense_dim, num_non_conv_rows, alpha, re_A_An_row_array_prod, num_non_conv_rows, dense_dim);
-				mkl_dimatcopy(ordering, trans, dense_dim, num_non_conv_rows, alpha, im_A_An_row_array_prod, num_non_conv_rows, dense_dim);
+				inplace_transpose(re_A_An_row_array_prod, dense_dim, num_non_conv_rows);
+				inplace_transpose(im_A_An_row_array_prod, dense_dim, num_non_conv_rows);
 				double timestamp_gemm_end   = omp_get_wtime();
 				time_An_CPVC_multiply += timestamp_gemm_end - timestamp_gemm_start;
 			}
@@ -1163,12 +1119,8 @@ void pade_method_solve(cdouble*  U_array,
 						/* Store coefficient in print-to-file format */
 						neumann_store_array[idx_NDOS] = a_coeff;
 
-						/* Store coefficient in print-to-file format */
-						neumann_store_array[idx_NDOS] = a_coeff;
-
 						if (print_neumann_terms){
-							printf("         - Neumann term %d for alpha'=%d, alpha=%d, q=%d: %.16e + %.16ei \n", n, idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, a_coeff.real(), a_coeff.imag());
-							//printf("%d\n", idx_row_NDOS*dense_dim + idx_col_NDOS);
+							printf("         - Neumann term %d for alpha'=%ld, alpha=%ld, q=%ld: %.16e + %.16ei \n", n, idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, a_coeff.real(), a_coeff.imag());
 						}
 					}
 				}
@@ -1212,11 +1164,11 @@ void pade_method_solve(cdouble*  U_array,
 		    store_sep_complex_matrix(re_A_An_row_array,
 									 im_A_An_row_array,
                                      num_on_shell_A_rows,
-		    				         dense_dim,
-		    				         dense_dim,
-		    				         A_An_row_filename,
-		    				         false,
-								     array_seperator_text);
+		    						 dense_dim,
+		    						 dense_dim,
+		    						 A_An_row_filename,
+		    						 false,
+									 array_seperator_text);
 			printf("         - Done \n");
 			}
 			if (store_neumann_terms){
@@ -1233,7 +1185,7 @@ void pade_method_solve(cdouble*  U_array,
 		}
 		delete [] times_array;
 
-		printf("       - Calculating Pade approximants PA[%d,%d]. \n", NM, NM); fflush(stdout);
+		printf("       - Calculating Pade approximants PA[%ld,%ld]. \n", NM, NM); fflush(stdout);
 		/* Calculate Pade approximants (PA) for elastic amplitudes */
 		for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 			for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
@@ -1280,10 +1232,10 @@ void pade_method_solve(cdouble*  U_array,
 
 					/* Criterias for convergence¨
 					 * If any are fulfilled, we set convergence to true for current on-shell element */
-					bool convergence_criteria_0 = (NM==NM_max);																				// Cannot go past max NM
-					bool convergence_criteria_1 = (NM-idx_best_PA>4);																		// If nothing better is found in the last 3 PAs, we assume we found the best
+					bool convergence_criteria_0 = (NM==NM_max);													// Cannot go past max NM
+					bool convergence_criteria_1 = (NM-idx_best_PA>4);												// If nothing better is found in the last 3 PAs, we assume we found the best
 					bool convergence_criteria_2 = (min_PA_diff<1e-6*std::abs(pade_approximants_array[idx_NDOS*(NM_max+1) + idx_best_PA]));	// If the difference is less than the 4th significant digit, we assume "good enough"
-					bool convergence_criteria_3 = (min_PA_diff<1e-7);																		// If we are below single precision resolution, assume convergence
+					bool convergence_criteria_3 = (min_PA_diff<1e-7);												// If we are below single precision resolution, assume convergence
 					
 					if (convergence_criteria_0 ||
 						convergence_criteria_1 ||
@@ -1345,10 +1297,10 @@ void pade_method_solve(cdouble*  U_array,
 
 						/* Criterias for convergence¨
 						* If any are fulfilled, we set convergence to true for current on-shell element */
-						bool convergence_criteria_0 = (NM==NM_max);																					// Cannot go past max NM
-						bool convergence_criteria_1 = (NM-idx_best_PA>4);																			// If nothing better is found in the last 3 PAs, we assume we found the best
+						bool convergence_criteria_0 = (NM==NM_max);													// Cannot go past max NM
+						bool convergence_criteria_1 = (NM-idx_best_PA>4);												// If nothing better is found in the last 3 PAs, we assume we found the best
 						bool convergence_criteria_2 = (min_PA_diff<1e-6*std::abs(pade_approximants_BU_array[idx_NDOS*(NM_max+1) + idx_best_PA]));	// If the difference is less than the 4th significant digit, we assume "good enough"
-						bool convergence_criteria_3 = (min_PA_diff<1e-7);																			// If we are below single precision resolution, assume convergence
+						bool convergence_criteria_3 = (min_PA_diff<1e-7);												// If we are below single precision resolution, assume convergence
 						
 						if (convergence_criteria_0 ||
 							convergence_criteria_1 ||
@@ -1381,7 +1333,7 @@ void pade_method_solve(cdouble*  U_array,
 				size_t idx_best_PA = pade_approximants_idx_array[idx_NDOS];
 
 				U_array[idx_NDOS] = pade_approximants_array[idx_NDOS*(NM_max+1) + idx_best_PA];
-				printf("       - U-matrix element for alpha'=%d, alpha=%d, q=%d: %.10e + %.10ei \n", idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, U_array[idx_NDOS].real(), U_array[idx_NDOS].imag());
+				printf("       - U-matrix element for alpha'=%ld, alpha=%ld, q=%ld: %.10e + %.10ei \n", idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, U_array[idx_NDOS].real(), U_array[idx_NDOS].imag());
 			}
 		}
 	}
@@ -1402,22 +1354,11 @@ void pade_method_solve(cdouble*  U_array,
 					size_t idx_best_PA = pade_approximants_BU_idx_array[idx_NDOS];
 
 					U_BU_array[idx_NDOS] = pade_approximants_BU_array[idx_NDOS*(NM_max+1) + idx_best_PA];
-					//printf("       - U-matrix element for alpha'=%d, alpha=%d, q=%d: %.10e + %.10ei \n", idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, U_array[idx_NDOS].real(), U_array[idx_NDOS].imag());
 				}
 			}
 		}
 	}
 	printf("       - Done \n"); fflush(stdout);
-
-	//printf("       - Storing on-shell Neumann-series terms a_n=A*K^n for all n to output-folder. \n"); fflush(stdout);
-	//			std::string array_seperator_text = "n = " + std::to_string(2*NM_max+1);
-	//store_complex_vector_with_comments(neumann_store_array,
-	//								   comment_array,
-	//								   num_deuteron_states*num_deuteron_states*num_q_com,
-	//								   neumann_terms_filename,
-	//								   false,
-	//								   "Neumann terms");
-	//printf("         - Done \n");
 
 	/* Free allocated working space */
 	delete [] a_coeff_array;
@@ -1503,14 +1444,6 @@ void solve_faddeev_equations(cdouble*  U_array,
 									   run_parameters);
 	
 	size_t  dense_dim = Nalpha * Nq_WP * Np_WP;
-
-	//// Temp code to print P123 rows
-	//size_t row_idx = 5*Np_WP*Nq_WP + 1*Np_WP + 0;
-	//for (size_t nnz_idx=0; nnz_idx<P123_sparse_dim; nnz_idx++){
-	//	if (P123_sparse_row_array[nnz_idx]==row_idx){
-	//		std::cout << P123_sparse_val_array[nnz_idx] << std::endl;
-	//	}
-	//}
 	
 	/* Test optimized routine for PVC columns */
 	if (test_PVC_col_routine){
@@ -1628,16 +1561,6 @@ void create_CT_row_maj_3N_pointer_array(double** CT_RM_array,
 			
 		/* Transpose C to get C^T */
 		simple_transpose_matrix_routine(CT_subarray, Np_WP);
-
-		//double* tempprod = new double [Np_WP*Np_WP];
-		//dot_MM(CT_subarray, C_subarray, tempprod, Np_WP, Np_WP, Np_WP);
-		//for (int i=0; i<Np_WP; i++){
-		//	for (int j=0; j<Np_WP; j++){
-		//		if (i!=j and abs(tempprod[i*Np_WP+j])>1e-15){
-		//			std::cout << "unco " << i << " " << j << " " << tempprod[i*Np_WP+j] << std::endl;
-		//		}
-		//	}
-		//}
 	}
 
 	/* Copy and transpose all 2N-coupled C-arrays */
@@ -1652,16 +1575,6 @@ void create_CT_row_maj_3N_pointer_array(double** CT_RM_array,
 		
 		/* Transpose C to get C^T */
 		simple_transpose_matrix_routine(CT_subarray, 2*Np_WP);
-
-		//double* tempprod = new double [4*Np_WP*Np_WP];
-		//dot_MM(CT_subarray, C_subarray, tempprod, 2*Np_WP, 2*Np_WP, 2*Np_WP);
-		//for (int i=0; i<2*Np_WP; i++){
-		//	for (int j=0; j<2*Np_WP; j++){
-		//		if (i!=j and abs(tempprod[i*2*Np_WP+j])>1e-15){
-		//			std::cout << "coup " << i << " " << j << " " << tempprod[i*2*Np_WP+j] << std::endl;
-		//		}
-		//	}
-		//}
 
 		/* Restucture coupled matrix array into 4 seperate arrays */
 		restructure_coupled_VC_product(CT_subarray, Np_WP);
@@ -1997,234 +1910,4 @@ void CPVC_col_brute_force(double*  col_array,
 						  size_t   P123_dim){
 	double* CT_ptr = NULL;
 	double* VC_ptr = NULL;
-
-	bool print_content = false;
-
-	/* Generate PVC-column */
-	double* PVC_col = new double [Nalpha*Nq_WP*Np_WP];
-	/* Ensure PVC_col contains only zeroes */
-	for (size_t idx=0; idx<Nalpha*Nq_WP*Np_WP; idx++){
-		PVC_col[idx] = 0;
-	}
-	
-	PVC_col_brute_force(PVC_col,
-					    idx_alpha_c, idx_p_c, idx_q_c,
-					    Nalpha,      Nq_WP,   Np_WP,
-					    VC_CM_array,
-					    P123_val_array,
-					    P123_row_array,
-					    P123_col_array,
-					    P123_dim);
-
-	/* Index: r */
-	for (size_t idx_alpha_r=0; idx_alpha_r<Nalpha; idx_alpha_r++){
-		for (size_t idx_q_r=0; idx_q_r<Nq_WP; idx_q_r++){
-			for (size_t idx_p_r=0; idx_p_r<Np_WP; idx_p_r++){
-				if (print_content){std::cout << "Index r " << idx_alpha_r << " " << idx_q_r << " " << idx_p_r << std::endl;}
-				double sum = 0;
-				/* Index: i */
-				for (size_t idx_alpha_i=0; idx_alpha_i<Nalpha; idx_alpha_i++){
-					CT_ptr = CT_RM_array[idx_alpha_r*Nalpha + idx_alpha_i];
-					if (CT_ptr!=NULL){
-						for (size_t idx_q_i=0; idx_q_i<Nq_WP; idx_q_i++){
-							if (idx_q_r == idx_q_i){
-								for (size_t idx_p_i=0; idx_p_i<Np_WP; idx_p_i++){
-									if (print_content){std::cout << " - Index i " << idx_alpha_i << " " << idx_q_i << " " << idx_p_i << std::endl;}
-
-									size_t PVC_col_idx = idx_alpha_i*Np_WP*Nq_WP + idx_q_i*Np_WP + idx_p_i;
-
-									double CT_element  = CT_ptr[idx_p_r*Np_WP + idx_p_i];
-									double PVC_element = PVC_col[PVC_col_idx];
-									sum += CT_element * PVC_element;
-								}
-							}
-						}
-					}
-				}
-
-				size_t idx_CPVC = idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_r;
-				col_array[idx_CPVC] = sum;
-			}
-		}
-	}
-}
-
-void PVC_col_calc_test(size_t   Nalpha,
-					   size_t 	Nq_WP,
-					   size_t 	Np_WP,
-					   double** VC_CM_array,
-					   double*  P123_sparse_val_array,
-					   int*  	P123_sparse_row_array,
-					   size_t*  P123_sparse_col_array,
-					   size_t   P123_sparse_dim){
-
-	bool print_content = false;
-
-	size_t dense_dim = Nalpha * Nq_WP * Np_WP;
-
-	/* Create column of (C^T)(P)(VC) */
-	double* PVC_col_array    = new double [dense_dim];
-	double* PVC_col_array_BF = new double [dense_dim];
-
-	bool all_cols_are_zero = true;
-	for (size_t idx_alpha_c=0; idx_alpha_c<Nalpha; idx_alpha_c++){
-		for (size_t idx_q_c=0; idx_q_c<Nq_WP; idx_q_c++){
-			for (size_t idx_p_c=0; idx_p_c<Np_WP; idx_p_c++){
-				
-				if (idx_alpha_c<=2){continue;}
-
-				/* Reset array */
-				for (size_t idx=0; idx<dense_dim; idx++){
-					PVC_col_array[idx]    = 0;
-					PVC_col_array_BF[idx] = 0;
-				}
-	
-				/* Calculate CPVC-column */
-				calculate_PVC_col(PVC_col_array,
-								  idx_alpha_c, idx_p_c, idx_q_c,
-								  Nalpha, Nq_WP, Np_WP,
-								  VC_CM_array,
-								  P123_sparse_val_array,
-								  P123_sparse_row_array,
-								  P123_sparse_col_array,
-								  P123_sparse_dim);
-				
-				PVC_col_brute_force(PVC_col_array_BF,
-									idx_alpha_c, idx_p_c, idx_q_c,
-									Nalpha, Nq_WP, Np_WP,
-									VC_CM_array,
-									P123_sparse_val_array,
-									P123_sparse_row_array,
-									P123_sparse_col_array,
-									P123_sparse_dim);
-				
-				double col_sum =0;
-				for (size_t idx_alpha_r=0; idx_alpha_r<Nalpha; idx_alpha_r++){
-					for (size_t idx_q_r=0; idx_q_r<Nq_WP; idx_q_r++){
-						for (size_t idx_p_r=0; idx_p_r<Np_WP; idx_p_r++){
-							
-							size_t idx_c = idx_alpha_c*Np_WP*Nq_WP + idx_q_c*Np_WP + idx_p_c;
-							size_t idx_r = idx_alpha_r*Np_WP*Nq_WP + idx_q_r*Np_WP + idx_p_r;
-							double diff = abs(PVC_col_array[idx_r] - PVC_col_array_BF[idx_r]);
-
-							if ( diff > 1e-15 ){
-								printf("   - Discrepency found: \n");
-								printf("     - Row %d: alpha=%d, q=%d, p=%d \n", idx_r, idx_alpha_r, idx_q_r, idx_p_r);
-								printf("     - Col %d: alpha=%d, q=%d, p=%d \n", idx_c, idx_alpha_c, idx_q_c, idx_p_c);
-								printf("     - Discrepency: %.16f (optimized) vs. %.16f (brute force)\n", PVC_col_array[idx_r], PVC_col_array_BF[idx_r]);
-								raise_error("PVC benchmarking failed");
-							}
-							col_sum += PVC_col_array[idx_r];
-						}
-					}
-				}
-				if (col_sum!=0 ){
-					all_cols_are_zero = false;
-				}
-			}
-		}
-	}
-	if (all_cols_are_zero){
-		printf("   - All PVC-columns are zero! PVC-test likely failed \n");
-	}
-	
-	delete [] PVC_col_array;
-	delete [] PVC_col_array_BF;	
-}
-
-void CPVC_col_calc_test(size_t   Nalpha,
-						size_t 	 Nq_WP,
-						size_t 	 Np_WP,
-						double** CT_RM_array,
-						double** VC_CM_array,
-						double*  P123_sparse_val_array,
-						int*     P123_sparse_row_array,
-						size_t*  P123_sparse_col_array,
-						size_t   P123_sparse_dim){
-
-	bool print_content = false;
-
-	size_t dense_dim = Nalpha * Nq_WP * Np_WP;
-
-	/* Create column of (C^T)(P)(VC) */
-	double* CPVC_col_array    	   = new double [dense_dim];
-	int*    CPVC_row_to_nnz_array  = new int    [dense_dim];
-	int*    CPVC_nnz_to_row_array  = new int    [dense_dim];
-	double* CPVC_col_array_BF 	   = new double [dense_dim];
-
-	bool all_cols_are_zero = true;
-	for (size_t idx_alpha_c=0; idx_alpha_c<Nalpha; idx_alpha_c++){
-		for (size_t idx_q_c=0; idx_q_c<Nq_WP; idx_q_c++){
-			for (size_t idx_p_c=0; idx_p_c<Np_WP; idx_p_c++){
-	
-				/* Reset array */
-				for (size_t idx=0; idx<dense_dim; idx++){
-					CPVC_col_array[idx]    	   = 0;
-					CPVC_row_to_nnz_array[idx] = -1;
-					CPVC_nnz_to_row_array[idx] = -1;
-					CPVC_col_array_BF[idx]	   = 0;
-				}
-	
-				/* Calculate CPVC-column */
-				size_t CPVC_num_nnz = 0;
-				calculate_CPVC_col(CPVC_col_array,
-								   CPVC_row_to_nnz_array,
-								   CPVC_nnz_to_row_array,
-								   CPVC_num_nnz,
-								   idx_alpha_c, idx_p_c, idx_q_c,
-								   Nalpha, Nq_WP, Np_WP,
-								   CT_RM_array,
-								   VC_CM_array,
-								   P123_sparse_val_array,
-								   P123_sparse_row_array,
-								   P123_sparse_col_array,
-								   P123_sparse_dim);
-				
-				CPVC_col_brute_force(CPVC_col_array_BF,
-									 idx_alpha_c, idx_p_c, idx_q_c,
-									 Nalpha, Nq_WP, Np_WP,
-									 CT_RM_array,
-									 VC_CM_array,
-									 P123_sparse_val_array,
-									 P123_sparse_row_array,
-									 P123_sparse_col_array,
-									 P123_sparse_dim);
-				
-				double col_sum =0;
-				for (size_t idx_alpha_r=0; idx_alpha_r<Nalpha; idx_alpha_r++){
-					for (size_t idx_q_r=0; idx_q_r<Nq_WP; idx_q_r++){
-						for (size_t idx_p_r=0; idx_p_r<Np_WP; idx_p_r++){
-							
-							size_t idx_c = idx_alpha_c*Np_WP*Nq_WP + idx_q_c*Np_WP + idx_p_c;
-							size_t idx_r = idx_alpha_r*Np_WP*Nq_WP + idx_q_r*Np_WP + idx_p_r;
-
-							size_t nnz_idx = CPVC_row_to_nnz_array[idx_r];
-
-							double diff = abs(CPVC_col_array[nnz_idx] - CPVC_col_array_BF[idx_r]);
-
-							if ( diff > 1e-15 ){
-								printf("   - Discrepency found: \n");
-								printf("     - Row %d: alpha=%d, q=%d, p=%d \n", idx_r, idx_alpha_r, idx_q_r, idx_p_r);
-								printf("     - Col %d: alpha=%d, q=%d, p=%d \n", idx_c, idx_alpha_c, idx_q_c, idx_p_c);
-								printf("     - Discrepency: %.16f (optimized) vs. %.16f (brute force)\n", CPVC_col_array[nnz_idx], CPVC_col_array_BF[idx_r]);
-								raise_error("CPVC benchmarking failed");
-							}
-							col_sum += CPVC_col_array[idx_r];
-						}
-					}
-				}
-				if (col_sum!=0 ){
-					all_cols_are_zero = false;
-				}
-			}
-		}
-	}
-	if (all_cols_are_zero){
-		printf("   - All CPVC-columns are zero! PVC-test likely failed \n");
-	}
-	
-	delete [] CPVC_col_array;
-	delete [] CPVC_row_to_nnz_array;
-	delete [] CPVC_nnz_to_row_array;
-	delete [] CPVC_col_array_BF;
 }

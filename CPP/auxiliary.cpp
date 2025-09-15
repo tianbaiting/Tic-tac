@@ -472,12 +472,12 @@ double pi2_prime_tilde(double p, double q, double x)
 	return sqrt(p * p + 0.25 * q * q + p * q * x);
 }
 
-void generate_Ptilde_new (double *P123_store, MKL_INT64 Pdim, MKL_INT64 N_p, double *p, MKL_INT64 N_q, double *q, MKL_INT64 N_x, double *x, double *wx, MKL_INT64 Jj_dim, double pmax, double qmax, int *L12_Jj, int *l3_Jj, int *J12_Jj, int *two_j3_Jj, int *S12_Jj, int *T12_Jj, MKL_INT64 Lmax, MKL_INT64 max_L12, MKL_INT64 max_l3, MKL_INT64 two_J, MKL_INT64 two_T, double *SixJ_array, int two_jmax_SixJ/*, double *Atilde_store, double *Btilde_store*/, double* Gtilde_store)
+void generate_Ptilde_new (double *P123_store, long long Pdim, long long N_p, double *p, long long N_q, double *q, long long N_x, double *x, double *wx, long long Jj_dim, double pmax, double qmax, int *L12_Jj, int *l3_Jj, int *J12_Jj, int *two_j3_Jj, int *S12_Jj, int *T12_Jj, long long Lmax, long long max_L12, long long max_l3, long long two_J, long long two_T, double *SixJ_array, int two_jmax_SixJ/*, double *Atilde_store, double *Btilde_store*/, double* Gtilde_store)
 {
 
 	// unused variable: int iZERO = 0;
 
-	for (MKL_INT64 index = 0; index <= Pdim * Pdim - 1; index++)
+	for (long long index = 0; index <= Pdim * Pdim - 1; index++)
 	{
 		P123_store[index] = 0.0;
 	}
@@ -500,7 +500,7 @@ void generate_Ptilde_new (double *P123_store, MKL_INT64 Pdim, MKL_INT64 N_p, dou
 	{
 		#pragma omp for
 
-		for (MKL_INT64 c = 0; c <= Pdim - 1; c++)
+		for (long long c = 0; c <= Pdim - 1; c++)
 		{
 
 			int c_fortran = c + 1;
@@ -537,7 +537,7 @@ void generate_Ptilde_new (double *P123_store, MKL_INT64 Pdim, MKL_INT64 N_p, dou
 			}
 		*/
 
-			for (MKL_INT64 r = 0; r <= Pdim - 1; r++)
+			for (long long r = 0; r <= Pdim - 1; r++)
 			{
 
 				int r_fortran = r + 1;
@@ -629,10 +629,10 @@ void generate_Ptilde_new (double *P123_store, MKL_INT64 Pdim, MKL_INT64 N_p, dou
 					// old:
 					/*
 					// note fortran convention for rows/columns! needed to make descriptors work properly
-					for (MKL_INT64 Ltotal = max(abs((int) (L12_Jj[alpha] - l3_Jj[alpha])), abs((int) (L12_Jj[alphaprime] - l3_Jj[alphaprime]))); Ltotal <= min((int) ((two_J + 5) / 2), min((int) (L12_Jj[alpha] + l3_Jj[alpha]), (int) (L12_Jj[alphaprime] + l3_Jj[alphaprime]))); Ltotal++)
+					for (long long Ltotal = max(abs((int) (L12_Jj[alpha] - l3_Jj[alpha])), abs((int) (L12_Jj[alphaprime] - l3_Jj[alphaprime]))); Ltotal <= min((int) ((two_J + 5) / 2), min((int) (L12_Jj[alpha] + l3_Jj[alpha]), (int) (L12_Jj[alphaprime] + l3_Jj[alphaprime]))); Ltotal++)
 					{
 
-						MKL_INT64 index = L12_Jj[alpha] * (max_l3 + 1) * (max_L12 + 1) * (max_l3 + 1) * N_p * N_q * N_x * (Lmax + 1)
+						long long index = L12_Jj[alpha] * (max_l3 + 1) * (max_L12 + 1) * (max_l3 + 1) * N_p * N_q * N_x * (Lmax + 1)
 										  + l3_Jj[alpha] * (max_L12 + 1) * (max_l3 + 1) * N_p * N_q * N_x * (Lmax + 1)
 										  + L12_Jj[alphaprime] * (max_l3 + 1) * N_p * N_q * N_x * (Lmax + 1)
 										  + l3_Jj[alphaprime] * N_p * N_q * N_x * (Lmax + 1)

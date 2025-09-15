@@ -1,0 +1,33 @@
+Running program for:
+two_J_3N_max:                    1
+Np_WP:                           50
+Nq_WP:                           50
+J_2N_max:                        3
+Nphi:                            48
+Nx:                              48
+chebyshev sparseness:            1.000
+chebyshev scale:                 100.000
+Np_per_WP:                       8
+Nq_per_WP:                       8
+P123-recovery mode on:           false
+P123 omp number of threads:      16
+Tensor-force on:                 true
+Isospin-breaking in 1S0:         true
+Mid-point approximation:         false
+Calculate P123 and store:        true
+Calculate breakup amplitudes:    false
+Solve Faddeev equation:          true
+Solve Faddeev with LAPACK:       false
+Production run:                  true
+Potential model:                 LO_internal
+p-momentum grid type:            chebyshev
+p-momentum grid input file:      
+q-momentum grid type:            chebyshev
+q-momentum grid input file:      
+Parameter walk:                  false
+Parameter input file:            none
+Parameter set index (PSI) start: -1
+Parameter set index (PSI) end:   -1
+Energy input file:               lab_energies.txt
+P123-matrix read/write folder:   Output
+Parallel run:                    false

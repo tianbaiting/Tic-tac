@@ -1,32 +1,26 @@
-
 #include "matrix_routines.h"
-
-void raise_error_DSS_MKL(_INTEGER_t error, const char* function_name){
-    printf("Function %s returned error code %lld\n", function_name, error);
-	exit(1);
-}
+#include <cblas.h>
 
 void dot_MV(double *A, double *B, double *C, int N, int M){
 	double  beta  = 0.0;
 	double  alpha = 1.0;
-	MKL_INT incrx = 1.0;
-	MKL_INT incry = 1.0;
-	char    trans = 'N';
-	MKL_INT n = N;
-	MKL_INT m = M;
-	//cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, N, M, K, &alpha, A, K, B, M, &beta, C, M);
-	dgemv(&trans, &n, &m, &alpha, A, &m, B, &incrx, &beta, C, &incry);
+	int incrx = 1;
+	int incry = 1;
+
+    // Assuming A is M x N matrix, B is vector of size N, C is vector of size M
+    // C = alpha*A*B + beta*C
+	cblas_dgemv(CblasRowMajor, CblasNoTrans, M, N, alpha, A, N, B, incrx, beta, C, incry);
 }
 
 
 std::complex<double> cdot_VV(std::complex<float> *X, std::complex<float> *Y, int N, int INCR_X, int INCR_Y){
 	std::complex<float> dot_product = 0;
-	cblas_cdotu_sub(N, X, INCR_X, Y, INCR_Y, &dot_product);
+	cblas_cdotu_sub(N, reinterpret_cast<const float*>(X), INCR_X, reinterpret_cast<const float*>(Y), INCR_Y, &dot_product);
 	return dot_product;
 }
 std::complex<double> cdot_VV(std::complex<double> *X, std::complex<double> *Y, int N, int INCR_X, int INCR_Y){
 	std::complex<double> dot_product = 0;
-	cblas_zdotu_sub(N, X, INCR_X, Y, INCR_Y, &dot_product);
+	cblas_zdotu_sub(N, reinterpret_cast<const double*>(X), INCR_X, reinterpret_cast<const double*>(Y), INCR_Y, &dot_product);
 	return dot_product;
 }
 
@@ -50,14 +44,14 @@ void cdot_MM(std::complex<double> *A, std::complex<double> *B, std::complex<doub
 
 void solve_MM(float* A, float* B, int dim){
 	char trans = 'N';
-	long long int ipiv [dim];
+	lapack_int ipiv [dim];
 	
 	LAPACKE_sgetrf(LAPACK_ROW_MAJOR, dim, dim, A, dim, ipiv);
 	LAPACKE_sgetrs(LAPACK_ROW_MAJOR, trans, dim, dim, A, dim, ipiv, B, dim);
 }
 void solve_MM(double* A, double* B, int dim){
 	char trans = 'N';
-	long long int ipiv [dim];
+	lapack_int ipiv [dim];
 	
 	LAPACKE_dgetrf(LAPACK_ROW_MAJOR, dim, dim, A, dim, ipiv);
 	LAPACKE_dgetrs(LAPACK_ROW_MAJOR, trans, dim, dim, A, dim, ipiv, B, dim);
@@ -65,26 +59,25 @@ void solve_MM(double* A, double* B, int dim){
 void solve_MM(std::complex<float> *A, std::complex<float> *B, int N){
 	
 	char trans = 'N';
-	long long int ipiv [N];
+	lapack_int ipiv [N];
 	
-	LAPACKE_cgetrf(LAPACK_ROW_MAJOR, N, N, A, N, ipiv);
-	LAPACKE_cgetrs(LAPACK_ROW_MAJOR, trans, N, N, A, N, ipiv, B, N);
+	LAPACKE_cgetrf(LAPACK_ROW_MAJOR, N, N, reinterpret_cast<lapack_complex_float*>(A), N, ipiv);
+	LAPACKE_cgetrs(LAPACK_ROW_MAJOR, trans, N, N, reinterpret_cast<const lapack_complex_float*>(A), N, ipiv, reinterpret_cast<lapack_complex_float*>(B), N);
 }
 void solve_MM(std::complex<double> *A, std::complex<double> *B, int N){
 	
 	char trans = 'N';
-	long long int ipiv [N];
+	lapack_int ipiv [N];
 	
-	LAPACKE_zgetrf(LAPACK_ROW_MAJOR, N, N, A, N, ipiv);
-	LAPACKE_zgetrs(LAPACK_ROW_MAJOR, trans, N, N, A, N, ipiv, B, N);
+	LAPACKE_zgetrf(LAPACK_ROW_MAJOR, N, N, reinterpret_cast<lapack_complex_double*>(A), N, ipiv);
+	LAPACKE_zgetrs(LAPACK_ROW_MAJOR, trans, N, N, reinterpret_cast<const lapack_complex_double*>(A), N, ipiv, reinterpret_cast<lapack_complex_double*>(B), N);
 }
 
 std::complex<double> determinant(std::complex<double>* A, int N){
-	//char trans = 'N';
-	long long int ipiv [N];
+	lapack_int ipiv [N];
 	
 	/* Perform LU decomposition, A is overwritten by L */
-	LAPACKE_zgetrf(LAPACK_ROW_MAJOR, N, N, A, N, ipiv);
+	LAPACKE_zgetrf(LAPACK_ROW_MAJOR, N, N, reinterpret_cast<lapack_complex_double*>(A), N, ipiv);
 
 	/* Diagonal of L equals determinant of A */
 	std::complex<double> product_sum_diagonal = 1;
@@ -149,7 +142,7 @@ void square_dense_to_sparse_COO_format_converter(int      mat_dim,
 
 	int row_idx = 0;
 	int col_idx = 0;
-	for (int i=0; i<nnz; i++){
+	for (size_t i=0; i<nnz; i++){
 		row_idx = temp_dense_idx_row_array[i];
 		col_idx = temp_dense_idx_col_array[i];
 
@@ -175,8 +168,8 @@ void square_sparse_COO_to_dense_format_converter(int      mat_dim,
 	*mat_dense_array = new double [mat_dim*mat_dim];
 
 	/* Fill dense matrix with zeroes */
-	for (int i=0; i<mat_dim; i++){
-		mat_dense_array[i] = 0;
+	for (int i=0; i<mat_dim*mat_dim; i++){
+		(*mat_dense_array)[i] = 0;
 	}
 
 	int row_idx = 0;
@@ -190,8 +183,6 @@ void square_sparse_COO_to_dense_format_converter(int      mat_dim,
 	}
 }
 
-/* THERE'S NO DIFFERENE IN OUTPUT BETWEEN CSR AND CSC WHEN IT COMES TO THIS FUNCTION,
- * THE OUTPUT DEPENDS PURELY ON INPUT */
 void coo_to_csr_format_converter(int*    idx_row_array_coo,
 								 size_t* idx_row_array_csr,
 								 size_t  mat_sparse_dim,
@@ -217,8 +208,6 @@ void coo_to_csr_format_converter(int*    idx_row_array_coo,
 	}
 }
 
-/* THERE'S NO DIFFERENE IN OUTPUT BETWEEN CSR AND CSC WHEN IT COMES TO THIS FUNCTION,
- * THE OUTPUT DEPENDS PURELY ON INPUT */
 void coo_to_csc_format_converter(int*    idx_col_array_coo,
 								 size_t* idx_col_array_csc,
 								 size_t  mat_sparse_dim,
