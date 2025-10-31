@@ -11,3 +11,7 @@ Output
 *.lot
 *.fls
 *.fdb_latexmks
+
+output
+tests
+build

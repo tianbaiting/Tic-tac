@@ -1,16 +1,16 @@
 Running program for:
 two_J_3N_max:                    1
-Np_WP:                           50
-Nq_WP:                           50
-J_2N_max:                        3
+Np_WP:                           40
+Nq_WP:                           40
+J_2N_max:                        2
 Nphi:                            48
 Nx:                              48
 chebyshev sparseness:            1.000
-chebyshev scale:                 100.000
+chebyshev scale:                 150.000
 Np_per_WP:                       8
 Nq_per_WP:                       8
 P123-recovery mode on:           false
-P123 omp number of threads:      16
+P123 omp number of threads:      4
 Tensor-force on:                 true
 Isospin-breaking in 1S0:         true
 Mid-point approximation:         false
@@ -28,6 +28,6 @@ Parameter walk:                  false
 Parameter input file:            none
 Parameter set index (PSI) start: -1
 Parameter set index (PSI) end:   -1
-Energy input file:               lab_energies.txt
-P123-matrix read/write folder:   Output
+Energy input file:               Input/lab_energies_190MeV.txt
+P123-matrix read/write folder:   ../../Data/permutation_matrices
 Parallel run:                    false

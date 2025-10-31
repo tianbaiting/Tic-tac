@@ -1,0 +1,26 @@
+# Deuteron-proton Ay calculation - Better parameters
+# 190 MeV/u deuteron on proton
+
+two_J_3N_max=1
+Np_WP=30
+Nq_WP=30
+J_2N_max=1
+Nphi=32
+Nx=32
+Np_per_WP=8
+Nq_per_WP=8
+chebyshev_t=1
+chebyshev_s=50
+p_grid_type=chebyshev
+q_grid_type=chebyshev
+P123_omp_num_threads=4
+P123_recovery=false
+tensor_force=true
+isospin_breaking_1S0=true
+production_run=true
+potential_model=nijmegen
+energy_input_file=lab_energies_190MeV.txt
+P123_folder=Output
+parallel_run=false
+calculate_and_store_P123=true
+solve_faddeev=true

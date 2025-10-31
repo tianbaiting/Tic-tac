@@ -1,0 +1,55 @@
+# 氘核-质子散射 Ay 快速测试配置
+# 基于原始CPP程序的配置格式
+
+# 基本量子数设置 (降低用于快速测试)
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=30
+Nq_WP=30
+
+# 网格积分参数
+Nphi=36
+Nx=36
+Np_per_WP=6
+Nq_per_WP=6
+
+# Chebyshev网格参数
+chebyshev_s=200
+chebyshev_t=1
+p_grid_type=chebyshev
+q_grid_type=chebyshev
+
+# 网格文件（使用默认）
+p_grid_filename=Input/NWP-100-splitnorm.txt
+q_grid_filename=Input/NWP-100-splitnorm.txt
+
+# 并行设置
+P123_omp_num_threads=4
+parallel_run=false
+
+# 计算控制
+P123_recovery=false
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=false
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=false
+
+# 势能模型 (使用简单模型快速测试)
+potential_model=LO_internal
+
+# 参数扫描设置
+parameter_walk=false
+parameter_file=
+
+# 能量范围设置
+PSI_start=-1
+PSI_end=-1
+
+# 输入输出文件
+energy_input_file=Input/lab_energies_190MeV.txt
+output_folder=Output
+P123_folder=../../Data/permutation_matrices
