@@ -397,6 +397,129 @@ def _write_curve_csv(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_comparison_svg(
+    path: Path,
+    *,
+    title: str,
+    x_label: str,
+    y_label: str,
+    angles: Sequence[float],
+    exp_vals: Sequence[float],
+    pred_vals: Sequence[float],
+    use_log_y: bool = False,
+) -> None:
+    if len(angles) != len(exp_vals) or len(angles) != len(pred_vals):
+        raise ValueError("angles/exp/pred length mismatch")
+    if not angles:
+        raise ValueError("empty series")
+
+    width = 980
+    height = 640
+    left = 90
+    right = 30
+    top = 60
+    bottom = 90
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+
+    x_min = min(angles)
+    x_max = max(angles)
+    if x_max <= x_min:
+        x_max = x_min + 1.0
+
+    y_exp = list(exp_vals)
+    y_pred = list(pred_vals)
+    if use_log_y:
+        y_exp = [math.log10(max(val, 1e-12)) for val in y_exp]
+        y_pred = [math.log10(max(val, 1e-12)) for val in y_pred]
+
+    y_min = min(min(y_exp), min(y_pred))
+    y_max = max(max(y_exp), max(y_pred))
+    if y_max <= y_min:
+        y_max = y_min + 1.0
+    y_pad = 0.08 * (y_max - y_min)
+    y_min -= y_pad
+    y_max += y_pad
+
+    def x_to_px(x: float) -> float:
+        return left + (x - x_min) * plot_w / (x_max - x_min)
+
+    def y_to_px(y: float) -> float:
+        return top + (y_max - y) * plot_h / (y_max - y_min)
+
+    def _make_polyline(xs: Sequence[float], ys: Sequence[float]) -> str:
+        pts = [f"{x_to_px(x):.3f},{y_to_px(y):.3f}" for x, y in zip(xs, ys)]
+        return " ".join(pts)
+
+    grid_lines: List[str] = []
+    tick_labels: List[str] = []
+
+    num_y_ticks = 6
+    for i in range(num_y_ticks + 1):
+        frac = i / num_y_ticks
+        y_val = y_min + frac * (y_max - y_min)
+        y_px = y_to_px(y_val)
+        grid_lines.append(
+            f"<line x1='{left}' y1='{y_px:.3f}' x2='{left + plot_w}' y2='{y_px:.3f}' "
+            "stroke='#e5e7eb' stroke-width='1'/>"
+        )
+        label = f"{(10 ** y_val):.3g}" if use_log_y else f"{y_val:.3f}"
+        tick_labels.append(
+            f"<text x='{left - 10}' y='{y_px + 4:.3f}' text-anchor='end' "
+            "font-family='DejaVu Sans, Arial, sans-serif' font-size='13' fill='#111827'>"
+            f"{label}</text>"
+        )
+
+    num_x_ticks = 8
+    for i in range(num_x_ticks + 1):
+        frac = i / num_x_ticks
+        x_val = x_min + frac * (x_max - x_min)
+        x_px = x_to_px(x_val)
+        grid_lines.append(
+            f"<line x1='{x_px:.3f}' y1='{top}' x2='{x_px:.3f}' y2='{top + plot_h}' "
+            "stroke='#f3f4f6' stroke-width='1'/>"
+        )
+        tick_labels.append(
+            f"<text x='{x_px:.3f}' y='{top + plot_h + 24}' text-anchor='middle' "
+            "font-family='DejaVu Sans, Arial, sans-serif' font-size='13' fill='#111827'>"
+            f"{x_val:.1f}</text>"
+        )
+
+    model_poly = _make_polyline(angles, y_pred)
+    exp_points = []
+    for x, y in zip(angles, y_exp):
+        exp_points.append(
+            f"<circle cx='{x_to_px(x):.3f}' cy='{y_to_px(y):.3f}' r='3.2' "
+            "fill='#1f2937' stroke='white' stroke-width='0.8'/>"
+        )
+
+    y_axis_text = y_label + (" (log10 scale)" if use_log_y else "")
+    svg = [
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>",
+        "<rect x='0' y='0' width='100%' height='100%' fill='white'/>",
+        f"<text x='{width/2:.1f}' y='32' text-anchor='middle' font-family='DejaVu Sans, Arial, sans-serif' "
+        "font-size='22' font-weight='700' fill='#111827'>"
+        f"{title}</text>",
+        *grid_lines,
+        f"<rect x='{left}' y='{top}' width='{plot_w}' height='{plot_h}' fill='none' stroke='#111827' stroke-width='1.2'/>",
+        f"<polyline fill='none' stroke='#dc2626' stroke-width='2.4' points='{model_poly}'/>",
+        *exp_points,
+        *tick_labels,
+        f"<text x='{left + plot_w/2:.1f}' y='{height - 28}' text-anchor='middle' font-family='DejaVu Sans, Arial, sans-serif' "
+        "font-size='16' fill='#111827'>"
+        f"{x_label}</text>",
+        f"<text x='24' y='{top + plot_h/2:.1f}' text-anchor='middle' transform='rotate(-90 24 {top + plot_h/2:.1f})' "
+        "font-family='DejaVu Sans, Arial, sans-serif' font-size='16' fill='#111827'>"
+        f"{y_axis_text}</text>",
+        f"<line x1='{left + 18}' y1='{top + 18}' x2='{left + 64}' y2='{top + 18}' stroke='#dc2626' stroke-width='2.4'/>",
+        f"<text x='{left + 70}' y='{top + 22}' font-family='DejaVu Sans, Arial, sans-serif' font-size='13' fill='#111827'>model</text>",
+        f"<circle cx='{left + 38}' cy='{top + 40}' r='3.2' fill='#1f2937' stroke='white' stroke-width='0.8'/>",
+        f"<text x='{left + 70}' y='{top + 44}' font-family='DejaVu Sans, Arial, sans-serif' font-size='13' fill='#111827'>experiment</text>",
+        "</svg>",
+    ]
+    path.write_text("\n".join(svg) + "\n", encoding="utf-8")
+
+
 def run_solver_if_requested(work_dir: Path, regenerate: bool, target_tlab: float) -> None:
     if not regenerate:
         return
@@ -595,6 +718,8 @@ def main() -> int:
 
     ay_csv = work_dir / "best_energy_iT11_curve.csv"
     dsigma_csv = work_dir / "best_energy_dsigma_curve.csv"
+    ay_svg = work_dir / "best_energy_iT11_comparison.svg"
+    dsigma_svg = work_dir / "best_energy_dsigma_comparison.svg"
     _write_curve_csv(
         ay_csv,
         best["it11_curve"]["angles_deg"],
@@ -610,6 +735,26 @@ def main() -> int:
         best["dsigma_curve"]["pred"],
         "dsigma_exp",
         "dsigma_model",
+    )
+    _write_comparison_svg(
+        ay_svg,
+        title=f"iT11 Comparison (best Tlab={best['tlab']:.3f} MeV)",
+        x_label="theta_cm (deg)",
+        y_label="iT11",
+        angles=best["it11_curve"]["angles_deg"],
+        exp_vals=best["it11_curve"]["exp"],
+        pred_vals=best["it11_curve"]["pred"],
+        use_log_y=False,
+    )
+    _write_comparison_svg(
+        dsigma_svg,
+        title=f"dSigma/dOmega Comparison (best Tlab={best['tlab']:.3f} MeV)",
+        x_label="theta_cm (deg)",
+        y_label="dSigma/dOmega",
+        angles=best["dsigma_curve"]["angles_deg"],
+        exp_vals=best["dsigma_curve"]["exp"],
+        pred_vals=best["dsigma_curve"]["pred"],
+        use_log_y=True,
     )
 
     summary = {
@@ -640,6 +785,8 @@ def main() -> int:
         "outputs": {
             "best_it11_csv": str(ay_csv),
             "best_dsigma_csv": str(dsigma_csv),
+            "best_it11_svg": str(ay_svg),
+            "best_dsigma_svg": str(dsigma_svg),
         },
     }
 
@@ -654,6 +801,8 @@ def main() -> int:
     print(f"text_report: {txt_file}")
     print(f"it11_curve_csv: {ay_csv}")
     print(f"dsigma_curve_csv: {dsigma_csv}")
+    print(f"it11_curve_svg: {ay_svg}")
+    print(f"dsigma_curve_svg: {dsigma_svg}")
 
     return 0 if pass_flag else 2
 
