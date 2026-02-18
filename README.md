@@ -156,6 +156,9 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 micromamba run -n anaroot-env python examples/plot_validation_curves.py --work-dir output/deuteron_proton_Ay
 ```
 
+英文标注的一张综合对比图输出为：
+- `output/deuteron_proton_Ay/best_energy_exp_vs_faddeev_annotated.png`
+
 190MeV dpol-p 数据符合性与计算说明见：`docs/dpol_p_190MeV_validation.md`
 
 ## 📊 核心算法
