@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GetDataWorkspace>
+  <version>2.26.0.20</version>
+  <WSversion>10</WSversion>
+  <File>
+    <Name>C:\Users\tbt\Nutstore\1\physics\nuclear\D_nuclear_experiment\code\DSigamaOverDOmega.jpg</Name>
+    <Width>1013</Width>
+    <Height>547</Height>
+  </File>
+  <Line>
+    <Caption>Line #1</Caption>
+    <LineColor>2,1,2</LineColor>
+    <BkColor>254,254,254</BkColor>
+    <PtColor>0,0,64</PtColor>
+    <LineType>0</LineType>
+    <Points MF="9">1435,1093,1543,1273,1642,1471,1750,1624,1849,1813,1948,1930,2047,2101,2146,2263,2245,2389,2344,2497</Points>
+    <Points MF="9">2434,2605,2524,2740,2614,2866,2749,2992,2884,3109,3019,3163,3154,3262,3289,3298,3424,3298,3559,3316</Points>
+    <Points MF="9">3694,3226,3838,3190,3964,3109,4108,3037,4243,2884,4387,2803,4495,2722,4657,2587</Points>
+  </Line>
+  <CurrentLine>0</CurrentLine>
+  <Xmin MF="9">841,4045,0.000000e+000</Xmin>
+  <Xmax MF="9">4882,4045,1.800000e+002</Xmax>
+  <Ymin MF="9">850,3973,4.000000e-002</Ymin>
+  <Ymax MF="9">850,805,1.000000e+001</Ymax>
+  <XScale>linear</XScale>
+  <YScale>logarithmic</YScale>
+  <Position>559,-100</Position>
+  <Zoom>
+    <Scale>100.0</Scale>
+  </Zoom>
+  <Digitize>
+    <IgnorePixels>1</IgnorePixels>
+    <LineIDMethod>2</LineIDMethod>
+  </Digitize>
+  <AutoTrace>
+    <TraceDistance>8</TraceDistance>
+    <SmoothLines>1</SmoothLines>
+  </AutoTrace>
+  <DigitizeArea>
+    <LineOrArea>0</LineOrArea>
+    <AreaType>1</AreaType>
+    <GridType>0</GridType>
+    <deltaX>2.00000000000000e+000</deltaX>
+    <deltaXUnits>1</deltaXUnits>
+    <GoThroughX>0.00000000000000e+000</GoThroughX>
+    <ShiftX>1</ShiftX>
+    <RotateAngle>0.000000</RotateAngle>
+    <dx>8.000000</dx>
+  </DigitizeArea>
+  <GridSettings>
+    <ShowGrid>0</ShowGrid>
+    <AreaType>0</AreaType>
+    <dx>30.000000</dx>
+    <dy>5.000000</dy>
+  </GridSettings>
+</GetDataWorkspace>
