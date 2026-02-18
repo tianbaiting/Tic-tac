@@ -151,7 +151,7 @@ EOF
 
 # 示例5：氘核-质子Ay计算（190 MeV/u）
 example_deuteron_ay() {
-    print_header "示例5: 190MeV 极化观测量数据复现"
+    print_header "示例5: 190MeV dpol-p 求解器验证"
 
     if [ ! -f "examples/deuteron_proton_Ay.py" ]; then
         print_error "脚本不存在: examples/deuteron_proton_Ay.py"
@@ -163,13 +163,21 @@ example_deuteron_ay() {
         return 1
     fi
 
-    print_message "生成与 data/DataOfCrosssectionAndPol 对齐的输出..."
-    python3 examples/deuteron_proton_Ay.py --grid experimental
+    print_message "运行 Tic-tac 求解器并生成 U 矩阵输出..."
+    python3 examples/deuteron_proton_Ay.py
 
     print_message "生成误差统计与对比报告..."
+    set +e
     python3 examples/compare_Ay_experiment.py
+    cmp_rc=$?
+    set -e
 
-    print_message "190MeV 数据复现流程完成"
+    if [ "$cmp_rc" -eq 0 ]; then
+        print_message "190MeV 求解器验证流程完成（通过）"
+    else
+        print_warning "190MeV 求解器验证完成，但当前参数未通过实验阈值（见 output/deuteron_proton_Ay/solver_validation_190MeV.txt）"
+        return "$cmp_rc"
+    fi
 }
 
 # 清理输出文件
@@ -195,7 +203,7 @@ show_help() {
     echo "  precision  - 运行高精度计算"
     echo "  scan       - 运行参数扫描计算"
     echo "  test       - 运行快速测试"
-    echo "  ay         - 复现190MeV极化d-p实验数据并生成对比报告"
+    echo "  ay         - 运行190MeV dpol-p求解器并对比实验数据"
     echo "  clean      - 清理输出文件" 
     echo "  help       - 显示此帮助信息"
     echo ""
@@ -203,7 +211,7 @@ show_help() {
     echo "  $0 test        # 快速测试"
     echo "  $0 basic       # 基本计算"
     echo "  $0 precision   # 高精度计算"
-    echo "  $0 ay          # 190MeV数据复现+对比"
+    echo "  $0 ay          # 190MeV求解器验证+对比"
 }
 
 # 主函数

@@ -136,15 +136,15 @@ python3 config.py save data/input.txt
 ### 6. 氘核-质子Ay计算示例
 
 ```bash
-# 运行190 MeV/u数据复现与对比（基于仓库内实验数据）
+# 运行190 MeV dpol-p 求解器验证
 ./examples/run_examples.sh ay
 
 # 或分步运行
-python3 examples/deuteron_proton_Ay.py --grid experimental
-python3 examples/compare_Ay_experiment.py
+python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --reuse-p123
+python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out
 ```
 
-输出文件默认写入 `output/deuteron_proton_Ay/`，包含拟合结果与质量报告（json/txt）。
+输出文件默认写入 `output/deuteron_proton_Ay/`，包含求解器日志、`U_PW_elements` 和对比报告（json/txt）。
 
 190MeV dpol-p 数据符合性与计算说明见：`docs/dpol_p_190MeV_validation.md`
 
@@ -221,11 +221,11 @@ output_phase_shifts=true
 计算氘核-质子散射的分析能力(Ay)：
 
 ```bash
-# 190 MeV/u数据复现（data/DataOfCrosssectionAndPol）
-python3 examples/deuteron_proton_Ay.py --grid experimental
+# 调用 Tic-tac 求解器（CPP/run）产出 U 矩阵
+python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --reuse-p123
 
-# 自动生成对比报告
-python3 examples/compare_Ay_experiment.py
+# 使用求解器输出与实验数据对比
+python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out
 
 # 或使用示例脚本一键运行
 ./examples/run_examples.sh ay
@@ -300,7 +300,7 @@ python3 examples/compare_Ay_experiment.py
 cd tests/Cont_Faddeev && make && ./run
 cd tests/Free_energy && make && ./run
 
-# 190MeV数据复现回归测试
+# 190MeV 求解器验证辅助函数测试
 python3 -m unittest tests/test_190mev_data_pipeline.py
 ```
 
