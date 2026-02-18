@@ -146,6 +146,8 @@ python3 examples/compare_Ay_experiment.py
 
 输出文件默认写入 `output/deuteron_proton_Ay/`，包含拟合结果与质量报告（json/txt）。
 
+190MeV dpol-p 数据符合性与计算说明见：`docs/dpol_p_190MeV_validation.md`
+
 ## 📊 核心算法
 
 ### Faddeev方程理论
