@@ -186,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Tic-tac solver for 190MeV dpol-p validation")
     parser.add_argument("--work-dir", default="output/deuteron_proton_Ay", help="Work/output directory")
     parser.add_argument("--solver", default="CPP/run", help="Solver binary path (default: CPP/run)")
-    parser.add_argument("--target-tlab", type=float, default=135.6, help="Target lab energy in MeV")
+    parser.add_argument("--target-tlab", type=float, default=190.0, help="Target lab energy in MeV")
     parser.add_argument("--two-j-3n-max", type=int, default=1)
     parser.add_argument("--j-2n-max", type=int, default=2)
     parser.add_argument("--np", type=int, default=20)
