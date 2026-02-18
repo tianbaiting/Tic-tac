@@ -139,12 +139,14 @@ python3 config.py save data/input.txt
 # 运行190 MeV dpol-p 求解器验证
 ./examples/run_examples.sh ay
 
-# 或分步运行
-python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --reuse-p123
-python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out
+# 或分步运行（190 MeV/u）
+python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab 190 --reuse-p123
+python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190
 ```
 
-输出文件默认写入 `output/deuteron_proton_Ay/`，包含求解器日志、`U_PW_elements` 和对比报告（json/txt）。
+输出文件默认写入 `output/deuteron_proton_Ay/`，包含求解器日志、`U_PW_elements`、对比报告（json/txt）以及最佳能量点曲线：
+- `best_energy_iT11_curve.csv`
+- `best_energy_dsigma_curve.csv`
 
 190MeV dpol-p 数据符合性与计算说明见：`docs/dpol_p_190MeV_validation.md`
 
@@ -222,10 +224,10 @@ output_phase_shifts=true
 
 ```bash
 # 调用 Tic-tac 求解器（CPP/run）产出 U 矩阵
-python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --reuse-p123
+python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab 190 --reuse-p123
 
 # 使用求解器输出与实验数据对比
-python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out
+python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190
 
 # 或使用示例脚本一键运行
 ./examples/run_examples.sh ay
