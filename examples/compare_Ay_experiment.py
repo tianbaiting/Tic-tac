@@ -11,9 +11,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict
+
+from ay190_pipeline import linear_interp, read_tensor_rows
+
+
+LEGACY_MOCK_ANGLES = [
+    20.0, 30.0, 40.0, 50.0, 60.0,
+    70.0, 80.0, 90.0, 100.0, 110.0,
+    120.0, 130.0, 140.0, 150.0, 160.0,
+]
+
+LEGACY_MOCK_AY = [
+    0.02, 0.04, 0.08, 0.12, 0.15,
+    0.16, 0.14, 0.10, 0.05, 0.00,
+    -0.05, -0.08, -0.06, -0.02, 0.01,
+]
 
 
 def run_generator_if_needed(output_dir: Path, force_regenerate: bool) -> None:
@@ -59,6 +75,54 @@ def format_metric_row(name: str, payload: Dict[str, float]) -> str:
     )
 
 
+def compute_legacy_mock_metrics(tensor_data_path: Path) -> Dict[str, float]:
+    rows = read_tensor_rows(tensor_data_path)
+    iT11_rows = [row for row in rows if row.iT11 is not None]
+
+    x_proxy = [linear_interp(LEGACY_MOCK_ANGLES, LEGACY_MOCK_AY, row.theta_deg) for row in iT11_rows]
+    y_exp = [row.iT11 for row in iT11_rows]
+
+    count = len(x_proxy)
+    if count == 0:
+        return {
+            "count": 0.0,
+            "alpha": 0.0,
+            "beta": 0.0,
+            "mae": math.nan,
+            "rmse": math.nan,
+            "max_abs_error": math.nan,
+        }
+
+    sx = sum(x_proxy)
+    sy = sum(y_exp)
+    sxx = sum(val * val for val in x_proxy)
+    sxy = sum(a * b for a, b in zip(x_proxy, y_exp))
+    denom = count * sxx - sx * sx
+
+    if abs(denom) < 1e-20:
+        alpha = 0.0
+        beta = sy / count
+    else:
+        alpha = (count * sxy - sx * sy) / denom
+        beta = (sy - alpha * sx) / count
+
+    pred = [alpha * val + beta for val in x_proxy]
+    residuals = [p - y for p, y in zip(pred, y_exp)]
+
+    mae = sum(abs(res) for res in residuals) / count
+    rmse = math.sqrt(sum(res * res for res in residuals) / count)
+    max_abs_error = max(abs(res) for res in residuals)
+
+    return {
+        "count": float(count),
+        "alpha": alpha,
+        "beta": beta,
+        "mae": mae,
+        "rmse": rmse,
+        "max_abs_error": max_abs_error,
+    }
+
+
 def build_report_text(summary: Dict[str, object]) -> str:
     lines = []
     lines.append("190 MeV/u d+p 数据对比报告")
@@ -79,10 +143,25 @@ def build_report_text(summary: Dict[str, object]) -> str:
         if name in metrics:
             lines.append(format_metric_row(name, metrics[name]))
 
+    tensor_data_path = Path(summary["inputs"]["tensor_data"])
+    legacy_metrics = compute_legacy_mock_metrics(tensor_data_path)
+    lines.append("")
+    lines.append("旧版示例模拟数据对比 (legacy mock Ay -> iT11 线性映射):")
+    lines.append(
+        "legacy_proxy    "
+        f"points={int(round(legacy_metrics['count'])):>3d}  "
+        f"alpha={legacy_metrics['alpha']:.3e}  "
+        f"beta={legacy_metrics['beta']:.3e}  "
+        f"mae={legacy_metrics['mae']:.3e}  "
+        f"rmse={legacy_metrics['rmse']:.3e}  "
+        f"max_abs_error={legacy_metrics['max_abs_error']:.3e}"
+    )
+
     lines.append("")
     lines.append("说明:")
     lines.append("- 当前流程用于验证仓库内190MeV数据读写和输出一致性。")
     lines.append("- 该输出是数据对齐基线，不等同于完整Faddeev物理预言。")
+    lines.append("- 上述 legacy 指标用于量化旧示例模拟数据与真实实验数据的差异。")
 
     return "\n".join(lines) + "\n"
 
