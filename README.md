@@ -147,6 +147,14 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 输出文件默认写入 `output/deuteron_proton_Ay/`，包含求解器日志、`U_PW_elements`、对比报告（json/txt）以及最佳能量点曲线：
 - `best_energy_iT11_curve.csv`
 - `best_energy_dsigma_curve.csv`
+- `best_energy_iT11_comparison.svg`
+- `best_energy_dsigma_comparison.svg`
+
+如需用 `matplotlib` 生成 PNG 对比图（实验点 vs 模型曲线）：
+
+```bash
+micromamba run -n anaroot-env python examples/plot_validation_curves.py --work-dir output/deuteron_proton_Ay
+```
 
 190MeV dpol-p 数据符合性与计算说明见：`docs/dpol_p_190MeV_validation.md`
 

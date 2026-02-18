@@ -43,3 +43,16 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 - `output/deuteron_proton_Ay/solver_validation_190MeV.json`
 - `output/deuteron_proton_Ay/best_energy_iT11_curve.csv`
 - `output/deuteron_proton_Ay/best_energy_dsigma_curve.csv`
+- `output/deuteron_proton_Ay/best_energy_iT11_comparison.svg`
+- `output/deuteron_proton_Ay/best_energy_dsigma_comparison.svg`
+
+使用 `matplotlib` 生成 PNG 对比图：
+
+```bash
+micromamba run -n anaroot-env python examples/plot_validation_curves.py --work-dir output/deuteron_proton_Ay
+```
+
+生成：
+- `output/deuteron_proton_Ay/best_energy_iT11_comparison.png`
+- `output/deuteron_proton_Ay/best_energy_dsigma_comparison.png`
+- `output/deuteron_proton_Ay/best_energy_comparison.png`
