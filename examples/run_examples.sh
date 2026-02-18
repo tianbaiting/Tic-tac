@@ -151,27 +151,25 @@ EOF
 
 # 示例5：氘核-质子Ay计算（190 MeV/u）
 example_deuteron_ay() {
-    print_header "示例5: 氘核-质子分析能力(Ay)计算"
-    
-    print_message "这是一个专业的极化散射计算示例"
-    print_message "计算190 MeV/u氘核与质子散射的分析能力"
-    
+    print_header "示例5: 190MeV 极化观测量数据复现"
+
     if [ ! -f "examples/deuteron_proton_Ay.py" ]; then
-        print_error "氘核Ay计算脚本不存在"
+        print_error "脚本不存在: examples/deuteron_proton_Ay.py"
         return 1
     fi
-    
-    print_warning "注意：这是一个高精度计算，可能需要数小时完成"
-    echo -e "继续吗？(y/N): \c"
-    read response
-    
-    if [ "$response" = "y" ] || [ "$response" = "Y" ]; then
-        print_message "启动氘核-质子Ay计算..."
-        python3 examples/deuteron_proton_Ay.py
-    else
-        print_message "已取消计算"
-        print_message "要手动运行，请使用: python3 examples/deuteron_proton_Ay.py"
+
+    if [ ! -f "examples/compare_Ay_experiment.py" ]; then
+        print_error "脚本不存在: examples/compare_Ay_experiment.py"
+        return 1
     fi
+
+    print_message "生成与 data/DataOfCrosssectionAndPol 对齐的输出..."
+    python3 examples/deuteron_proton_Ay.py --grid experimental
+
+    print_message "生成误差统计与对比报告..."
+    python3 examples/compare_Ay_experiment.py
+
+    print_message "190MeV 数据复现流程完成"
 }
 
 # 清理输出文件
@@ -197,7 +195,7 @@ show_help() {
     echo "  precision  - 运行高精度计算"
     echo "  scan       - 运行参数扫描计算"
     echo "  test       - 运行快速测试"
-    echo "  ay         - 氘核-质子分析能力计算(190 MeV/u)"
+    echo "  ay         - 复现190MeV极化d-p实验数据并生成对比报告"
     echo "  clean      - 清理输出文件" 
     echo "  help       - 显示此帮助信息"
     echo ""
@@ -205,31 +203,32 @@ show_help() {
     echo "  $0 test        # 快速测试"
     echo "  $0 basic       # 基本计算"
     echo "  $0 precision   # 高精度计算"
-    echo "  $0 ay          # 氘核分析能力计算"
+    echo "  $0 ay          # 190MeV数据复现+对比"
 }
 
 # 主函数
 main() {
     print_header "Tic-tac 三体核物理计算示例"
-    
-    # 检查程序
-    check_program
-    
+
     # 创建必要目录
     mkdir -p data output
     
     # 处理命令行参数
     case "${1:-help}" in
         "basic")
+            check_program
             example_basic
             ;;
         "precision")
+            check_program
             example_high_precision
             ;;
         "scan")
+            check_program
             example_parameter_scan
             ;;
         "test")
+            check_program
             example_test
             ;;
         "ay")

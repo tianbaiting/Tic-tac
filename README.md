@@ -136,12 +136,15 @@ python3 config.py save data/input.txt
 ### 6. 氘核-质子Ay计算示例
 
 ```bash
-# 运行190 MeV/u氘核分析能力计算
+# 运行190 MeV/u数据复现与对比（基于仓库内实验数据）
 ./examples/run_examples.sh ay
 
-# 或直接运行Python脚本
-python3 examples/deuteron_proton_Ay.py
+# 或分步运行
+python3 examples/deuteron_proton_Ay.py --grid experimental
+python3 examples/compare_Ay_experiment.py
 ```
+
+输出文件默认写入 `output/deuteron_proton_Ay/`，包含拟合结果与质量报告（json/txt）。
 
 ## 📊 核心算法
 
@@ -216,10 +219,13 @@ output_phase_shifts=true
 计算氘核-质子散射的分析能力(Ay)：
 
 ```bash
-# 氘核-质子Ay计算 (190 MeV/u)
-python3 examples/deuteron_proton_Ay.py
+# 190 MeV/u数据复现（data/DataOfCrosssectionAndPol）
+python3 examples/deuteron_proton_Ay.py --grid experimental
 
-# 或使用示例脚本
+# 自动生成对比报告
+python3 examples/compare_Ay_experiment.py
+
+# 或使用示例脚本一键运行
 ./examples/run_examples.sh ay
 ```
 
@@ -285,13 +291,15 @@ python3 examples/deuteron_proton_Ay.py
 程序包含多个基准测试用例：
 
 ```bash
-# 运行所有测试
-make test
+# 主程序快速冒烟测试
+./examples/run_examples.sh test
 
-# 运行特定测试
-./tests/test_faddeev_solver
-./tests/test_potential_matrix
-./tests/test_state_space
+# 传统数值测试（分别在子目录构建）
+cd tests/Cont_Faddeev && make && ./run
+cd tests/Free_energy && make && ./run
+
+# 190MeV数据复现回归测试
+python3 -m unittest tests/test_190mev_data_pipeline.py
 ```
 
 ### 物理验证
