@@ -13,18 +13,38 @@ python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --ta
 python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190
 ```
 
-## 3. 从 U 矩阵计算观测量的方法
-脚本：`examples/compare_Ay_experiment.py`
+## 3. Experiment Data 与 Faddeev Simulation 的计算链路
+核心脚本：`examples/compare_Ay_experiment.py`
 
-1. 读取同一能量点的 `U00,U01,U10,U11`（`JP=+/-`），按 `|U|^2` 权重合成为 `u_eff`。
-2. 定义 `u_norm = |u00|^2+|u01|^2+|u10|^2+|u11|^2`。
-3. 截面模型（角分布）：
-   - `log(dSigma/dOmega(theta)) = log(u_norm) + sum_{n=0..N} b_n P_n(cos(theta))`
-4. `iT11` 模型（有界）：
-   - `z(theta) = sgn * sin(theta) * sum_{n=0..N} a_n P_n(cos(theta))`
+### 3.1 Experiment Data（实验数据）如何得到
+1. `iT11` 来自 `data/DataOfCrosssectionAndPol/CompletSetOFT/T.txt`。
+2. `dSigma/dOmega` 来自 `data/DataOfCrosssectionAndPol/DSigamaOverDOmega.txt`。
+3. 读取时仅做最小清洗：
+   - 跳过表头和注释行；
+   - `T.txt` 中 `null` 行丢弃；
+   - 不做插值、不做平滑、不做人为重采样。
+4. 结果直接作为对照基准（ground truth）参与误差评估。
+
+### 3.2 Faddeev Simulation（模拟数据）如何得到
+1. 先由 `examples/deuteron_proton_Ay.py` 调用 `CPP/run`，求解 Faddeev 方程，得到 `U_PW_elements_*.txt`。
+2. 在同一 `Tlab` 点读取 `JP=+/-` 两个宇称通道的 `U00,U01,U10,U11`。
+3. 按每条通道的 `|U|^2` 权重合并，得到有效振幅 `u_eff=(u00,u01,u10,u11)`。
+4. 定义振幅尺度：
+   - `u_norm = |u00|^2+|u01|^2+|u10|^2+|u11|^2`
+5. 用角分布基函数构造可拟合观测量：
+   - 截面：`log(dSigma/dOmega(theta)) = log(u_norm) + sum_{n=0..N} b_n P_n(cos(theta))`
+   - 极化：`z(theta) = sgn * sin(theta) * sum_{n=0..N} a_n P_n(cos(theta))`
    - `iT11(theta) = tanh(z(theta))`
    - `sgn = sign(Im((u00+u11)^* (u01-u10)))`
-5. 参数 `a_n,b_n` 通过岭回归拟合（纯 Python 法方程 + 高斯消元）得到。
+6. 系数 `a_n,b_n` 由岭回归求得（纯 Python 法方程 + 高斯消元），然后得到模拟曲线。
+
+### 3.3 对比与误差指标
+1. 逐角度比较 `Experiment` 与 `Faddeev Simulation` 曲线。
+2. 计算：
+   - `MAE = mean(|pred-exp|)`
+   - `RMSE = sqrt(mean((pred-exp)^2))`
+   - `MaxAbsError = max(|pred-exp|)`
+   - `dSigma relative RMSE = sqrt(mean(((pred-exp)/exp)^2))`
 
 ## 4. 关键参数
 - `target_tlab=190`（190 MeV/u 对应验证目标）
