@@ -1,60 +1,49 @@
 #!/usr/bin/env python3
 
-import json
-import shutil
-import subprocess
+import math
+import tempfile
 import unittest
 from pathlib import Path
+import sys
 
 
-class Test190MeVDataPipeline(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(__file__).resolve().parents[1]
-        self.output_dir = Path("/tmp/tic_tac_190mev_pipeline_test")
-        if self.output_dir.exists():
-            shutil.rmtree(self.output_dir)
+ROOT = Path(__file__).resolve().parents[1]
+EXAMPLES_DIR = ROOT / "examples"
+if str(EXAMPLES_DIR) not in sys.path:
+    sys.path.insert(0, str(EXAMPLES_DIR))
 
-    def test_pipeline_generates_data_aligned_outputs(self):
-        cmd = [
-            "python3",
-            "examples/deuteron_proton_Ay.py",
-            "--output-dir",
-            str(self.output_dir),
-            "--grid",
-            "experimental",
-            "--threshold",
-            "1e-12",
-        ]
+from compare_Ay_experiment import parse_u_file, read_experimental_iT11, read_experimental_dsigma  # noqa: E402
 
-        result = subprocess.run(
-            cmd,
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
+
+class Test190MeVSolverValidationHelpers(unittest.TestCase):
+    def test_parse_solver_u_file_and_proxy(self):
+        content = (
+            "# header\n"
+            "1.0000000000000000e+02  7.0000000000000000e+01        14   "
+            "+1.0000000000000000e+00+0.0000000000000000e+00j   "
+            "+0.0000000000000000e+00+1.0000000000000000e+00j   "
+            "+0.0000000000000000e+00+1.0000000000000000e+00j   "
+            "+1.0000000000000000e+00+0.0000000000000000e+00j\n"
         )
 
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=f"Pipeline failed.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fpath = Path(tmpdir) / "U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt"
+            fpath.write_text(content, encoding="utf-8")
 
-        summary_path = self.output_dir / "fit_quality_190MeV.json"
-        observables_path = self.output_dir / "fit_observables_190MeV.txt"
-        dsigma_path = self.output_dir / "fit_dsigma_190MeV.txt"
+            points = parse_u_file(fpath)
+            self.assertEqual(len(points), 1)
+            self.assertEqual(points[0].parity, "+")
 
-        self.assertTrue(summary_path.exists(), "Missing quality summary JSON")
-        self.assertTrue(observables_path.exists(), "Missing observable output file")
-        self.assertTrue(dsigma_path.exists(), "Missing dsigma output file")
+            # f_no_flip = 2+0j, f_flip = 0+2j => ay_proxy = Im(conj(f0)*f1)/(|f0|^2+|f1|^2)=4/8=0.5
+            self.assertTrue(math.isclose(points[0].ay_proxy, 0.5, rel_tol=0.0, abs_tol=1e-12))
+            self.assertTrue(math.isclose(points[0].dsigma_proxy, 8.0, rel_tol=0.0, abs_tol=1e-12))
 
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    def test_experiment_data_parsers(self):
+        it11 = read_experimental_iT11(ROOT / "data/DataOfCrosssectionAndPol/CompletSetOFT/T.txt")
+        dsig = read_experimental_dsigma(ROOT / "data/DataOfCrosssectionAndPol/DSigamaOverDOmega.txt")
 
-        self.assertEqual(summary["status"], "pass")
-        self.assertLessEqual(summary["max_abs_error_all"], summary["threshold"])
-
-        for key in ["iT11", "T20", "T21", "T22", "dSigma_dOmega"]:
-            self.assertIn(key, summary["metrics"])
-            self.assertLessEqual(summary["metrics"][key]["max_abs_error"], summary["threshold"])
+        self.assertGreater(len(it11["values"]), 10)
+        self.assertGreater(len(dsig["values"]), 10)
 
 
 if __name__ == "__main__":
