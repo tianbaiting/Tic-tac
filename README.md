@@ -46,6 +46,21 @@ If you need command help from solver:
 ./CPP/run -h
 ```
 
+## Input Profiles
+
+Canonical hand-written input files are kept in `CPP/Input/`:
+
+- `CPP/Input/input.txt`: baseline profile
+- `CPP/Input/input_Ay_test.txt`: lower-cost 190 MeV/u quick test profile
+- `CPP/Input/input_Ay_fixed.txt`: refined 190 MeV/u profile
+- `CPP/Input/input_Ay_nijmegen_legacy.txt`: legacy Nijmegen profile (kept for reproducibility)
+
+Run from repository root:
+
+```bash
+./CPP/run CPP/Input/input.txt
+```
+
 ## 190 MeV/u dpol-p Workflow
 
 ### 1. Run solver

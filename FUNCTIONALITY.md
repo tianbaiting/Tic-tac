@@ -42,6 +42,7 @@ Workflow documentation:
 Primary maintained runtime path:
 - `cd CPP && make -j`
 - `./CPP/run CPP/Input/input.txt`
+- Hand-written input templates are centralized under `CPP/Input/`.
 
 Automated check:
 - `python3 -m unittest tests/test_190mev_data_pipeline.py`

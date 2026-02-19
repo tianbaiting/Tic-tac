@@ -17,3 +17,6 @@ tests
 build
 tags
 __pycache__/
+CPP/Output/
+CPP/Input/*_autogen.txt
+CPP/Input/energy_*_autogen.txt

@@ -1,21 +1,33 @@
-# Run "-h" or "--help" to see meaning of arguments
+# Baseline input profile for running from repository root:
+#   ./CPP/run CPP/Input/input.txt
+
+# State-space truncation
 two_J_3N_max=1
+J_2N_max=3
 Np_WP=50
 Nq_WP=50
-J_2N_max=1
+
+# Integration / quadrature
 Nphi=48
 Nx=48
 Np_per_WP=8
 Nq_per_WP=8
-chebyshev_s=200
+
+# Momentum-grid setup
+chebyshev_s=100
 chebyshev_t=1
 p_grid_type=chebyshev
-p_grid_filename=Input/NWP-100-splitnorm.txt
+p_grid_filename=
 q_grid_type=chebyshev
-q_grid_filename=Input/NWP-100-splitnorm.txt
+q_grid_filename=
+
+# Parallel / runtime control
 P123_omp_num_threads=4
-parallel_run=true
+parallel_run=false
+channel_idx=-1
 P123_recovery=false
+
+# Physics switches
 tensor_force=true
 isospin_breaking_1S0=true
 midpoint_approx=false
@@ -24,11 +36,15 @@ include_breakup_channels=false
 solve_faddeev=true
 solve_dense=false
 production_run=true
+
+# Model and parameter walk
 potential_model=LO_internal
 parameter_walk=false
-parameter_file=
+parameter_file=none
 PSI_start=-1
 PSI_end=-1
-energy_input_file=Input/lab_energies.txt
-output_folder=Output
-P123_folder=../../Data/permutation_matrices
+
+# IO paths (root-relative)
+energy_input_file=CPP/Input/lab_energies.txt
+output_folder=CPP/Output
+P123_folder=CPP/Output

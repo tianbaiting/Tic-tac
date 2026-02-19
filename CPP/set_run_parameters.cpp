@@ -426,7 +426,7 @@ void show_usage(){
 	std::cout << "parameter_file:           File from which the code reads parameter input. Note that\n"
 			  << "                          the number of parameters must equal the number of potential\n"
 	  		  << "                          model parameters \n"
-			  << "Example:                  parameter_walk=Input/samples.txt -> Program reads samples.txt\n"
+			  << "Example:                  parameter_walk=CPP/Input/samples.txt -> Program reads samples.txt\n"
 	  		  << "                                                              line-by-line and loops\n"
 			  << "                                                              through values. \n"
 			  << seperationLine

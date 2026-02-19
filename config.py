@@ -48,8 +48,8 @@ class TicTacConfig:
             'q_grid_type': 'chebyshev',
             'q_grid_filename': '',
             'energy_input_file': 'CPP/Input/lab_energies.txt',
-            'output_folder': 'Output',
-            'P123_folder': 'Output',
+            'output_folder': 'CPP/Output',
+            'P123_folder': 'CPP/Output',
         }
     
     def save_config(self, filename='data/input.txt'):

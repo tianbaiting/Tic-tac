@@ -1,39 +1,37 @@
-# 190 MeV/u dpol-p quick test profile
+# Legacy 190 MeV/u dpol-p profile (Nijmegen potential)
+# Kept for reproducibility of earlier exploratory runs.
 
-# Low-cost truncation / mesh
 two_J_3N_max=1
-J_2N_max=2
+J_2N_max=1
 Np_WP=30
 Nq_WP=30
-Nphi=36
-Nx=36
-Np_per_WP=6
-Nq_per_WP=6
+Nphi=32
+Nx=32
+Np_per_WP=8
+Nq_per_WP=8
 
-# Grid (Chebyshev)
-chebyshev_s=200
 chebyshev_t=1
+chebyshev_s=50
 p_grid_type=chebyshev
 p_grid_filename=
 q_grid_type=chebyshev
 q_grid_filename=
 
-# Runtime controls
 P123_omp_num_threads=4
 parallel_run=false
 channel_idx=-1
 P123_recovery=false
-calculate_and_store_P123=false
-solve_faddeev=true
-solve_dense=false
-production_run=false
-include_breakup_channels=false
 
 # Physics
-potential_model=LO_internal
+potential_model=nijmegen
 tensor_force=true
 isospin_breaking_1S0=true
 midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
 
 # Parameter walk
 parameter_walk=false
