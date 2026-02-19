@@ -16,3 +16,4 @@ output
 tests
 build
 tags
+__pycache__/

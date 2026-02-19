@@ -66,6 +66,23 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 micromamba run -n anaroot-env python examples/plot_validation_curves.py --work-dir output/deuteron_proton_Ay
 ```
 
+## Multi-Energy dpol-p Observables (70/135/190 MeV/u)
+
+Run solver-driven (Faddeev `U` -> observables) pipeline:
+
+```bash
+python3 examples/run_dpol_p_observables.py --work-dir output/dpol_p_observables --energies 70,135,190
+```
+
+Plot all observables (`dSigma/dOmega`, `iT11`, `T20`, `T21`, `T22`) with matplotlib:
+
+```bash
+micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py --work-dir output/dpol_p_observables
+```
+
+Detailed algorithm and output hierarchy:
+`docs/dpol_p_multi_energy_observables.md`
+
 ## Key Outputs
 
 Generated under `output/deuteron_proton_Ay/`:
