@@ -55,11 +55,30 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 - `ridge=1e-8`
 - 求解器主参数：`two_J_3N_max=1, J_2N_max=2, Np_WP=20, Nq_WP=20, potential_model=LO_internal`
 
-## 5. 当前结果（实测）
-- 状态：`PASS`
-- 最接近能量：`Tlab=161.145 MeV`（`|delta|=28.855 MeV`）
-- `iT11`: `RMSE=0.004998`, `MAE=0.003970`
-- `dSigma/dOmega`: `RMSE=0.029506`, `relative RMSE=0.028075`
+## 5. 当前结果（以本地最新运行为准）
+不要在文档中手写固定数值，直接读取本次运行输出：
+- `output/deuteron_proton_Ay/solver_validation_190MeV.json`
+- `output/deuteron_proton_Ay/solver_validation_190MeV.txt`
+
+快速查看关键字段：
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+p = Path('output/deuteron_proton_Ay/solver_validation_190MeV.json')
+if not p.exists():
+    raise SystemExit('validation JSON not found')
+j = json.loads(p.read_text())
+best = j.get('best_energy', {})
+m = j.get('metrics', {})
+print('target_tlab=', j.get('target_tlab'))
+print('best_tlab=', best.get('tlab'), 'delta=', best.get('delta_to_target'))
+print('iT11 RMSE=', m.get('it11_rmse'), 'MAE=', m.get('it11_mae'))
+print('dSigma RMSE=', m.get('dsigma_rmse'), 'relative RMSE=', m.get('dsigma_relative_rmse'))
+print('pass_threshold=', j.get('pass_threshold'))
+PY
+```
 
 输出文件：
 - `output/deuteron_proton_Ay/solver_validation_190MeV.txt`

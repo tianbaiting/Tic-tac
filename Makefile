@@ -96,7 +96,7 @@ cleanall: clean
 # 运行程序
 run: $(TARGET)
 	@echo "运行程序..."
-	./$(TARGET) --input data/input.txt
+	./$(TARGET) data/input.txt
 
 # 调试运行
 debug: $(TARGET)

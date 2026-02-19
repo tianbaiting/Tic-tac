@@ -1,35 +1,35 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/` is the primary codebase: `core/` (solver/state-space/resolvent/potential), `interactions/` (nuclear potentials, including Fortran bridges), `config/`, `io/`, and `utils/`.
-- `include/` contains shared headers (`constants.h`, `type_defs.h`).
-- `data/` stores runtime inputs and reference datasets; default runtime input is `data/input.txt`.
-- `examples/` contains runnable workflows (`run_examples.sh`, `deuteron_proton_Ay.py`, `quick_Ay_test.py`).
-- `tests/` and `Test/` contain legacy numerical test harnesses (`Cont_Faddeev`, `Free_energy`).
-- `CPP/` is an older parallel implementation; prefer changes in `src/` unless intentionally maintaining both trees.
+- `src/` contains the refactored C++ implementation (`core/`, `config/`, `io/`, `interactions/`, `utils/`).
+- `CPP/` contains the actively used solver entrypoint `CPP/run` plus legacy-compatible build assets.
+- `include/` stores shared headers (`constants.h`, `type_defs.h`).
+- `examples/` contains maintained end-to-end workflows (`deuteron_proton_Ay.py`, `compare_Ay_experiment.py`, `run_dpol_p_observables.py`).
+- `docs/` contains method, validation, and parameter-tuning documentation.
+- `data/` stores experiment inputs (`DataOfCrosssectionAndPol`) and energy/input files.
+- `tests/` holds automated Python checks; `Test/` keeps older numerical harnesses.
 
 ## Build, Test, and Development Commands
-- `make` builds the main executable `./tic-tac` from `src/`.
-- `./build.sh release` runs CMake + parallel build in `build/` and copies `bin/tic-tac` to project root.
-- `./build.sh debug` produces a debug build.
-- `./tic-tac --input data/input.txt` runs a configured calculation.
-- `python3 config.py save data/input.txt` regenerates a baseline input file.
-- `./examples/run_examples.sh test` runs a fast smoke test configuration.
-- `cd tests/Cont_Faddeev && make && ./run` (and similarly in `tests/Free_energy`) runs legacy numerical checks.
+- `cd CPP && make -j` builds the solver used by current workflows (`CPP/run`).
+- `./CPP/run CPP/Input/input.txt` runs with an input file.
+- `./CPP/run Np_WP=30 Nq_WP=30 energy_input_file=CPP/Input/lab_energies_190MeV.txt` runs with inline overrides.
+- `python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab 190` runs 190 MeV/u solver output generation.
+- `python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190` validates against experiment.
+- `python3 -m unittest tests/test_190mev_data_pipeline.py` runs the core regression test.
 
 ## Coding Style & Naming Conventions
-- Use C++17-compatible code (current build config) and preserve mixed C++/Fortran interoperability.
-- Match local file style: existing code uses braces on the same line and mixed tabs/spaces in legacy files.
-- Prefer descriptive `snake_case` for variables/functions and keep file pairs aligned (e.g., `foo.h` + `foo.cpp`).
-- No repo formatter is configured (`.clang-format` absent); keep formatting changes minimal and local.
+- C++ target is C++17 in current build scripts.
+- Follow local style in touched files; avoid repo-wide reformatting.
+- Use descriptive `snake_case` names for new functions/variables in scripts and utilities.
+- Keep configuration keys identical to `set_run_parameters.cpp` (`key=value`, lowercase booleans).
 
 ## Testing Guidelines
-- There is no reliable top-level `make test`; use example smoke tests plus relevant `tests/` harnesses.
-- For solver or potential changes, run at least one `examples/run_examples.sh test` case and one domain-specific harness.
-- For physics-facing changes, record key output deltas (energies, amplitudes, Ay curves) in the PR.
+- For solver pipeline edits, run at least:
+  - `python3 examples/quick_Ay_test.py`
+  - `python3 -m unittest tests/test_190mev_data_pipeline.py`
+- If observables scripts change, regenerate outputs under `output/` and inspect produced JSON summaries.
 
 ## Commit & Pull Request Guidelines
-- Follow existing history: short, imperative commit subjects (e.g., `core: improve Neumann convergence printout`).
-- Keep commits focused to one technical change.
-- PRs should include: problem statement, files touched, exact reproduce commands, and numerical impact.
-- Link related issues and include plots/tables when analysis scripts or observable outputs change.
+- Use short, imperative commit messages (`docs:`, `build:`, `examples:` prefixes are preferred).
+- Keep one technical concern per commit.
+- In PR descriptions, include reproducible commands and numerical impact (energy deltas, RMSE/MAE, or output file diffs).

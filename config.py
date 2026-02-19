@@ -14,60 +14,42 @@ class TicTacConfig:
     def __init__(self):
         """初始化默认配置"""
         self.config = {
-            # 基本参数
-            'two_J_3N_max': 1,          # 三体系统最大总角动量（×2）
-            'Np_WP': 50,                # p方向波包数量
-            'Nq_WP': 50,                # q方向波包数量
-            'J_2N_max': 1,              # 二体系统最大角动量
-            
-            # 网格参数
-            'Nphi': 48,                 # φ角积分点数
-            'Nx': 48,                   # x积分点数
-            'Np_per_WP': 8,             # 每个波包的p点数
-            'Nq_per_WP': 8,             # 每个波包的q点数
-            
-            # Chebyshev网格参数
-            'chebyshev_s': 200,         # Chebyshev网格缩放参数
-            'chebyshev_t': 1,           # Chebyshev网格类型参数
-            
-            # 网格类型
-            'p_grid_type': 'chebyshev', # p网格类型
-            'q_grid_type': 'chebyshev', # q网格类型
-            
-            # 网格文件
-            'p_grid_filename': 'data/NWP-100-splitnorm.txt',
-            'q_grid_filename': 'data/NWP-100-splitnorm.txt',
-            
-            # 并行设置
-            'P123_omp_num_threads': 4,  # OpenMP线程数
-            'parallel_run': True,       # 是否并行运行
-            
-            # 计算选项
-            'P123_recovery': False,     # 是否恢复P123计算
-            'tensor_force': True,       # 是否包含张量力
-            'isospin_breaking_1S0': True, # 是否包含同位旋破缺
-            'midpoint_approx': False,   # 是否使用中点近似
-            'calculate_and_store_P123': True, # 是否计算并存储P123
-            'include_breakup_channels': False, # 是否包含破裂道
-            'solve_faddeev': True,      # 是否求解Faddeev方程
-            'solve_dense': False,       # 是否使用稠密求解器
-            'production_run': True,     # 是否生产运行
-            
-            # 势能模型
-            'potential_model': 'LO_internal', # 势能模型类型
-            
-            # 参数扫描
-            'parameter_walk': False,    # 是否参数扫描
-            'parameter_file': '',       # 参数文件
-            
-            # 能量范围
-            'PSI_start': -1,           # 起始PSI
-            'PSI_end': -1,             # 结束PSI
-            
-            # 文件路径
-            'energy_input_file': 'data/lab_energies.txt',
-            'output_folder': 'output',
-            'P123_folder': 'data/permutation_matrices'
+            # 与 set_default_values(...) 对齐的默认值
+            'two_J_3N_max': 1,
+            'Np_WP': 50,
+            'Nq_WP': 50,
+            'J_2N_max': 3,
+            'Nphi': 48,
+            'Nx': 48,
+            'Np_per_WP': 8,
+            'Nq_per_WP': 8,
+            'chebyshev_s': 100,
+            'chebyshev_t': 1,
+            'channel_idx': -1,
+            'parallel_run': False,
+            'P123_omp_num_threads': 4,
+            'P123_recovery': False,
+            'tensor_force': True,
+            'isospin_breaking_1S0': True,
+            'midpoint_approx': False,
+            'calculate_and_store_P123': True,
+            'include_breakup_channels': False,
+            'solve_faddeev': True,
+            'solve_dense': False,
+            'production_run': True,
+            'potential_model': 'LO_internal',
+            'parameter_walk': False,
+            'parameter_file': 'none',
+            'PSI_start': -1,
+            'PSI_end': -1,
+            'subfolder': 'Output',
+            'p_grid_type': 'chebyshev',
+            'p_grid_filename': '',
+            'q_grid_type': 'chebyshev',
+            'q_grid_filename': '',
+            'energy_input_file': 'CPP/Input/lab_energies.txt',
+            'output_folder': 'Output',
+            'P123_folder': 'Output',
         }
     
     def save_config(self, filename='data/input.txt'):
@@ -106,12 +88,14 @@ class TicTacConfig:
                     # 类型转换
                     if value.lower() in ['true', 'false']:
                         self.config[key] = value.lower() == 'true'
-                    elif value.isdigit():
-                        self.config[key] = int(value)
-                    elif value.replace('.', '').isdigit():
-                        self.config[key] = float(value)
                     else:
-                        self.config[key] = value
+                        try:
+                            self.config[key] = int(value)
+                        except ValueError:
+                            try:
+                                self.config[key] = float(value)
+                            except ValueError:
+                                self.config[key] = value
         
         print(f"配置已从文件加载: {filename}")
         return True
@@ -148,7 +132,9 @@ def main():
     if command == 'save':
         filename = sys.argv[2] if len(sys.argv) > 2 else 'data/input.txt'
         # 确保目录存在
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        directory = os.path.dirname(filename)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         config.save_config(filename)
     
     elif command == 'load':

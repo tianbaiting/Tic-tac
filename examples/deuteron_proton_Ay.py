@@ -50,17 +50,15 @@ def ensure_cpp_solver_binary(root: Path, solver_path: Path) -> None:
     if solver_path != root / "CPP" / "run":
         raise FileNotFoundError(f"Solver binary not found: {solver_path}")
 
-    cmd = (
-        "g++ $(find CPP -maxdepth 3 -name '*.o' | sort) -o CPP/run "
-        "-L/lib/x86_64-linux-gnu "
-        "-Wl,--no-as-needed -lgomp -lgsl -lgslcblas -lpthread -lm -ldl -lgfortran "
-        "-lhdf5_serial_hl_cpp -lhdf5_serial_cpp -lhdf5_serial_hl -lhdf5_serial "
-        "-lstdc++fs -llapacke -llapack -lblas"
+    result = subprocess.run(
+        ["make", "-C", str(root / "CPP"), "-j"],
+        cwd=root,
+        capture_output=True,
+        text=True,
     )
-    result = subprocess.run(["zsh", "-lc", cmd], cwd=root, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
-            "Failed to link CPP/run from existing object files.\n"
+            "Failed to build CPP/run using `make -C CPP`.\n"
             f"stdout:\n{result.stdout}\n"
             f"stderr:\n{result.stderr}"
         )
