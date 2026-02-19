@@ -1,5 +1,8 @@
 # 190 MeV/u dpol-p：从 Tic-tac U 矩阵到截面与 iT11
 
+详细算法流程（离散化、Faddeev 求解、U 到可观测量映射）请看：
+- `docs/algorithm_flow_and_logic.md`
+
 ## 1. 目标
 对 `data/DataOfCrosssectionAndPol` 的 190 MeV/u 极化氘核-质子数据做求解器驱动验证：
 - 微分截面 `dSigma/dOmega(theta)`
