@@ -106,7 +106,11 @@ rg '^make_fwp_statespace\t' tags
 5. 在实验角度点直接计算预测：
    - `dSigma/dOmega = u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)`
    - `iT11 = clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)`
-6. 仅在最后与实验做残差统计，输出 `CSV/SVG/JSON/TXT`。
+6. `dSigma/dOmega` 支持单位输出切换（`mb/sr` 或 `fm^2/sr`）：
+   - 实验文件单位自动识别；
+   - 统一换算后再做残差统计与出图；
+   - 仅做单位换算，不做曲线拟合。
+7. 仅在最后与实验做残差统计，输出 `CSV/SVG/JSON/TXT`。
 
 注意：这一步是“从求解器振幅到实验可比曲线”的工程映射，不做实验曲线拟合或线性插值回放。
 

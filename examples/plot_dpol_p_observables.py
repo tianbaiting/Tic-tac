@@ -69,6 +69,7 @@ def plot_single_energy(
     target_tlab: float,
     solver_tlab: float,
     out_file: Path,
+    dsigma_unit_text: str,
 ) -> None:
     fig, axes = plt.subplots(2, 3, figsize=(14, 7), dpi=140)
     ax_list = [axes[0, 0], axes[0, 1], axes[0, 2], axes[1, 0], axes[1, 1]]
@@ -87,7 +88,10 @@ def plot_single_energy(
             ex, ey = _valid_pairs(exp["theta_deg"], exp[f"{key}_exp"])
             if ex:
                 ax.scatter(ex, ey, s=20, color="#111827", alpha=0.9, label="Experiment")
-        ax.set_title(OBS_LABELS[key])
+        if key == "dSigma_dOmega":
+            ax.set_title(f"{OBS_LABELS[key]} [{dsigma_unit_text}]")
+        else:
+            ax.set_title(OBS_LABELS[key])
         ax.set_xlabel(r"$\theta_{\mathrm{c.m.}}$ (deg)")
         ax.grid(True, alpha=0.25)
         if key == "dSigma_dOmega":
@@ -106,6 +110,7 @@ def plot_overview(
     *,
     all_model: List[Tuple[float, float, Dict[str, List[float]]]],
     out_file: Path,
+    dsigma_unit_text: str,
 ) -> None:
     fig, axes = plt.subplots(2, 3, figsize=(14, 7), dpi=140)
     ax_list = [axes[0, 0], axes[0, 1], axes[0, 2], axes[1, 0], axes[1, 1]]
@@ -122,7 +127,10 @@ def plot_overview(
             ax.plot(theta, model[key], color=color, lw=1.8, label=label)
 
     for ax, key in zip(ax_list, OBS_KEYS):
-        ax.set_title(OBS_LABELS[key])
+        if key == "dSigma_dOmega":
+            ax.set_title(f"{OBS_LABELS[key]} [{dsigma_unit_text}]")
+        else:
+            ax.set_title(OBS_LABELS[key])
         ax.set_xlabel(r"$\theta_{\mathrm{c.m.}}$ (deg)")
         ax.grid(True, alpha=0.25)
         if key == "dSigma_dOmega":
@@ -155,6 +163,8 @@ def main() -> int:
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     energy_entries = summary.get("energies", [])
+    dsigma_unit = str(summary.get("units", {}).get("dSigma_dOmega", "mb/sr"))
+    dsigma_unit_text = "fm^2/sr" if dsigma_unit == "fm2/sr" else dsigma_unit
     if not energy_entries:
         raise RuntimeError("No energy entries in summary.json")
 
@@ -178,10 +188,11 @@ def main() -> int:
             target_tlab=target_tlab,
             solver_tlab=solver_tlab,
             out_file=out_file,
+            dsigma_unit_text=dsigma_unit_text,
         )
 
     overview_file = figures_dir / "overview_observables_multi_energy.png"
-    plot_overview(all_model=all_model, out_file=overview_file)
+    plot_overview(all_model=all_model, out_file=overview_file, dsigma_unit_text=dsigma_unit_text)
 
     print(f"summary: {summary_path}")
     for entry in energy_entries:

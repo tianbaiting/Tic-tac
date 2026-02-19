@@ -81,6 +81,7 @@ def make_combined_plot(
     ds_model: list[float],
     out_file: Path,
     annotation: Dict[str, Any],
+    dsigma_y_label: str,
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5.4), dpi=140)
     fig.suptitle("Experiment vs Faddeev Simulation (190 MeV/u d + p)", fontsize=15, fontweight="bold")
@@ -125,7 +126,7 @@ def make_combined_plot(
     ax1.set_yscale("log")
     ax1.set_title("dSigma/dOmega")
     ax1.set_xlabel("theta_cm (deg)")
-    ax1.set_ylabel("dSigma/dOmega")
+    ax1.set_ylabel(dsigma_y_label)
     ax1.grid(True, alpha=0.25, linestyle="--", linewidth=0.6)
     ax1.legend(loc="best")
     ax1.text(
@@ -171,6 +172,9 @@ def main() -> int:
 
     summary = json.loads(summary_json.read_text(encoding="utf-8"))
     best = summary.get("best_energy", {})
+    units = summary.get("units", {})
+    dsigma_unit = str(units.get("dsigma_output", "mb/sr"))
+    dsigma_unit_text = "fm^2/sr" if dsigma_unit == "fm2/sr" else dsigma_unit
     annotation = {
         "target_tlab": float(summary.get("target_tlab", math.nan)),
         "best_tlab": float(best.get("tlab", math.nan)),
@@ -205,7 +209,7 @@ def main() -> int:
         exp_label=ds_exp_label,
         model_label=ds_model_label,
         title="190 MeV/u dpol-p: dSigma/dOmega (Experiment vs Model)",
-        y_label="dSigma/dOmega",
+        y_label=f"dSigma/dOmega [{dsigma_unit_text}]",
         out_file=dsigma_png,
         log_y=True,
     )
@@ -218,6 +222,7 @@ def main() -> int:
         ds_model=ds_model,
         out_file=combined_png,
         annotation=annotation,
+        dsigma_y_label=f"dSigma/dOmega [{dsigma_unit_text}]",
     )
     make_combined_plot(
         it11_theta=it11_theta,
@@ -228,6 +233,7 @@ def main() -> int:
         ds_model=ds_model,
         out_file=annotated_png,
         annotation=annotation,
+        dsigma_y_label=f"dSigma/dOmega [{dsigma_unit_text}]",
     )
 
     print(f"it11_png: {it11_png}")

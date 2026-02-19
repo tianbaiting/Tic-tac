@@ -19,6 +19,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from observable_units import (
+    SUPPORTED_DSIGMA_UNITS,
+    UNIT_MB_PER_SR,
+    convert_dsigma_series,
+    convert_dsigma_value,
+    infer_dsigma_unit_from_lines,
+    normalize_dsigma_unit,
+)
+
 
 @dataclass
 class SolverChannelPoint:
@@ -397,7 +406,11 @@ def _u_invariants(u_eff: Dict[str, complex]) -> Dict[str, float]:
     }
 
 
-def _model_observables(theta_deg: float, inv: Dict[str, float]) -> Dict[str, float]:
+def _model_observables(
+    theta_deg: float,
+    inv: Dict[str, float],
+    dsigma_output_unit: str = UNIT_MB_PER_SR,
+) -> Dict[str, float]:
     theta = math.radians(theta_deg)
     x = math.cos(theta)
     s = math.sin(theta)
@@ -408,7 +421,8 @@ def _model_observables(theta_deg: float, inv: Dict[str, float]) -> Dict[str, flo
     # Reduced-U model:
     # These expressions are deterministic functions of solver U invariants.
     sigma_shape = 1.10 * inv["inv_t20"] * p2 + 0.60 * inv["inv_t22"] * p4
-    dsigma = inv["u_norm"] * math.exp(sigma_shape)
+    dsigma_mb = inv["u_norm"] * math.exp(sigma_shape)
+    dsigma = convert_dsigma_value(dsigma_mb, UNIT_MB_PER_SR, dsigma_output_unit)
 
     it11 = 1.20 * inv["inv_it11"] * s * (-1.20 * p2 - 0.20 * p1)
     t20 = 0.35 * inv["inv_t20"] * (0.20 * p2 + 0.80 * p1)
@@ -478,10 +492,14 @@ def read_experimental_tensor(path: Path) -> Dict[str, Dict[str, List[float]]]:
     return out
 
 
-def read_experimental_dsigma(path: Path) -> Dict[str, List[float]]:
+def read_experimental_dsigma(path: Path, target_unit: str = UNIT_MB_PER_SR) -> Dict[str, object]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    source_unit = infer_dsigma_unit_from_lines(lines, fallback_unit=UNIT_MB_PER_SR)
+    output_unit = normalize_dsigma_unit(target_unit)
+
     angles: List[float] = []
     values: List[float] = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in lines:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -493,7 +511,12 @@ def read_experimental_dsigma(path: Path) -> Dict[str, List[float]]:
             values.append(float(parts[1]))
         except ValueError:
             continue
-    return {"angles": angles, "values": values}
+    return {
+        "angles": angles,
+        "values": convert_dsigma_series(values, source_unit, output_unit),
+        "source_unit": source_unit,
+        "output_unit": output_unit,
+    }
 
 
 def _nearest_model_values(
@@ -569,6 +592,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--theta-min", type=float, default=20.0)
     parser.add_argument("--theta-max", type=float, default=170.0)
     parser.add_argument("--theta-step", type=float, default=1.0)
+    parser.add_argument(
+        "--dsigma-unit",
+        default=UNIT_MB_PER_SR,
+        choices=list(SUPPORTED_DSIGMA_UNITS),
+        help="Output unit for dSigma/dOmega in CSV/JSON",
+    )
     return parser
 
 
@@ -576,6 +605,7 @@ def main() -> int:
     args = build_parser().parse_args()
     root = Path(__file__).resolve().parents[1]
     target_tlabs = _parse_energy_list(args.energies)
+    dsigma_output_unit = normalize_dsigma_unit(args.dsigma_unit)
 
     cfg = SolverRunConfig(
         root=root,
@@ -643,7 +673,7 @@ def main() -> int:
         delta = abs(solved_tlab - target)
         inv = _u_invariants(best["u_eff"])  # type: ignore[arg-type]
 
-        rows = [_model_observables(theta, inv) for theta in angles]
+        rows = [_model_observables(theta, inv, dsigma_output_unit=dsigma_output_unit) for theta in angles]
         energy_dir = analysis_dir / _energy_dir_name(target)
         energy_dir.mkdir(parents=True, exist_ok=True)
 
@@ -659,6 +689,13 @@ def main() -> int:
             "u_eff": {k: _serialize_complex(v) for k, v in best["u_eff"].items()},  # type: ignore[union-attr]
             "model_curve_csv": str(model_csv),
             "num_solver_channels_combined": int(best["num_channels"]),
+            "units": {
+                "dSigma_dOmega": dsigma_output_unit,
+                "iT11": "dimensionless",
+                "T20": "dimensionless",
+                "T21": "dimensionless",
+                "T22": "dimensionless",
+            },
         }
         (energy_dir / "metadata.json").write_text(
             json.dumps(metadata, indent=2, ensure_ascii=False),
@@ -683,7 +720,7 @@ def main() -> int:
     comparison_190: Dict[str, object] = {"available": False}
     if tensor_data.exists() and dsigma_data.exists():
         exp_t = read_experimental_tensor(tensor_data)
-        exp_dsigma = read_experimental_dsigma(dsigma_data)
+        exp_dsigma = read_experimental_dsigma(dsigma_data, target_unit=dsigma_output_unit)
 
         target_190_entry = min(energy_entries, key=lambda item: abs(float(item["target_tlab_mev_per_u"]) - 190.0))
         e190_dir = Path(str(target_190_entry["analysis_dir"]))
@@ -752,6 +789,10 @@ def main() -> int:
             "available": True,
             "selected_solver_tlab_mev": target_190_entry["selected_solver_tlab_mev"],
             "experiment_csv": str(exp_csv),
+            "units": {
+                "dSigma_dOmega_input_detected": exp_dsigma["source_unit"],
+                "dSigma_dOmega_used": exp_dsigma["output_unit"],
+            },
             "metrics": {
                 "dSigma_dOmega": {
                     "rmse": _rmse(m_ds, exp_dsigma["values"]),
@@ -789,6 +830,14 @@ def main() -> int:
         "workflow": "Tic-tac U-matrix -> reduced-U observable model (no experimental fit)",
         "targets_tlab_mev_per_u": target_tlabs,
         "angles_deg": {"min": cfg.angle_min_deg, "max": cfg.angle_max_deg, "step": cfg.angle_step_deg},
+        "units": {
+            "dSigma_dOmega": dsigma_output_unit,
+            "dSigma_dOmega_model_base": UNIT_MB_PER_SR,
+            "iT11": "dimensionless",
+            "T20": "dimensionless",
+            "T21": "dimensionless",
+            "T22": "dimensionless",
+        },
         "solver": {
             "returncode": run_result["returncode"],
             "log_file": str(run_result["log_file"]),
@@ -816,6 +865,7 @@ def main() -> int:
     lines.append("dpol-p multi-energy observable run")
     lines.append("=================================")
     lines.append(f"targets (MeV/u): {', '.join(f'{v:.1f}' for v in target_tlabs)}")
+    lines.append(f"dSigma/dOmega unit: {dsigma_output_unit}")
     lines.append(f"solver return code: {run_result['returncode']}")
     lines.append("")
     lines.append("selected solver energies:")

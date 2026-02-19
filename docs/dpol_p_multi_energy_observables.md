@@ -16,7 +16,8 @@
 ```bash
 python3 examples/run_dpol_p_observables.py \
   --work-dir output/dpol_p_observables \
-  --energies 70,135,190
+  --energies 70,135,190 \
+  --dsigma-unit mb/sr
 ```
 
 默认离散化参数已针对这三个入射能量设置为：
@@ -32,6 +33,8 @@ python3 examples/run_dpol_p_observables.py \
 micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py \
   --work-dir output/dpol_p_observables
 ```
+
+若需要 `fm^2/sr` 输出，改为 `--dsigma-unit fm2/sr`。
 
 ## 3. 计算链路（纯 solver 驱动）
 1. 写入多能量输入并运行 `CPP/run`。

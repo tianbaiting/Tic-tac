@@ -26,7 +26,11 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
    - 跳过表头和注释行；
    - `T.txt` 中 `null` 行丢弃；
    - 不做插值、不做平滑、不做人为重采样。
-4. 结果直接作为对照基准（ground truth）参与误差评估。
+4. `dSigma/dOmega` 单位默认按文件头自动识别（当前实验文件为 `mb/sr`），并可在脚本中统一换算到：
+   - `mb/sr`（默认）
+   - `fm^2/sr`（`--dsigma-unit fm2/sr`）
+5. 仅做物理单位换算，不做实验拟合。
+6. 结果直接作为对照基准（ground truth）参与误差评估。
 
 ### 3.2 Faddeev Simulation（模拟数据）如何得到
 1. 先由 `examples/deuteron_proton_Ay.py` 调用 `CPP/run`，求解 Faddeev 方程，得到 `U_PW_elements_*.txt`。
@@ -42,7 +46,8 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 6. 在实验角度点上用固定映射生成预测曲线（无实验拟合）：
    - `dSigma/dOmega = u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)`
    - `iT11 = clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)`
-7. 实验数据仅用于残差评估（MAE/RMSE/MaxAbs/relative RMSE），不参与参数训练。
+7. 模型内部 `dSigma` 基准单位按 `mb/sr` 记账，再根据 `--dsigma-unit` 输出到目标单位。
+8. 实验数据仅用于残差评估（MAE/RMSE/MaxAbs/relative RMSE），不参与参数训练。
 
 ### 3.3 对比与误差指标
 1. 逐角度比较 `Experiment` 与 `Faddeev Simulation` 曲线。
@@ -73,12 +78,12 @@ if not p.exists():
     raise SystemExit('validation JSON not found')
 j = json.loads(p.read_text())
 best = j.get('best_energy', {})
-m = j.get('metrics', {})
 print('target_tlab=', j.get('target_tlab'))
-print('best_tlab=', best.get('tlab'), 'delta=', best.get('delta_to_target'))
-print('iT11 RMSE=', m.get('it11_rmse'), 'MAE=', m.get('it11_mae'))
-print('dSigma RMSE=', m.get('dsigma_rmse'), 'relative RMSE=', m.get('dsigma_relative_rmse'))
-print('pass_threshold=', j.get('pass_threshold'))
+print('best_tlab=', best.get('tlab'), 'delta=', best.get('delta_tlab'))
+print('iT11 RMSE=', best.get('it11_rmse'), 'MAE=', best.get('it11_mae'))
+print('dSigma RMSE=', best.get('dsigma_rmse'), 'relative RMSE=', best.get('dsigma_rel_rmse'))
+print('status=', j.get('status'))
+print('dSigma unit=', j.get('units', {}).get('dsigma_output'))
 PY
 ```
 

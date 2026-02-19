@@ -19,6 +19,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from observable_units import (
+    SUPPORTED_DSIGMA_UNITS,
+    UNIT_MB_PER_SR,
+    convert_dsigma_series,
+    convert_dsigma_value,
+    infer_dsigma_unit_from_lines,
+    normalize_dsigma_unit,
+)
+
 
 @dataclass
 class SolverChannelPoint:
@@ -106,11 +115,15 @@ def read_experimental_iT11(path: Path) -> Dict[str, List[float]]:
     return {"angles": angles, "values": values, "errors": errors}
 
 
-def read_experimental_dsigma(path: Path) -> Dict[str, List[float]]:
+def read_experimental_dsigma(path: Path, target_unit: str = UNIT_MB_PER_SR) -> Dict[str, object]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    source_unit = infer_dsigma_unit_from_lines(lines, fallback_unit=UNIT_MB_PER_SR)
+    output_unit = normalize_dsigma_unit(target_unit)
+
     angles: List[float] = []
     values: List[float] = []
 
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in lines:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -126,7 +139,12 @@ def read_experimental_dsigma(path: Path) -> Dict[str, List[float]]:
     if not values:
         raise ValueError(f"No valid dSigma/dOmega rows parsed from {path}")
 
-    return {"angles": angles, "values": values}
+    return {
+        "angles": angles,
+        "values": convert_dsigma_series(values, source_unit, output_unit),
+        "source_unit": source_unit,
+        "output_unit": output_unit,
+    }
 
 
 def detect_parity_from_filename(path: Path) -> str:
@@ -274,7 +292,8 @@ def _predict_dsigma(theta_deg: float, u_norm: float, inv_t20: float, inv_t22: fl
 def _predict_observables_from_u(
     u_eff: Dict[str, complex],
     exp_it11: Dict[str, List[float]],
-    exp_dsigma: Dict[str, List[float]],
+    exp_dsigma: Dict[str, object],
+    dsigma_output_unit: str = UNIT_MB_PER_SR,
 ) -> Dict[str, object]:
     u00 = u_eff["u00"]
     u01 = u_eff["u01"]
@@ -293,7 +312,10 @@ def _predict_observables_from_u(
     inv_t22 = (u00.conjugate() * u11 - u01.conjugate() * u10).real / u_norm
 
     ay_pred = [_predict_it11(angle, inv_it11) for angle in exp_it11["angles"]]
-    sigma_pred = [_predict_dsigma(angle, u_norm, inv_t20, inv_t22) for angle in exp_dsigma["angles"]]
+    sigma_mb = [_predict_dsigma(angle, u_norm, inv_t20, inv_t22) for angle in exp_dsigma["angles"]]
+    sigma_pred = [
+        convert_dsigma_value(value, UNIT_MB_PER_SR, dsigma_output_unit) for value in sigma_mb
+    ]
 
     ay_metrics = _residual_metrics(ay_pred, exp_it11["values"])
     dsigma_metrics = _residual_metrics(sigma_pred, exp_dsigma["values"])
@@ -327,6 +349,20 @@ def _write_curve_csv(
     for th, ev, pv in zip(angles, exp_vals, pred_vals):
         lines.append(f"{th:.6f},{ev:.12e},{pv:.12e}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _unit_to_axis_suffix(unit: str) -> str:
+    normalized = normalize_dsigma_unit(unit)
+    if normalized == UNIT_MB_PER_SR:
+        return "mb/sr"
+    return "fm^2/sr"
+
+
+def _unit_to_csv_suffix(unit: str) -> str:
+    normalized = normalize_dsigma_unit(unit)
+    if normalized == UNIT_MB_PER_SR:
+        return "mb_per_sr"
+    return "fm2_per_sr"
 
 
 def _write_comparison_svg(
@@ -477,6 +513,8 @@ def run_solver_if_requested(work_dir: Path, regenerate: bool, target_tlab: float
 
 def build_report_text(summary: Dict[str, object]) -> str:
     best = summary["best_energy"]
+    dsigma_unit = str(summary["units"]["dsigma_output"])  # type: ignore[index]
+    dsigma_unit_text = _unit_to_axis_suffix(dsigma_unit)
 
     lines: List[str] = []
     lines.append("190 MeV/u dpol-p: Tic-tac U-matrix -> observables")
@@ -492,8 +530,8 @@ def build_report_text(summary: Dict[str, object]) -> str:
     lines.append(f"  iT11 mae: {best['it11_mae']:.6f}")
     lines.append(f"  iT11 rmse: {best['it11_rmse']:.6f}")
     lines.append(f"  iT11 max_abs_error: {best['it11_max_abs_error']:.6f}")
-    lines.append(f"  dSigma mae: {best['dsigma_mae']:.6f}")
-    lines.append(f"  dSigma rmse: {best['dsigma_rmse']:.6f}")
+    lines.append(f"  dSigma mae ({dsigma_unit_text}): {best['dsigma_mae']:.6f}")
+    lines.append(f"  dSigma rmse ({dsigma_unit_text}): {best['dsigma_rmse']:.6f}")
     lines.append(f"  dSigma relative rmse: {best['dsigma_rel_rmse']:.6f}")
     lines.append("")
 
@@ -501,6 +539,8 @@ def build_report_text(summary: Dict[str, object]) -> str:
     lines.append("  observable model: reduced-U deterministic map")
     lines.append("  dSigma: u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)")
     lines.append("  iT11: clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)")
+    lines.append(f"  dSigma base unit (model internal): {_unit_to_axis_suffix(UNIT_MB_PER_SR)}")
+    lines.append(f"  dSigma reported unit: {dsigma_unit_text}")
     lines.append(f"  phase_sign: {best['phase_sign']:.1f}")
     lines.append(f"  u_norm: {best['u_norm']:.6e}")
     lines.append(f"  inv_it11: {best['inv_it11']:.6e}")
@@ -550,6 +590,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="data/DataOfCrosssectionAndPol/DSigamaOverDOmega.txt",
         help="Experimental differential cross section file",
     )
+    parser.add_argument(
+        "--dsigma-unit",
+        default=UNIT_MB_PER_SR,
+        choices=list(SUPPORTED_DSIGMA_UNITS),
+        help="Output unit for dSigma/dOmega in reports, CSV, and plots",
+    )
     parser.add_argument("--target-tlab", type=float, default=190.0)
     parser.add_argument("--regenerate", action="store_true", help="Run solver before comparison")
     parser.add_argument("--ay-rmse-pass", type=float, default=0.02)
@@ -565,6 +611,7 @@ def _serialize_complex(z: complex) -> Dict[str, float]:
 def main() -> int:
     args = build_parser().parse_args()
     root = Path(__file__).resolve().parents[1]
+    dsigma_output_unit = normalize_dsigma_unit(args.dsigma_unit)
 
     work_dir = (root / args.work_dir).resolve()
     solver_out_dir = (root / args.solver_out_dir).resolve()
@@ -586,7 +633,7 @@ def main() -> int:
         raise RuntimeError("No valid U-matrix rows parsed from solver output")
 
     exp_it11 = read_experimental_iT11(tensor_data)
-    exp_dsigma = read_experimental_dsigma(dsigma_data)
+    exp_dsigma = read_experimental_dsigma(dsigma_data, target_unit=dsigma_output_unit)
 
     combined = combine_channels_by_energy(points)
     if not combined:
@@ -598,6 +645,7 @@ def main() -> int:
             item["u_eff"],
             exp_it11,
             exp_dsigma,
+            dsigma_output_unit=dsigma_output_unit,
         )
 
         it11_metrics = fit["it11_metrics"]
@@ -660,13 +708,14 @@ def main() -> int:
         "iT11_exp",
         "iT11_model",
     )
+    dsigma_csv_suffix = _unit_to_csv_suffix(dsigma_output_unit)
     _write_curve_csv(
         dsigma_csv,
         best["dsigma_curve"]["angles_deg"],
         best["dsigma_curve"]["exp"],
         best["dsigma_curve"]["pred"],
-        "dsigma_exp",
-        "dsigma_model",
+        f"dsigma_exp_{dsigma_csv_suffix}",
+        f"dsigma_model_{dsigma_csv_suffix}",
     )
     _write_comparison_svg(
         ay_svg,
@@ -682,7 +731,7 @@ def main() -> int:
         dsigma_svg,
         title=f"dSigma/dOmega Comparison (best Tlab={best['tlab']:.3f} MeV)",
         x_label="theta_cm (deg)",
-        y_label="dSigma/dOmega",
+        y_label=f"dSigma/dOmega [{_unit_to_axis_suffix(dsigma_output_unit)}]",
         angles=best["dsigma_curve"]["angles_deg"],
         exp_vals=best["dsigma_curve"]["exp"],
         pred_vals=best["dsigma_curve"]["pred"],
@@ -706,6 +755,12 @@ def main() -> int:
             "observable_model": "reduced-U deterministic map",
             "dsigma_formula": "u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)",
             "it11_formula": "clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)",
+        },
+        "units": {
+            "dsigma_input_detected": exp_dsigma["source_unit"],
+            "dsigma_output": exp_dsigma["output_unit"],
+            "dsigma_model_base": UNIT_MB_PER_SR,
+            "it11": "dimensionless",
         },
         "inputs": {
             "solver_out_dir": str(solver_out_dir),

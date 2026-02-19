@@ -75,6 +75,10 @@ python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --ta
 python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190
 ```
 
+`dSigma/dOmega` output unit can be selected with `--dsigma-unit`:
+- `mb/sr` (default)
+- `fm2/sr`
+
 ### 3. Generate comparison figures (matplotlib)
 
 ```bash
@@ -95,6 +99,12 @@ Plot all observables (`dSigma/dOmega`, `iT11`, `T20`, `T21`, `T22`) with matplot
 micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py --work-dir output/dpol_p_observables
 ```
 
+To generate curves in `fm^2/sr` instead of `mb/sr`:
+
+```bash
+python3 examples/run_dpol_p_observables.py --work-dir output/dpol_p_observables --energies 70,135,190 --dsigma-unit fm2/sr
+```
+
 Detailed algorithm and output hierarchy:
 `docs/dpol_p_multi_energy_observables.md`
 
@@ -112,6 +122,19 @@ Generated under `output/deuteron_proton_Ay/`:
 - `best_energy_exp_vs_faddeev_annotated.png` (single annotated comparison figure)
 - `best_energy_iT11_comparison.png`
 - `best_energy_dsigma_comparison.png`
+
+## dSigma Unit Conversion
+
+Experimental `DSigamaOverDOmega.txt` is in `mb/sr`.
+
+- `1 mb/sr = 0.1 fm^2/sr`
+- `1 fm^2/sr = 10 mb/sr`
+
+Convert file units reproducibly:
+
+```bash
+python3 examples/convert_dsigma_units.py --to-unit fm2/sr
+```
 
 ## How Experiment vs Simulation Is Computed
 
