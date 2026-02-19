@@ -29,8 +29,25 @@ CPPFLAGS := -Wall -Wno-sign-compare -Wno-unused-variable -std=c++17 -O3 -ggdb -f
 FORTFLAGS_90 := -O3 -fdefault-real-8 -fdefault-double-8 -cpp -ffree-form -ffree-line-length-1000 -fPIC
 FORTFLAGS_77 := -O3
 
-#LDLIBS :=  -Wl,--no-as-needed -lgomp -lgsl -lgslcblas -lpthread -lm -ldl -lgfortran -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_serial_hl  -lhdf5_serial 
-LDLIBS :=  -Wl,--no-as-needed -lgomp -lgsl -lpthread -lm -ldl -lgfortran -lhdf5_hl_cpp -lhdf5_cpp  -lhdf5_serial_hl  -lhdf5_serial -lstdc++fs -llapacke -llapack -lblas
+# Optional conda toolchain integration:
+# If CONDA_PREFIX is set (for example via `micromamba run -n <env>` or `micromamba activate`),
+# prefer headers/libs from that environment.
+CONDA_INCLUDE :=
+CONDA_LDFLAGS :=
+HDF5_LIBS :=
+ifneq ($(strip $(CONDA_PREFIX)),)
+CONDA_INCLUDE := -I$(CONDA_PREFIX)/include
+CONDA_LDFLAGS := -L$(CONDA_PREFIX)/lib -Wl,-rpath,$(CONDA_PREFIX)/lib
+HDF5_LIBS := -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5
+else
+HDF5_LIBS := -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_serial_hl -lhdf5_serial
+endif
+
+CPPFLAGS += $(CONDA_INCLUDE)
+LDFLAGS += $(CONDA_LDFLAGS)
+
+# LDLIBS :=  -Wl,--no-as-needed -lgomp -lgsl -lgslcblas -lpthread -lm -ldl -lgfortran -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_serial_hl  -lhdf5_serial
+LDLIBS :=  -Wl,--no-as-needed -lgomp -lgsl -lpthread -lm -ldl -lgfortran $(HDF5_LIBS) -lstdc++fs -llapacke -llapack -lblas -lcurl
 # Use MKL-libraries
 #LDLIBS += -L$(MKLROOT)/lib/intel64 -lmkl_intel_ilp64 -lmkl_gnu_thread -lmkl_core
 
