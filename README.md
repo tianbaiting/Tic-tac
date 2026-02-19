@@ -83,6 +83,9 @@ micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py --work-
 Detailed algorithm and output hierarchy:
 `docs/dpol_p_multi_energy_observables.md`
 
+Tic-tac tunable parameters and practical tuning order:
+`docs/tictac_parameter_tuning.md`
+
 ## Key Outputs
 
 Generated under `output/deuteron_proton_Ay/`:

@@ -385,10 +385,11 @@ void show_usage(){
 			  << seperationLine
 			  << std::endl;
 	
-	std::cout << "p_grid_type:              Sets which type of distribution of p-momentum bins.\n"
-			  << "                          Currently only the Chebyshev distribution is implemented.\n"
-			  << "Example:                  p_grid_type=chebyshev -> WP-Boundaries are distributed in a\n"
-			  << "                                                   Chebyshev-distribution.\n"
+	std::cout << "p_grid_type:              Sets distribution type of p-momentum bins.\n"
+			  << "                          Possible options are (chebyshev, custom).\n"
+			  << "Example:                  p_grid_type=chebyshev -> Build boundaries from Chebyshev\n"
+			  << "                                                   parameters (chebyshev_s, chebyshev_t).\n"
+			  << "                          p_grid_type=custom -> Read boundaries from p_grid_filename.\n"
 			  << seperationLine
 			  << std::endl;
 	
@@ -400,6 +401,7 @@ void show_usage(){
 			  << std::endl;
 	
 	std::cout << "q_grid_type:              Same as p_grid_type but for q-momentum bins.\n"
+			  << "                          Possible options are (chebyshev, custom).\n"
 			  << seperationLine
 			  << std::endl;
 	
@@ -556,7 +558,7 @@ void use_input_list(run_params& run_parameters, std::string filename){
 	std::cout << "Using input file " <<  filename << " for run options." << std::endl;
 	std::cout << std::endl;
 	std::cout << "Any unset options will be filled with default parameters." << std::endl;
-	std::cout << "All other command line input will be ignored." << std::endl;
+	std::cout << "Command-line key=value options are parsed left-to-right and can override file values." << std::endl;
 	std::cout << std::endl;
 }
 

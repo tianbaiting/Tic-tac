@@ -6,6 +6,7 @@
 - 极化分析本领 `iT11(theta)`
 
 对应验证管线见：`docs/dpol_p_190MeV_validation.md`。
+参数调优与输入项说明见：`docs/tictac_parameter_tuning.md`。
 
 ## 2. ctags 入口约定（替代行号）
 为避免文档因代码增删而失效，本文统一使用“符号入口（tag）”而非固定行号。

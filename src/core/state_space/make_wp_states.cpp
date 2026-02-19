@@ -66,7 +66,7 @@ void make_q_bin_grid(fwp_statespace& fwp_states, run_params run_parameters){
 									scale,
 									sparseness_degree);
 	}
-	else if (run_parameters.p_grid_type=="custom"){
+	else if (run_parameters.q_grid_type=="custom"){
 		read_WP_boundaries_from_txt(fwp_states.q_WP_array, fwp_states.Nq_WP, run_parameters.q_grid_filename);
 	}
 	else{
