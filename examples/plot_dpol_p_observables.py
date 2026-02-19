@@ -62,6 +62,27 @@ def _valid_pairs(xs: List[float], ys: List[float]) -> Tuple[List[float], List[fl
     return px, py
 
 
+def _finite_values(values: List[float]) -> List[float]:
+    return [v for v in values if math.isfinite(v)]
+
+
+def _auto_linear_ylim(values: List[float]) -> Tuple[float, float]:
+    finite = _finite_values(values)
+    if not finite:
+        return (-1.0, 1.0)
+
+    y_min = min(finite)
+    y_max = max(finite)
+    if y_max <= y_min:
+        center = y_min
+        half_span = max(0.05, 0.1 * max(1.0, abs(center)))
+        return (center - half_span, center + half_span)
+
+    span = y_max - y_min
+    pad = 0.10 * span
+    return (y_min - pad, y_max + pad)
+
+
 def plot_single_energy(
     *,
     model: Dict[str, List[float]],
@@ -97,7 +118,10 @@ def plot_single_energy(
         if key == "dSigma_dOmega":
             ax.set_yscale("log")
         else:
-            ax.set_ylim(-1.05, 1.05)
+            y_for_limits = _finite_values(model[key])
+            if exp is not None:
+                y_for_limits.extend(_finite_values(exp[f"{key}_exp"]))
+            ax.set_ylim(*_auto_linear_ylim(y_for_limits))
         ax.legend(loc="best", fontsize=9)
 
     fig.tight_layout(rect=(0, 0, 1, 0.94))
@@ -126,6 +150,15 @@ def plot_overview(
         for ax, key in zip(ax_list, OBS_KEYS):
             ax.plot(theta, model[key], color=color, lw=1.8, label=label)
 
+    overview_limits: Dict[str, Tuple[float, float]] = {}
+    for key in OBS_KEYS:
+        if key == "dSigma_dOmega":
+            continue
+        y_values: List[float] = []
+        for _, _, model in all_model:
+            y_values.extend(_finite_values(model[key]))
+        overview_limits[key] = _auto_linear_ylim(y_values)
+
     for ax, key in zip(ax_list, OBS_KEYS):
         if key == "dSigma_dOmega":
             ax.set_title(f"{OBS_LABELS[key]} [{dsigma_unit_text}]")
@@ -136,7 +169,7 @@ def plot_overview(
         if key == "dSigma_dOmega":
             ax.set_yscale("log")
         else:
-            ax.set_ylim(-1.05, 1.05)
+            ax.set_ylim(*overview_limits[key])
         ax.legend(loc="best", fontsize=8)
 
     fig.tight_layout(rect=(0, 0, 1, 0.94))
