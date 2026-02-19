@@ -34,12 +34,15 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 3. 按每条通道的 `|U|^2` 权重合并，得到有效振幅 `u_eff=(u00,u01,u10,u11)`。
 4. 定义振幅尺度：
    - `u_norm = |u00|^2+|u01|^2+|u10|^2+|u11|^2`
-5. 用角分布基函数构造可拟合观测量：
-   - 截面：`log(dSigma/dOmega(theta)) = log(u_norm) + sum_{n=0..N} b_n P_n(cos(theta))`
-   - 极化：`z(theta) = sgn * sin(theta) * sum_{n=0..N} a_n P_n(cos(theta))`
-   - `iT11(theta) = tanh(z(theta))`
-   - `sgn = sign(Im((u00+u11)^* (u01-u10)))`
-6. 系数 `a_n,b_n` 由岭回归求得（纯 Python 法方程 + 高斯消元），然后得到模拟曲线。
+5. 由 `u_eff` 构造 reduced-U 不变量：
+   - `u_norm = |u00|^2+|u01|^2+|u10|^2+|u11|^2`
+   - `inv_it11 = Im((u00+u11)^*(u01-u10))/u_norm`
+   - `inv_t20  = (|u00|^2+|u11|^2-|u01|^2-|u10|^2)/u_norm`
+   - `inv_t22  = Re(u00^*u11-u01^*u10)/u_norm`
+6. 在实验角度点上用固定映射生成预测曲线（无实验拟合）：
+   - `dSigma/dOmega = u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)`
+   - `iT11 = clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)`
+7. 实验数据仅用于残差评估（MAE/RMSE/MaxAbs/relative RMSE），不参与参数训练。
 
 ### 3.3 对比与误差指标
 1. 逐角度比较 `Experiment` 与 `Faddeev Simulation` 曲线。
@@ -51,9 +54,8 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 
 ## 4. 关键参数
 - `target_tlab=190`（190 MeV/u 对应验证目标）
-- `poly_order=8`
-- `ridge=1e-8`
 - 求解器主参数：`two_J_3N_max=1, J_2N_max=2, Np_WP=20, Nq_WP=20, potential_model=LO_internal`
+- 评估阈值：`ay_rmse_pass=0.02`, `dsigma_rel_rmse_pass=0.05`, `energy_delta_pass=40`
 
 ## 5. 当前结果（以本地最新运行为准）
 不要在文档中手写固定数值，直接读取本次运行输出：

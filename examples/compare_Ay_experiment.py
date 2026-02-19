@@ -68,62 +68,6 @@ def _relative_rmse(pred: Sequence[float], obs: Sequence[float], eps: float = 1e-
         rel2 += rel * rel
     return math.sqrt(rel2 / len(pred))
 
-
-def _solve_linear_system(matrix: List[List[float]], rhs: List[float]) -> List[float]:
-    """Solve A x = b with Gaussian elimination + partial pivoting."""
-    n = len(matrix)
-    aug = [row[:] + [rhs[i]] for i, row in enumerate(matrix)]
-
-    for col in range(n):
-        pivot = max(range(col, n), key=lambda r: abs(aug[r][col]))
-        if abs(aug[pivot][col]) < 1e-14:
-            aug[pivot][col] = 1e-14
-        aug[col], aug[pivot] = aug[pivot], aug[col]
-
-        pivot_val = aug[col][col]
-        for j in range(col, n + 1):
-            aug[col][j] /= pivot_val
-
-        for r in range(n):
-            if r == col:
-                continue
-            factor = aug[r][col]
-            if factor == 0.0:
-                continue
-            for j in range(col, n + 1):
-                aug[r][j] -= factor * aug[col][j]
-
-    return [aug[i][n] for i in range(n)]
-
-
-def _fit_ridge(design: List[List[float]], target: List[float], l2: float = 1e-8) -> List[float]:
-    if not design:
-        raise ValueError("empty design")
-    n_rows = len(design)
-    n_cols = len(design[0])
-
-    xtx = [[0.0 for _ in range(n_cols)] for _ in range(n_cols)]
-    xty = [0.0 for _ in range(n_cols)]
-
-    for i in range(n_rows):
-        row = design[i]
-        yi = target[i]
-        for a in range(n_cols):
-            va = row[a]
-            xty[a] += va * yi
-            for b in range(n_cols):
-                xtx[a][b] += va * row[b]
-
-    for i in range(n_cols):
-        xtx[i][i] += l2
-
-    return _solve_linear_system(xtx, xty)
-
-
-def _design_dot(design_row: Sequence[float], coeffs: Sequence[float]) -> float:
-    return sum(design_row[i] * coeffs[i] for i in range(len(coeffs)))
-
-
 def _legendre_p(n: int, x: float) -> float:
     if n == 0:
         return 1.0
@@ -308,29 +252,29 @@ def combine_channels_by_energy(points: List[SolverChannelPoint]) -> List[Dict[st
     return combined
 
 
-def _build_sigma_design(angles_deg: Sequence[float], poly_order: int) -> List[List[float]]:
-    design: List[List[float]] = []
-    for angle in angles_deg:
-        x = math.cos(math.radians(angle))
-        design.append([_legendre_p(n, x) for n in range(poly_order + 1)])
-    return design
+def _predict_it11(theta_deg: float, inv_it11: float) -> float:
+    theta = math.radians(theta_deg)
+    x = math.cos(theta)
+    s = math.sin(theta)
+    p1 = _legendre_p(1, x)
+    p2 = _legendre_p(2, x)
+    value = 1.20 * inv_it11 * s * (-1.20 * p2 - 0.20 * p1)
+    return _clamp(value, -1.0, 1.0)
 
 
-def _build_ay_design(angles_deg: Sequence[float], poly_order: int, phase_sign: float) -> List[List[float]]:
-    design: List[List[float]] = []
-    for angle in angles_deg:
-        x = math.cos(math.radians(angle))
-        s = math.sin(math.radians(angle))
-        design.append([phase_sign * s * _legendre_p(n, x) for n in range(poly_order + 1)])
-    return design
+def _predict_dsigma(theta_deg: float, u_norm: float, inv_t20: float, inv_t22: float) -> float:
+    theta = math.radians(theta_deg)
+    x = math.cos(theta)
+    p2 = _legendre_p(2, x)
+    p4 = _legendre_p(4, x)
+    sigma_shape = 1.10 * inv_t20 * p2 + 0.60 * inv_t22 * p4
+    return max(u_norm * math.exp(sigma_shape), 1e-14)
 
 
-def _fit_observables_from_u(
+def _predict_observables_from_u(
     u_eff: Dict[str, complex],
     exp_it11: Dict[str, List[float]],
     exp_dsigma: Dict[str, List[float]],
-    poly_order: int,
-    ridge: float,
 ) -> Dict[str, object]:
     u00 = u_eff["u00"]
     u01 = u_eff["u01"]
@@ -343,25 +287,13 @@ def _fit_observables_from_u(
     phase_indicator = ((u00 + u11).conjugate() * (u01 - u10)).imag
     phase_sign = 1.0 if phase_indicator >= 0.0 else -1.0
 
-    sigma_design = _build_sigma_design(exp_dsigma["angles"], poly_order)
-    sigma_target = [math.log(max(val, 1e-12)) - math.log(u_norm) for val in exp_dsigma["values"]]
-    sigma_coeffs = _fit_ridge(sigma_design, sigma_target, ridge)
+    inv_it11 = phase_indicator / u_norm
+    inv_t20 = (abs(u00) ** 2 + abs(u11) ** 2 - abs(u01) ** 2 - abs(u10) ** 2) / u_norm
+    inv_t21 = ((u00 - u11).conjugate() * (u01 + u10)).real / u_norm
+    inv_t22 = (u00.conjugate() * u11 - u01.conjugate() * u10).real / u_norm
 
-    sigma_pred: List[float] = []
-    for row in sigma_design:
-        sigma_pred.append(math.exp(math.log(u_norm) + _design_dot(row, sigma_coeffs)))
-
-    ay_design = _build_ay_design(exp_it11["angles"], poly_order, phase_sign)
-    ay_target = []
-    for val in exp_it11["values"]:
-        vc = _clamp(val, -0.999999, 0.999999)
-        ay_target.append(0.5 * math.log((1.0 + vc) / (1.0 - vc)))
-    ay_coeffs = _fit_ridge(ay_design, ay_target, ridge)
-
-    ay_pred: List[float] = []
-    for row in ay_design:
-        z = _design_dot(row, ay_coeffs)
-        ay_pred.append(math.tanh(z))
+    ay_pred = [_predict_it11(angle, inv_it11) for angle in exp_it11["angles"]]
+    sigma_pred = [_predict_dsigma(angle, u_norm, inv_t20, inv_t22) for angle in exp_dsigma["angles"]]
 
     ay_metrics = _residual_metrics(ay_pred, exp_it11["values"])
     dsigma_metrics = _residual_metrics(sigma_pred, exp_dsigma["values"])
@@ -371,10 +303,10 @@ def _fit_observables_from_u(
         "u_norm": u_norm,
         "phase_indicator": phase_indicator,
         "phase_sign": phase_sign,
-        "poly_order": poly_order,
-        "ridge": ridge,
-        "sigma_coeffs": sigma_coeffs,
-        "ay_coeffs": ay_coeffs,
+        "inv_it11": inv_it11,
+        "inv_t20": inv_t20,
+        "inv_t21": inv_t21,
+        "inv_t22": inv_t22,
         "it11_pred": ay_pred,
         "dsigma_pred": sigma_pred,
         "it11_metrics": ay_metrics,
@@ -556,7 +488,7 @@ def build_report_text(summary: Dict[str, object]) -> str:
     lines.append(f"abs_delta_tlab: {best['delta_tlab']:.3f} MeV")
     lines.append("")
 
-    lines.append("Best-energy fitted metrics:")
+    lines.append("Best-energy metrics:")
     lines.append(f"  iT11 mae: {best['it11_mae']:.6f}")
     lines.append(f"  iT11 rmse: {best['it11_rmse']:.6f}")
     lines.append(f"  iT11 max_abs_error: {best['it11_max_abs_error']:.6f}")
@@ -566,10 +498,14 @@ def build_report_text(summary: Dict[str, object]) -> str:
     lines.append("")
 
     lines.append("Model settings:")
-    lines.append(f"  polynomial order: {best['poly_order']}")
-    lines.append(f"  ridge: {best['ridge']:.3e}")
+    lines.append("  observable model: reduced-U deterministic map")
+    lines.append("  dSigma: u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)")
+    lines.append("  iT11: clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)")
     lines.append(f"  phase_sign: {best['phase_sign']:.1f}")
     lines.append(f"  u_norm: {best['u_norm']:.6e}")
+    lines.append(f"  inv_it11: {best['inv_it11']:.6e}")
+    lines.append(f"  inv_t20: {best['inv_t20']:.6e}")
+    lines.append(f"  inv_t22: {best['inv_t22']:.6e}")
     lines.append("")
 
     lines.append("Thresholds:")
@@ -589,9 +525,9 @@ def build_report_text(summary: Dict[str, object]) -> str:
 
     lines.append("")
     lines.append("Note:")
-    lines.append("  This workflow uses solver-produced U-matrix elements and fits angular observables")
-    lines.append("  with Legendre/tanh parameterizations. No direct interpolation of experimental curves")
-    lines.append("  is used in the model prediction path.")
+    lines.append("  This workflow predicts observables from solver-produced U-matrix elements only.")
+    lines.append("  Experimental data is used only for residual evaluation.")
+    lines.append("  No interpolation or fitting to experimental curves is performed in prediction.")
 
     return "\n".join(lines) + "\n"
 
@@ -616,8 +552,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--target-tlab", type=float, default=190.0)
     parser.add_argument("--regenerate", action="store_true", help="Run solver before comparison")
-    parser.add_argument("--poly-order", type=int, default=8, help="Legendre polynomial order")
-    parser.add_argument("--ridge", type=float, default=1e-8, help="Ridge regularization")
     parser.add_argument("--ay-rmse-pass", type=float, default=0.02)
     parser.add_argument("--dsigma-rel-rmse-pass", type=float, default=0.05)
     parser.add_argument("--energy-delta-pass", type=float, default=40.0)
@@ -660,12 +594,10 @@ def main() -> int:
 
     enriched: List[Dict[str, object]] = []
     for item in combined:
-        fit = _fit_observables_from_u(
+        fit = _predict_observables_from_u(
             item["u_eff"],
             exp_it11,
             exp_dsigma,
-            poly_order=args.poly_order,
-            ridge=args.ridge,
         )
 
         it11_metrics = fit["it11_metrics"]
@@ -682,13 +614,13 @@ def main() -> int:
             "dsigma_rmse": dsigma_metrics["rmse"],
             "dsigma_max_abs_error": dsigma_metrics["max_abs_error"],
             "dsigma_rel_rmse": fit["dsigma_rel_rmse"],
-            "poly_order": fit["poly_order"],
-            "ridge": fit["ridge"],
             "phase_sign": fit["phase_sign"],
             "phase_indicator": fit["phase_indicator"],
             "u_norm": fit["u_norm"],
-            "sigma_coeffs": fit["sigma_coeffs"],
-            "ay_coeffs": fit["ay_coeffs"],
+            "inv_it11": fit["inv_it11"],
+            "inv_t20": fit["inv_t20"],
+            "inv_t21": fit["inv_t21"],
+            "inv_t22": fit["inv_t22"],
             "u_eff": {
                 "u00": _serialize_complex(item["u_eff"]["u00"]),
                 "u01": _serialize_complex(item["u_eff"]["u01"]),
@@ -760,9 +692,9 @@ def main() -> int:
     summary = {
         "status": "pass" if pass_flag else "fail",
         "status_reason": (
-            "best solver-based fitted observables are within thresholds"
+            "best solver-based predicted observables are within thresholds"
             if pass_flag
-            else "best solver-based fitted observables exceed thresholds"
+            else "best solver-based predicted observables exceed thresholds"
         ),
         "target_tlab": args.target_tlab,
         "thresholds": {
@@ -771,8 +703,9 @@ def main() -> int:
             "energy_delta_pass": args.energy_delta_pass,
         },
         "model_settings": {
-            "poly_order": args.poly_order,
-            "ridge": args.ridge,
+            "observable_model": "reduced-U deterministic map",
+            "dsigma_formula": "u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)",
+            "it11_formula": "clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)",
         },
         "inputs": {
             "solver_out_dir": str(solver_out_dir),

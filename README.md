@@ -121,8 +121,8 @@ Generated under `output/deuteron_proton_Ay/`:
 - Simulation data:
   - Parse `U00,U01,U10,U11` from solver `U_PW_elements_*.txt`
   - Combine parity channels at the same energy with `|U|^2` weights
-  - Build angle-dependent observables with Legendre/tanh parameterization
-  - Fit coefficients by ridge regression (pure Python normal equations + Gaussian elimination)
+  - Build angle-dependent observables from reduced-U invariants with fixed formulas
+  - Do not fit model coefficients to experimental curves
   - Report MAE/RMSE/max error and relative RMSE
 
 Details and formulas: `docs/dpol_p_190MeV_validation.md`

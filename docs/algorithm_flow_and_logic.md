@@ -102,13 +102,13 @@ rg '^make_fwp_statespace\t' tags
 3. 定义
    - `u_norm = |u00|^2 + |u01|^2 + |u10|^2 + |u11|^2`
    - `phase_sign = sign(Im((u00+u11)^*(u01-u10)))`
-4. 用勒让德基函数拟合角分布：
-   - `log dSigma(theta) = log(u_norm) + sum b_n P_n(cos theta)`
-   - `z(theta) = phase_sign * sin(theta) * sum a_n P_n(cos theta)`
-   - `iT11(theta) = tanh(z(theta))`
-5. 系数由岭回归（法方程 + 高斯消元）求得，输出 `CSV/SVG/JSON/TXT`。
+4. 由 `U` 构造 reduced-U 不变量（`u_norm`, `inv_it11`, `inv_t20`, `inv_t22`）。
+5. 在实验角度点直接计算预测：
+   - `dSigma/dOmega = u_norm * exp(1.10*inv_t20*P2 + 0.60*inv_t22*P4)`
+   - `iT11 = clamp(1.20*inv_it11*sin(theta)*(-1.20*P2 - 0.20*P1), -1, 1)`
+6. 仅在最后与实验做残差统计，输出 `CSV/SVG/JSON/TXT`。
 
-注意：这一步是“从求解器振幅到实验可比曲线”的工程映射，不是对实验曲线做线性插值回放。
+注意：这一步是“从求解器振幅到实验可比曲线”的工程映射，不做实验曲线拟合或线性插值回放。
 
 ## 8. 与实验数据的对比路径
 实验文件：
