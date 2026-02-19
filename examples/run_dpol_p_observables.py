@@ -27,6 +27,12 @@ from observable_units import (
     infer_dsigma_unit_from_lines,
     normalize_dsigma_unit,
 )
+from solver_u_file_utils import (
+    detect_parity_symbol,
+    detect_two_j,
+    required_p123_sparse_names,
+    select_latest_u_file_family,
+)
 
 
 @dataclass
@@ -34,6 +40,7 @@ class SolverChannelPoint:
     tlab: float
     ecm: float
     q_idx: int
+    two_j: int
     parity: str
     u00: complex
     u01: complex
@@ -100,26 +107,7 @@ def ensure_cpp_solver_binary(root: Path, solver_path: Path) -> None:
 
 
 def _find_latest_existing_u_files(solver_out_dir: Path) -> List[Path]:
-    candidates = sorted(
-        solver_out_dir.glob("U_PW_elements_*.txt"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    plus: Optional[Path] = None
-    minus: Optional[Path] = None
-    for path in candidates:
-        if plus is None and "_JP_1_1_" in path.name:
-            plus = path
-        if minus is None and "_JP_1_-1_" in path.name:
-            minus = path
-        if plus is not None and minus is not None:
-            break
-    out: List[Path] = []
-    if plus is not None:
-        out.append(plus)
-    if minus is not None:
-        out.append(minus)
-    return out
+    return select_latest_u_file_family(solver_out_dir)
 
 
 def _link_or_copy_p123_if_requested(dst_p123_dir: Path, src_p123_dir: Optional[Path]) -> None:
@@ -148,12 +136,21 @@ def _assert_reusable_p123_matches_grid(p123_dir: Path, cfg: SolverRunConfig) -> 
         raise FileNotFoundError(
             f"--reuse-p123 enabled, but P123 directory does not exist: {p123_dir}"
         )
-    name_plus = f"P123_sparse_JP_1_1_Np_{cfg.np_wp}_Nq_{cfg.nq_wp}_J2max_{cfg.j_2n_max}.h5"
-    name_minus = f"P123_sparse_JP_1_-1_Np_{cfg.np_wp}_Nq_{cfg.nq_wp}_J2max_{cfg.j_2n_max}.h5"
-    if not (p123_dir / name_plus).exists() or not (p123_dir / name_minus).exists():
+    required = required_p123_sparse_names(
+        np_wp=cfg.np_wp,
+        nq_wp=cfg.nq_wp,
+        j2max=cfg.j_2n_max,
+        two_j_3n_max=cfg.two_j_3n_max,
+    )
+    missing = [name for name in required if not (p123_dir / name).exists()]
+    if missing:
+        missing_preview = ", ".join(missing[:6])
+        if len(missing) > 6:
+            missing_preview += f", ... ({len(missing)} missing)"
         raise FileNotFoundError(
             "--reuse-p123 was requested but matching P123 files were not found for "
-            f"Np={cfg.np_wp}, Nq={cfg.nq_wp}, J_2N_max={cfg.j_2n_max} in {p123_dir}.\n"
+            f"Np={cfg.np_wp}, Nq={cfg.nq_wp}, J_2N_max={cfg.j_2n_max}, two_J_3N_max={cfg.two_j_3n_max} in {p123_dir}.\n"
+            f"Missing examples: {missing_preview}\n"
             "Disable --reuse-p123 for fresh generation, or provide a compatible --reuse-p123-from folder."
         )
 
@@ -294,16 +291,17 @@ def run_cpp_solver(cfg: SolverRunConfig) -> Dict[str, object]:
 
 
 def detect_parity_from_filename(path: Path) -> str:
-    name = path.name
-    if "_JP_1_1_" in name:
-        return "+"
-    if "_JP_1_-1_" in name:
-        return "-"
-    return "?"
+    return detect_parity_symbol(path)
+
+
+def detect_two_j_from_filename(path: Path) -> int:
+    two_j = detect_two_j(path)
+    return 1 if two_j is None else two_j
 
 
 def parse_u_file(path: Path) -> List[SolverChannelPoint]:
     parity = detect_parity_from_filename(path)
+    two_j = detect_two_j_from_filename(path)
     points: List[SolverChannelPoint] = []
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -330,6 +328,7 @@ def parse_u_file(path: Path) -> List[SolverChannelPoint]:
                 tlab=tlab,
                 ecm=ecm,
                 q_idx=q_idx,
+                two_j=two_j,
                 parity=parity,
                 u00=u00,
                 u01=u01,

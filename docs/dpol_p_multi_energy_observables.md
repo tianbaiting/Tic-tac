@@ -38,8 +38,8 @@ micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py \
 
 ## 3. 计算链路（纯 solver 驱动）
 1. 写入多能量输入并运行 `CPP/run`。
-2. 读取 `solver_out/U_PW_elements_*.txt`（`JP=+/-`）。
-3. 对同一离散能量点按 `|U|^2` 做宇称通道加权，得到 `u_eff=(u00,u01,u10,u11)`。
+2. 读取 `solver_out/U_PW_elements_*.txt` 中“同一网格/同一 PSI”的**全部 `JP` 文件**（例如 `JP=1,3,5,7`，含 `+/-`）。
+3. 对同一离散能量点按 `|U|^2` 做跨 `JP` 与宇称通道加权，得到 `u_eff=(u00,u01,u10,u11)`。
 4. 由 `u_eff` 构建不变量：
    - `u_norm = |u00|^2+|u01|^2+|u10|^2+|u11|^2`
    - `inv_it11 = Im((u00+u11)^*(u01-u10))/u_norm`

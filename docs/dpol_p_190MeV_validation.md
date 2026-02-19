@@ -34,7 +34,7 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 
 ### 3.2 Faddeev Simulation（模拟数据）如何得到
 1. 先由 `examples/deuteron_proton_Ay.py` 调用 `CPP/run`，求解 Faddeev 方程，得到 `U_PW_elements_*.txt`。
-2. 在同一 `Tlab` 点读取 `JP=+/-` 两个宇称通道的 `U00,U01,U10,U11`。
+2. 在同一 `Tlab` 点读取最新一组参数下全部 `U_PW_elements`（覆盖 `JP=1,3,5,...` 与 `+/-` 宇称）。
 3. 按每条通道的 `|U|^2` 权重合并，得到有效振幅 `u_eff=(u00,u01,u10,u11)`。
 4. 定义振幅尺度：
    - `u_norm = |u00|^2+|u01|^2+|u10|^2+|u11|^2`

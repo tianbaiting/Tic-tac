@@ -27,6 +27,7 @@ from observable_units import (
     infer_dsigma_unit_from_lines,
     normalize_dsigma_unit,
 )
+from solver_u_file_utils import detect_parity_symbol, select_latest_u_file_family
 
 
 @dataclass
@@ -34,6 +35,7 @@ class SolverChannelPoint:
     tlab: float
     ecm: float
     q_idx: int
+    two_j: int
     parity: str
     u00: complex
     u01: complex
@@ -148,16 +150,28 @@ def read_experimental_dsigma(path: Path, target_unit: str = UNIT_MB_PER_SR) -> D
 
 
 def detect_parity_from_filename(path: Path) -> str:
+    return detect_parity_symbol(path)
+
+
+def detect_two_j_from_filename(path: Path) -> int:
     name = path.name
-    if "_JP_1_1_" in name:
-        return "+"
-    if "_JP_1_-1_" in name:
-        return "-"
-    return "?"
+    marker = "_JP_"
+    idx = name.find(marker)
+    if idx < 0:
+        return 1
+    payload = name[idx + len(marker) :]
+    fields = payload.split("_")
+    if not fields:
+        return 1
+    try:
+        return int(fields[0])
+    except ValueError:
+        return 1
 
 
 def parse_u_file(path: Path) -> List[SolverChannelPoint]:
     parity = detect_parity_from_filename(path)
+    two_j = detect_two_j_from_filename(path)
     points: List[SolverChannelPoint] = []
 
     for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -192,6 +206,7 @@ def parse_u_file(path: Path) -> List[SolverChannelPoint]:
                 tlab=tlab,
                 ecm=ecm,
                 q_idx=q_idx,
+                two_j=two_j,
                 parity=parity,
                 u00=u00,
                 u01=u01,
@@ -206,27 +221,7 @@ def parse_u_file(path: Path) -> List[SolverChannelPoint]:
 
 
 def find_latest_solver_u_files(solver_out_dir: Path) -> List[Path]:
-    candidates = sorted(solver_out_dir.glob("U_PW_elements_*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not candidates:
-        return []
-
-    latest_plus: Optional[Path] = None
-    latest_minus: Optional[Path] = None
-
-    for path in candidates:
-        if latest_plus is None and "_JP_1_1_" in path.name:
-            latest_plus = path
-        if latest_minus is None and "_JP_1_-1_" in path.name:
-            latest_minus = path
-        if latest_plus is not None and latest_minus is not None:
-            break
-
-    selected: List[Path] = []
-    if latest_plus is not None:
-        selected.append(latest_plus)
-    if latest_minus is not None:
-        selected.append(latest_minus)
-    return selected
+    return select_latest_u_file_family(solver_out_dir)
 
 
 def combine_channels_by_energy(points: List[SolverChannelPoint]) -> List[Dict[str, object]]:

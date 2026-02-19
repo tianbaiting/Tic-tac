@@ -97,8 +97,8 @@ rg '^make_fwp_statespace\t' tags
 
 命名提醒：脚本名历史上用 `Ay`，但这里实际输出并对比的是实验文件中的 `iT11`。
 
-1. 从 `U_PW_elements_*.txt` 读取 `u00,u01,u10,u11`（`parse_u_file`）。
-2. 同能量不同宇称通道按 `|U|^2` 加权合并（`combine_channels_by_energy`）。
+1. 从 `U_PW_elements_*.txt` 读取 `u00,u01,u10,u11`（`parse_u_file`），并自动选取同一参数族下全部 `JP` 文件。
+2. 同能量下跨 `JP` 与不同宇称通道按 `|U|^2` 加权合并（`combine_channels_by_energy`）。
 3. 定义
    - `u_norm = |u00|^2 + |u01|^2 + |u10|^2 + |u11|^2`
    - `phase_sign = sign(Im((u00+u11)^*(u01-u10)))`

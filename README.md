@@ -142,8 +142,8 @@ python3 examples/convert_dsigma_units.py --to-unit fm2/sr
   - `data/DataOfCrosssectionAndPol/CompletSetOFT/T.txt` for `iT11(theta)`
   - `data/DataOfCrosssectionAndPol/DSigamaOverDOmega.txt` for `dSigma/dOmega(theta)`
 - Simulation data:
-  - Parse `U00,U01,U10,U11` from solver `U_PW_elements_*.txt`
-  - Combine parity channels at the same energy with `|U|^2` weights
+  - Parse `U00,U01,U10,U11` from solver `U_PW_elements_*.txt` (all available `JP` channels from the latest run family)
+  - Combine channels at the same energy with `|U|^2` weights (across `JP` and parity)
   - Build angle-dependent observables from reduced-U invariants with fixed formulas
   - Do not fit model coefficients to experimental curves
   - Report MAE/RMSE/max error and relative RMSE
