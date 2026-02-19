@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ctags:build",
+      "type": "shell",
+      "command": "ctags -R --languages=C,C++ --kinds-C++=+p --fields=+n -f tags src include",
+      "problemMatcher": []
+    }
+  ]
+}
