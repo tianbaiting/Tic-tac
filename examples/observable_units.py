@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-"""Cross-section unit parsing and conversion helpers."""
+"""
+Purpose:
+  Shared unit helpers for dSigma/dOmega tables used by example workflows.
+
+Data flow (left -> right):
+  raw unit token or file header lines
+    -> normalized canonical unit (`mb/sr` or `fm2/sr`)
+    -> scale factor
+    -> converted scalar or converted sequence
+
+Called by:
+  - `convert_dsigma_units.py`
+  - `compare_Ay_experiment.py`
+  - `run_dpol_p_observables.py`
+
+Usage:
+  Import as a utility module:
+    from observable_units import convert_dsigma_value, normalize_dsigma_unit
+"""
 
 from __future__ import annotations
 

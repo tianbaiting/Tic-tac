@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Quick 190 MeV/u dpol-p smoke test using maintained pipeline scripts."""
+"""
+Purpose:
+  Fast smoke test for the maintained 190 MeV/u pipeline.
+
+Data flow (left -> right):
+  CLI args
+    -> run `deuteron_proton_Ay.py`
+    -> run `compare_Ay_experiment.py`
+    -> optionally run `plot_validation_curves.py`
+    -> print return codes and summary JSON fields
+
+Calls / dependencies:
+  - External process wrapper around scripts in `examples/`.
+  - Reads `solver_validation_190MeV.json` when present.
+
+Usage:
+  python3 examples/quick_Ay_test.py --work-dir output/quick_Ay_test --plot
+"""
 
 from __future__ import annotations
 
@@ -64,6 +81,7 @@ def main() -> int:
     work_dir = (root / args.work_dir).resolve()
     python = sys.executable
 
+    # Step 1: produce solver outputs for the requested settings.
     run_solver_cmd = [
         python,
         str(root / "examples" / "deuteron_proton_Ay.py"),
@@ -105,6 +123,7 @@ def main() -> int:
     if rc != 0:
         return rc
 
+    # Step 2: compare model outputs against experiment and write validation artifacts.
     compare_cmd = [
         python,
         str(root / "examples" / "compare_Ay_experiment.py"),
@@ -117,6 +136,7 @@ def main() -> int:
     ]
     rc = run_command(compare_cmd, root, timeout_s=180)
 
+    # Step 3: optional lightweight summary extraction for CI/smoke visibility.
     summary_path = work_dir / "solver_validation_190MeV.json"
     if summary_path.exists():
         try:

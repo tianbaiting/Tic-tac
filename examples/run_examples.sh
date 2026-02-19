@@ -1,5 +1,27 @@
 #!/usr/bin/env bash
 
+# Purpose:
+#   Convenience entrypoint for common example workflows.
+#
+# Data flow (high level):
+#   command token
+#     -> call one or more python scripts under examples/
+#     -> produce outputs under output/*
+#     -> optional plotting through micromamba env
+#
+# Calls:
+#   - quick_Ay_test.py
+#   - deuteron_proton_Ay.py
+#   - compare_Ay_experiment.py
+#   - run_dpol_p_observables.py
+#   - plot_validation_curves.py / plot_dpol_p_observables.py
+#
+# Usage:
+#   ./examples/run_examples.sh smoke
+#   ./examples/run_examples.sh validate190
+#   ./examples/run_examples.sh multi
+#   ./examples/run_examples.sh clean
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,11 +36,13 @@ print_warn() {
 }
 
 run_smoke() {
+    # Fast pipeline health check: solver + comparison (and optional summary parsing).
     print_info "Run quick 190 MeV/u smoke validation"
     "$PYTHON_BIN" "$ROOT_DIR/examples/quick_Ay_test.py" --work-dir output/quick_Ay_test
 }
 
 run_validate_190() {
+    # Single-energy 190 MeV/u run and validation artifact generation.
     print_info "Run 190 MeV/u solver and experiment comparison"
     "$PYTHON_BIN" "$ROOT_DIR/examples/deuteron_proton_Ay.py" \
         --work-dir output/deuteron_proton_Ay \
@@ -39,6 +63,7 @@ run_validate_190() {
 }
 
 run_multi_energy() {
+    # Multi-energy production path for 70/135/190 MeV/u model observables.
     print_info "Run multi-energy observables (70/135/190 MeV/u)"
     "$PYTHON_BIN" "$ROOT_DIR/examples/run_dpol_p_observables.py" \
         --work-dir output/dpol_p_observables \
@@ -54,6 +79,7 @@ run_multi_energy() {
 }
 
 clean_outputs() {
+    # Remove generated outputs only; source code remains untouched.
     print_info "Clean output folder"
     rm -rf "$ROOT_DIR/output"/*
 }

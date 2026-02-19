@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Plot experiment vs model validation curves using matplotlib."""
+"""
+Purpose:
+  Plot validation curves for the 190 MeV/u workflow in `output/deuteron_proton_Ay`.
+
+Data flow (left -> right):
+  best_energy_iT11_curve.csv + best_energy_dsigma_curve.csv + solver_validation_190MeV.json
+    -> parse curve values and summary metrics
+    -> single-panel + combined-panel matplotlib plots
+    -> PNG files in work directory
+
+Calls / dependencies:
+  - Consumes artifacts produced by `compare_Ay_experiment.py`.
+  - Uses matplotlib `Agg` backend for non-interactive rendering.
+
+Usage:
+  python3 examples/plot_validation_curves.py \
+    --work-dir output/deuteron_proton_Ay
+"""
 
 from __future__ import annotations
 
@@ -191,6 +208,7 @@ def main() -> int:
     combined_png = work_dir / "best_energy_comparison.png"
     annotated_png = work_dir / "best_energy_exp_vs_faddeev_annotated.png"
 
+    # Emit per-observable and combined figures from the same parsed curve payload.
     make_plot(
         theta=it11_theta,
         exp_vals=it11_exp,

@@ -1,11 +1,35 @@
 #!/usr/bin/env python3
 """
-Run Tic-tac for multiple deuteron lab energies and compute solver-driven observables.
+Purpose:
+  Run Tic-tac at multiple target energies and emit solver-driven observable curves.
 
-This workflow is intentionally solver-first:
-- U-matrix comes from Tic-tac (Faddeev/WPCD).
-- dSigma/dOmega, iT11, T20, T21, T22 are computed from reduced U invariants.
-- No experimental data is used to fit model parameters.
+What this script does:
+  1) Create multi-energy solver input/config files.
+  2) Run solver once for all requested energies.
+  3) Parse/merge U-matrix channels.
+  4) Compute dSigma/dOmega, iT11, T20, T21, T22 from reduced-U invariants.
+  5) Write per-energy model CSV + metadata + run summary.
+  6) Optionally generate post-hoc 190 MeV residual metrics against experiment.
+
+Data flow (left -> right):
+  CLI args + solver outputs + (optional experiment files)
+    -> combined U-channel points by energy
+    -> reduced-U invariants
+    -> observable curves on theta grid
+    -> analysis/{energy_*}/observables_model.csv + metadata.json
+    -> analysis/summary.json
+
+Calls / dependencies:
+  - Uses `solver_u_file_utils.py` for U-file family selection and P123 checks.
+  - Uses `observable_units.py` for dSigma unit handling.
+  - Calls external solver binary `CPP/run`.
+
+Usage:
+  python3 examples/run_dpol_p_observables.py \
+    --work-dir output/dpol_p_observables \
+    --energies 70,135,190 \
+    --two-j-3n-max 7 \
+    --dsigma-unit fm2/sr
 """
 
 from __future__ import annotations
@@ -641,6 +665,7 @@ def main() -> int:
     analysis_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
+    # Solver stage: generate U-matrix files for the requested energy list.
     run_result = run_cpp_solver(cfg)
     if run_result["returncode"] != 0:
         print(f"solver_returncode: {run_result['returncode']}")
@@ -657,6 +682,7 @@ def main() -> int:
         print("Failed to parse any U-matrix rows.")
         return 4
 
+    # Physics mapping stage: merge channels and evaluate observable model on angle grid.
     combined = combine_channels_by_energy(points)
     if not combined:
         print("Failed to combine parity channels by energy.")
@@ -713,7 +739,7 @@ def main() -> int:
             }
         )
 
-    # Optional post-hoc comparison at 190 MeV/u (not used for model calculation).
+    # Optional validation stage: compare 190 MeV model against experiment (no fitting).
     tensor_data = root / "data" / "DataOfCrosssectionAndPol" / "CompletSetOFT" / "T.txt"
     dsigma_data = root / "data" / "DataOfCrosssectionAndPol" / "DSigamaOverDOmega.txt"
     comparison_190: Dict[str, object] = {"available": False}

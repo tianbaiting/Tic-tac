@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-"""Convert differential cross section table units between mb/sr and fm^2/sr."""
+"""
+Purpose:
+  Convert dSigma/dOmega tables between `mb/sr` and `fm2/sr`.
+
+Data flow (left -> right):
+  input txt (angle, value)
+    -> detect/override source unit
+    -> value-wise conversion
+    -> output txt with updated unit marker and converted numeric rows
+
+Calls / dependencies:
+  - Uses `observable_units.py` for normalization, detection, and conversion factors.
+
+Usage:
+  python3 examples/convert_dsigma_units.py \
+    --input data/DataOfCrosssectionAndPol/DSigamaOverDOmega.txt \
+    --output data/DataOfCrosssectionAndPol/DSigamaOverDOmega_fm2_per_sr.txt \
+    --to-unit fm2/sr
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Helpers for selecting and parsing Tic-tac U-matrix output filenames."""
+"""
+Purpose:
+  Utility helpers for parsing/choosing Tic-tac `U_PW_elements_*.txt` files.
+
+Data flow (left -> right):
+  filename string
+    -> parsed metadata (Np, Nq, JP, Jmax, PSI)
+    -> filtering/grouping logic
+    -> selected file family for downstream physics scripts
+
+Called by:
+  - `compare_Ay_experiment.py`
+  - `run_dpol_p_observables.py`
+
+Usage:
+  Import as a helper module:
+    from solver_u_file_utils import select_latest_u_file_family, detect_parity_symbol
+"""
 
 from __future__ import annotations
 
@@ -57,6 +74,7 @@ def detect_two_j(path: Path) -> Optional[int]:
 
 
 def select_latest_u_file_family(solver_out_dir: Path) -> List[Path]:
+    # "Family" means same (Np, Nq, Jmax/J2max tag, PSI), differing only in JP/parity.
     candidates = list(solver_out_dir.glob("U_PW_elements_*.txt"))
     parsed: List[Tuple[Path, UFileMeta]] = []
     for path in candidates:
@@ -80,6 +98,7 @@ def select_latest_u_file_family(solver_out_dir: Path) -> List[Path]:
 
 
 def required_p123_sparse_names(np_wp: int, nq_wp: int, j2max: int, two_j_3n_max: int) -> List[str]:
+    # Build exact sparse P123 filenames expected by solver when reusing P123.
     names: List[str] = []
     for two_j in range(1, two_j_3n_max + 1, 2):
         for parity in (1, -1):

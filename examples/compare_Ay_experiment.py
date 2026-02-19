@@ -1,12 +1,34 @@
 #!/usr/bin/env python3
 """
-190 MeV/u dpol-p solver-vs-experiment comparison.
+Purpose:
+  Compare solver-driven observables against 190 MeV/u experiment data.
 
-This script reads Tic-tac U-matrix output and builds angle-dependent observables:
-- dSigma/dOmega(theta)
-- iT11(theta)
+What this script does:
+  1) Read solver U-matrix files from solver_out.
+  2) Combine parity channels at identical solver energy.
+  3) Build reduced-U invariants and predict:
+     - dSigma/dOmega(theta)
+     - iT11(theta)
+  4) Evaluate residuals against experiment and write reports/curves.
 
-No interpolation of experimental curves is used in the model path.
+Data flow (left -> right):
+  U_PW_elements_*.txt + experiment txt files
+    -> parse/merge channels
+    -> reduced-U map prediction
+    -> metrics
+    -> CSV/SVG/JSON/TXT in work_dir
+
+Calls / dependencies:
+  - Uses `observable_units.py` for unit parsing/conversion.
+  - Uses `solver_u_file_utils.py` for selecting latest U-file family.
+  - Optional upstream call: runs `examples/deuteron_proton_Ay.py` when `--regenerate` is set.
+
+Usage:
+  python3 examples/compare_Ay_experiment.py \
+    --work-dir output/deuteron_proton_Ay \
+    --solver-out-dir output/deuteron_proton_Ay/solver_out \
+    --target-tlab 190 \
+    --dsigma-unit fm2/sr
 """
 
 from __future__ import annotations
@@ -608,6 +630,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     dsigma_output_unit = normalize_dsigma_unit(args.dsigma_unit)
 
+    # Resolve all IO roots first so the rest of the script only handles absolute paths.
     work_dir = (root / args.work_dir).resolve()
     solver_out_dir = (root / args.solver_out_dir).resolve()
     tensor_data = (root / args.tensor_data).resolve()
@@ -616,6 +639,7 @@ def main() -> int:
     work_dir.mkdir(parents=True, exist_ok=True)
     run_solver_if_requested(work_dir, args.regenerate, args.target_tlab)
 
+    # Solver branch: U files -> parsed channel points.
     u_files = find_latest_solver_u_files(solver_out_dir)
     if not u_files:
         raise RuntimeError(f"No U_PW_elements files found in {solver_out_dir}")
@@ -627,9 +651,11 @@ def main() -> int:
     if not points:
         raise RuntimeError("No valid U-matrix rows parsed from solver output")
 
+    # Experiment branch: raw measurement tables -> typed arrays.
     exp_it11 = read_experimental_iT11(tensor_data)
     exp_dsigma = read_experimental_dsigma(dsigma_data, target_unit=dsigma_output_unit)
 
+    # Join branch: combine solver channels by energy and evaluate every available energy point.
     combined = combine_channels_by_energy(points)
     if not combined:
         raise RuntimeError("Failed to combine solver channels into energy points")
@@ -683,6 +709,7 @@ def main() -> int:
         }
         enriched.append(enriched_item)
 
+    # Select closest available solver energy to the requested target and emit artifacts.
     best = min(enriched, key=lambda item: float(item["delta_tlab"]))
 
     pass_flag = (
