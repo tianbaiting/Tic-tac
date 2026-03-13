@@ -1,5 +1,5 @@
 #include "matrix_routines.h"
-#include <cblas.h>
+#include <gsl/gsl_cblas.h>
 
 void dot_MV(double *A, double *B, double *C, int N, int M){
 	double  beta  = 0.0;

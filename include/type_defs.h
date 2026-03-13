@@ -5,6 +5,9 @@
 #include <complex>
 #include <string>
 
+// [EN] Keep this header as the canonical solver-wide type catalog; `src/type_defs.h` is only a compatibility
+// redirect so the refactored tree and the legacy include layout cannot silently drift apart. / [CN] 保持此头文件作为全求解器共享类型的唯一真相源；`src/type_defs.h` 只是兼容性转发层，避免重构目录与旧目录的类型定义悄悄漂移。
+
 typedef unsigned int uint;
 //~ typedef float floatType;
 typedef double floatType;
@@ -12,6 +15,10 @@ typedef std::complex<floatType> cfloatType;
 typedef std::complex<double> cdouble;
 typedef unsigned long long int ull_int;
 
+// [EN] The three-body basis is stored channel-by-channel in contiguous alpha ranges, so each conserved J^pi block
+// can be solved independently after the global basis is generated. This mirrors the block structure used in the
+// WPCD Faddeev formulation discussed in the project docs and in Miller et al., Phys. Rev. C 106, 024001 (2022).
+// [CN] 三体基以连续 alpha 区间按守恒的 J^pi 通道分块存储，因此在生成全局基之后，每个块都可以独立求解；这对应项目文档和 Miller 等人在 Phys. Rev. C 106, 024001 (2022) 中讨论的 WPCD Faddeev 分块结构。
 typedef struct pw_3N_statespace{
 	int  Nalpha;				// Number of partial waves, set in dynamical state-space construction (by construct_symmetric_pw_states)
 	int  J_2N_max;				// Maximum pair-system total angular momentum
@@ -28,7 +35,8 @@ typedef struct pw_3N_statespace{
 	int  N_chn_3N;				// Number of distinct 3N JP-channels
 } pw_3N_statespace;
 
-/* Free wave-packet (FWP) statespace struct */
+// [EN] fWP stores the free Jacobi-momentum packet mesh that replaces continuum integrals by finite bins plus
+// quadrature weights. All later operators are projected onto this discretized p-q lattice first. / [CN] fWP 保存自由 Jacobi 动量波包网格，用有限 bin 和求积权重取代连续积分；后续所有算符都先投影到这套离散的 p-q 格点上。
 typedef struct fwp_statespace{
 	int 	Np_WP;				// Number of p-momentum WPs
 	int 	Nq_WP;				// Number of q-momentum WPs
@@ -46,7 +54,9 @@ typedef struct fwp_statespace{
 	double* norm_q_array;		// q-momentum normaliszation, for all bins
 } fwp_statespace;
 
-/* Scattering wave-packet (SWP) statespace struct */
+// [EN] SWP stores the interacting packet basis obtained by diagonalizing the pair Hamiltonian inside each 2N
+// channel. In this basis the channel resolvent is diagonal apart from the bound/continuum branch choice, which is
+// the key WPCD simplification exploited by the solver. / [CN] SWP 保存每个两体通道内对角化相互作用哈密顿量后得到的散射波包基；在这套基中，通道分辨算符除束缚/连续分支选择外近似对角，这正是求解器利用的 WPCD 核心简化。
 typedef struct swp_statespace{
 	int 	Np_WP;				// Number of p-momentum WPs
 	int 	Nq_WP;				// Number of q-momentum WPs
@@ -60,8 +70,13 @@ typedef struct swp_statespace{
 	double* q_WP_array;			// Boundaries of q-momentum WPs
 } swp_statespace;
 
-/* Struct containing all information regarding on-shell indices for on-shell
- * energies and corresponding bins, as well as deuteron channels, for ALL 3N channels */ 
+// [EN] This is the global energy-selection record: user-requested laboratory energies are first mapped to discrete
+// q-shell bins here, then each J^pi channel receives a local view of the relevant entries. This matches the Sean B.
+// Miller workflow where observables are extracted only from the finite set of on-shell packet amplitudes.
+// / [CN] 这是全局的能量选择记录：用户请求的实验室能量先在这里映射到离散 q-shell bin，然后每个 J^pi 通道再拿到
+// 相关条目的局部视图。这对应 Sean B. Miller 工作流里“只从有限个 on-shell 波包振幅提取可观测量”的做法。
+// [EN] These arrays translate the large packet lattice back to the physical elastic asymptotic states. Only the
+// deuteron rows/columns at the on-shell q bins are finally reported as nd/pd observables. / [CN] 这些数组负责把巨大的波包格点重新映射回物理弹性渐近态；最终真正输出为 nd/pd 可观测量的，只是 on-shell q bin 上的氘核行/列。
 typedef struct solution_configuration{
 	size_t  num_T_lab;				// Number of on-shell bins/energies to calculate
 	double* T_lab_array;			// On-shell lab  energies  (T_lab)
@@ -72,18 +87,21 @@ typedef struct solution_configuration{
 	int*    deuteron_num_array;		// Contains number of deuteron-channels in all 3N-channels
 } solution_configuration;
 
-/* Struct containing all information regarding on-shell indices for on-shell
- * bins, as well as deuteron channels, for GIVEN 3N channel */ 
+// [EN] Channel-local on-shell bookkeeping lets the solver work blockwise: a single J^pi channel receives its own
+// elastic rows, breakup rows, and q-bin map without carrying unrelated channels through the hot path. / [CN] 通道局部的 on-shell 索引使求解器可以逐块运行：单个 J^pi 通道只携带自身的弹性行、裂变行和 q-bin 映射，不把无关通道带入热点路径。
 typedef struct channel_os_indexing{	// This should be renamed solution_configuration_subchannel
 	size_t  num_T_lab;				// Number of elastic on-shell bins/energies to calculate
 	int*    q_com_idx_array;		// Index-array for elastic on-shell q-bins
 	int*    deuteron_idx_array;		// Index-array for deuteron-channels in given 3N-channel
 	int     num_deuteron_states;	// Number of deuteron-channels in given 3N-channel
-	int*    alphapq_idx_array;		// Index-array for on-shell alpha-,p-,q-bins (used for breakup)
-	int*    q_com_BU_idx_array;		// Index-array for on-shell alpha-,p-,q-bins (used for breakup)
+	int*    alphapq_idx_array;		// Flattened triples (alpha, q, p) for breakup on-shell packet states
+	int*    q_com_BU_idx_array;		// Prefix offsets that group breakup triples by elastic q-shell bin
 	size_t  num_BU_chns;			// Number of breakup channels (combinations of p,q, and alpha)
 } channel_os_indexing;
 
+// [EN] Runtime controls mix physics truncations, discretization knobs, and IO locations because the current solver
+// still exposes a legacy key=value interface. Keeping them in one record avoids long argument chains while the
+// build is migrated from `CPP/` to `src/`. / [CN] 运行参数同时包含物理截断、离散化旋钮和 IO 路径，因为当前求解器仍然对外暴露旧式 key=value 接口；在从 `CPP/` 迁移到 `src/` 的过程中，把它们放在同一记录里能避免冗长的参数链。
 typedef struct run_params{
 	int         two_J_3N_max;
 	int         Np_WP;
@@ -166,4 +184,3 @@ typedef struct bounds_mesh_table{
 //} Psparse_table;
 
 #endif // TYPE_DEFS_H
-

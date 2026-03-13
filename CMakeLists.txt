@@ -23,12 +23,10 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 # Fortran编译选项
-set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -fdefault-real-8 -fdefault-double-8")
-set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -ffree-form -ffree-line-length-1000 -fPIC")
-set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -std=legacy")
+set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -fdefault-real-8 -fdefault-double-8 -fPIC")
 
 # 查找必要的包
-find_package(OpenMP COMPONENTS CXX)
+find_package(OpenMP COMPONENTS CXX Fortran)
 find_package(GSL REQUIRED)
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
 
@@ -62,16 +60,26 @@ file(GLOB_RECURSE SOURCES_IO "${CMAKE_SOURCE_DIR}/src/io/*.cpp")
 file(GLOB_RECURSE SOURCES_UTILS "${CMAKE_SOURCE_DIR}/src/utils/*.cpp")
 
 # Fortran源文件
-file(GLOB_RECURSE SOURCES_FORTRAN 
-    "${CMAKE_SOURCE_DIR}/src/interactions/chp/*.f90"
-#    "${CMAKE_SOURCE_DIR}/src/interactions/nijmegen/*.f"  # 暂时跳过有问题的Fortran 77文件
-)
+file(GLOB_RECURSE SOURCES_FORTRAN_F90 "${CMAKE_SOURCE_DIR}/src/interactions/**/*.f90")
+file(GLOB_RECURSE SOURCES_FORTRAN_F77 "${CMAKE_SOURCE_DIR}/src/interactions/**/*.f")
 
-# 使用CPP目录中已编译的nijmegen对象文件
-set(NIJMEGEN_OBJECTS
-    "${CMAKE_SOURCE_DIR}/CPP/Interactions/nijmegen/nijmegen_interface.o"
-    "${CMAKE_SOURCE_DIR}/CPP/Interactions/nijmegen/pnijm.o"
-)
+foreach(source_file ${SOURCES_FORTRAN_F90})
+    set_source_files_properties(
+        ${source_file}
+        PROPERTIES
+        Fortran_FORMAT FREE
+        COMPILE_OPTIONS "-cpp;-ffree-line-length-1000;-std=legacy"
+    )
+endforeach()
+
+foreach(source_file ${SOURCES_FORTRAN_F77})
+    set_source_files_properties(
+        ${source_file}
+        PROPERTIES
+        Fortran_FORMAT FIXED
+        COMPILE_OPTIONS "-std=legacy;-ffixed-line-length-none"
+    )
+endforeach()
 
 # 主程序源文件
 set(SOURCES_MAIN "${CMAKE_SOURCE_DIR}/src/main.cpp")
@@ -84,17 +92,18 @@ set(ALL_SOURCES
     ${SOURCES_INTERACTIONS}
     ${SOURCES_IO}
     ${SOURCES_UTILS}
-    ${SOURCES_FORTRAN}
+    ${SOURCES_FORTRAN_F90}
+    ${SOURCES_FORTRAN_F77}
 )
 
 # 创建可执行文件
 add_executable(${PROJECT_NAME} 
     ${ALL_SOURCES}
-    ${NIJMEGEN_OBJECTS}  # 添加预编译的nijmegen对象文件
 )
 
 # 链接库
 target_link_libraries(${PROJECT_NAME}
+    OpenMP::OpenMP_CXX
     ${GSL_LIBRARIES}
     ${HDF5_LIBRARIES}
     ${HDF5_HL_LIBRARIES}

@@ -1,6 +1,53 @@
 
 #include "make_resolvent.h"
 
+namespace {
+
+bool is_singlet_s_wave_channel(int L_2N, int S_2N, int J_2N){
+	return L_2N==0 && S_2N==0 && J_2N==0;
+}
+
+double* select_swp_energy_branch(int L_2N,
+								 int S_2N,
+								 int J_2N,
+								 int T_2N,
+								 int two_T_3N,
+								 int Np_WP,
+								 double* e_SWP_unco_array,
+								 double* e_SWP_coup_array,
+								 const run_params& run_parameters){
+	const bool coupled_via_L_2N = run_parameters.tensor_force && L_2N!=J_2N && J_2N!=0;
+	const bool coupled_via_T_3N = is_singlet_s_wave_channel(L_2N, S_2N, J_2N) && run_parameters.isospin_breaking_1S0;
+	if (coupled_via_L_2N && coupled_via_T_3N){
+		raise_error("Warning! Code has not been written to handle isospin-breaking in coupled channels!");
+	}
+
+	if (!coupled_via_L_2N && !coupled_via_T_3N){
+		const int chn_2N_idx = unique_2N_idx(L_2N, S_2N, J_2N, T_2N, false, run_parameters);
+		return &e_SWP_unco_array[chn_2N_idx * (Np_WP+1)];
+	}
+
+	const int chn_2N_idx = unique_2N_idx(L_2N, S_2N, J_2N, T_2N, true, run_parameters);
+	double* channel_branch_ptr = &e_SWP_coup_array[chn_2N_idx * 2*(Np_WP+1)];
+
+	// [EN] The coupled SWP storage contains two contiguous branches. Tensor-force coupling uses the lower/upper
+	// orbital branch (L<J or L>J), while isospin-breaking in 1S0 uses the T_3N branch label. / [CN] 耦合 SWP 存储里
+	// 连续放着两条分支：张量力耦合时按轨道角动量分支选取（L<J 或 L>J），而 1S0 的同位旋破缺则按 T_3N 分支选取。
+	if (coupled_via_L_2N){
+		if (L_2N>J_2N){
+			channel_branch_ptr += Np_WP + 1;
+		}
+		return channel_branch_ptr;
+	}
+
+	if (two_T_3N!=1){
+		channel_branch_ptr += Np_WP + 1;
+	}
+	return channel_branch_ptr;
+}
+
+} // namespace
+
 double heaviside_step_function(double val){
 	if (val<0){
 		return 0;
@@ -10,7 +57,9 @@ double heaviside_step_function(double val){
 	}
 }
 
-/* See header-file, commentary (A), for explanation of notation and equations */
+// [EN] In the SWP basis the channel resolvent becomes diagonal, and the only remaining work is to integrate the
+// resolvent kernel over the packet energy cells. For a deuteron-like bound channel this yields a bound-continuum
+// term with the expected logarithmic real part and step-function imaginary part. / [CN] 在 SWP 基中，通道分辨算符变为对角形式；剩余工作只是把分辨核在波包能量元上积分。对于氘核这类束缚分支，会得到具有对数实部和阶跃函数虚部的束缚-连续项。
 cdouble resolvent_bound_continuum(double E, double Eb,
 								  double q_bin_upper,
 								  double q_bin_lower){
@@ -35,7 +84,9 @@ cdouble resolvent_bound_continuum(double E, double Eb,
 	return {Re_R, Im_R};
 }
 
-/* See header-file, commentary (A), for explanation of notation and equations */
+// [EN] For continuum-continuum packets we average the free three-body propagator over one p-cell and one q-cell.
+// This regularized cell average is one reason WPCD avoids the singular kernels of the continuous formulation.
+// [CN] 对连续-连续波包，我们在一个 p 单元和一个 q 单元上对自由三体传播子取平均；这种规则化的单元平均正是 WPCD 能避开连续表述中奇异核的重要原因之一。
 cdouble resolvent_continuum_continuum(double E, double Eb,
 									  double q_bin_upper,
 									  double q_bin_lower,
@@ -84,6 +135,10 @@ void calculate_resolvent_array_in_SWP_basis(cdouble* G_array,
 											swp_statespace swp_states,
 											pw_3N_statespace pw_states,
 											run_params run_parameters){
+
+	// [EN] The full AGS/Faddeev iteration only needs the diagonal entries of G in the SWP basis, so this routine
+	// fills one complex number per (alpha, q-bin, p-bin). The later Neumann/Padé solver multiplies by these entries
+	// as a cheap elementwise step between rescattering iterations. / [CN] 完整的 AGS/Faddeev 迭代在 SWP 基中只需要 G 的对角元，因此这里为每个 (alpha, q-bin, p-bin) 填充一个复数；后续 Neumann/Padé 求解器在每次再散射迭代之间只需做一次廉价的逐元素乘法。
 	
 	int 	Np_WP			 = swp_states.Np_WP;
 	int     Nq_WP			 = swp_states.Nq_WP;
@@ -98,13 +153,6 @@ void calculate_resolvent_array_in_SWP_basis(cdouble* G_array,
 	int* T_2N_array		= pw_states.T_2N_array;
 	int* two_T_3N_array = pw_states.two_T_3N_array;
 
-	/* This test will be reused several times */
-	bool tensor_force_true = (run_parameters.tensor_force==true);
-
-	/* Pointer to either p_SWP_unco_array or p_SWP_coup_array,
-	 * which is determined by whether the channel is coupled or not */
-	double* e_SWP_array_ptr = NULL;
-
 	/* Loop over states along resolvent diagonal */
 	for (int idx_alpha=0; idx_alpha<Nalpha; idx_alpha++){
 	
@@ -115,45 +163,18 @@ void calculate_resolvent_array_in_SWP_basis(cdouble* G_array,
 
 		int two_T_3N = two_T_3N_array[idx_alpha];
 
-		/* Detemine if this is a coupled channel.
-		 * !!! With isospin symmetry-breaking we count 1S0 as a coupled matrix via T_3N-coupling !!! */
-		bool coupled_channel = false;
-		bool state_1S0 = (S==0 && J==0 && L==0);
-		bool coupled_via_L_2N = (tensor_force_true && L!=J && J!=0);
-		bool coupled_via_T_3N = (state_1S0==true && run_parameters.isospin_breaking_1S0==true);
-		if (coupled_via_L_2N && coupled_via_T_3N){
-			raise_error("Warning! Code has not been written to handle isospin-breaking in coupled channels!");
-		}
-		if (coupled_via_L_2N || coupled_via_T_3N){ // This counts 3P0 as uncoupled; used in matrix structure
-			coupled_channel  = true;
-		}
-
-		if (coupled_channel){
-			int chn_2N_idx = unique_2N_idx(L, S, J, T, coupled_channel, run_parameters);
-			if (coupled_via_L_2N){
-				if (L<J){
-					e_SWP_array_ptr = &e_SWP_coup_array[chn_2N_idx * 2*(Np_WP+1)];
-				}
-				else{
-					e_SWP_array_ptr = &e_SWP_coup_array[chn_2N_idx * 2*(Np_WP+1) + Np_WP+1];
-				}
-			}
-			else if (coupled_via_T_3N){
-				if (two_T_3N==1){
-					e_SWP_array_ptr = &e_SWP_coup_array[chn_2N_idx * 2*(Np_WP+1)];
-				}
-				else{
-					e_SWP_array_ptr = &e_SWP_coup_array[chn_2N_idx * 2*(Np_WP+1) + Np_WP+1];
-				}
-			}
-			else{
-				raise_error("Unknown coupling encountered in resolvent-calculation!");
-			}
-		}
-		else{
-			int chn_2N_idx = unique_2N_idx(L, S, J, T, coupled_channel, run_parameters);
-			e_SWP_array_ptr = &e_SWP_unco_array[chn_2N_idx * (Np_WP+1)];
-		}
+		// [EN] The channel resolvent is diagonal in the SWP basis, but each alpha state must still select the correct
+		// interacting p-packet branch before the analytic cell average can be evaluated. / [CN] 通道分辨算符在 SWP 基中
+		// 虽然是对角的，但每个 alpha 态仍需先选中正确的相互作用 p 波包分支，才能计算解析的单元平均。
+		double* e_SWP_array_ptr = select_swp_energy_branch(L,
+															   S,
+															   J,
+															   T,
+															   two_T_3N,
+															   Np_WP,
+															   e_SWP_unco_array,
+															   e_SWP_coup_array,
+															   run_parameters);
 
 		//printf("%d %d %d %d \n", L, S, J, T);
 

@@ -1,6 +1,125 @@
 #include "solve_faddeev.h"
-#include <cblas.h>
+#include <gsl/gsl_cblas.h>
 #include <cstring>
+#include <vector>
+
+namespace {
+
+// [EN] The deuteron packet always occupies p-index 0 after the SWP eigenvalue ordering used in this solver, so all
+// elastic on-shell amplitudes live on one fixed p slice. / [CN] 按当前求解器使用的 SWP 本征值排序，氘核波包总是位于
+// p-index 0，因此所有弹性 on-shell 振幅都落在同一个固定的 p 切片上。
+constexpr size_t elastic_bound_packet_index = 0;
+
+struct elastic_on_shell_index {
+	size_t alpha_row;
+	size_t alpha_col;
+	size_t q_idx;
+	size_t row_storage_idx;
+	size_t col_storage_idx;
+	size_t value_storage_idx;
+};
+
+// [EN] Flatten one (alpha, q, p) packet state into the dense packet-lattice index used everywhere in the kernel.
+// / [CN] 把单个 (alpha, q, p) 波包态展平成核内部统一使用的稠密格点索引。
+inline size_t dense_packet_index(size_t alpha_idx,
+								 size_t q_idx,
+								 size_t p_idx,
+								 size_t Nq_WP,
+								 size_t Np_WP){
+	return alpha_idx*Nq_WP*Np_WP + q_idx*Np_WP + p_idx;
+}
+
+// [EN] Elastic rows are stored as (deuteron-row, q-shell) blocks because that is the minimum subset needed by the
+// Miller/Sean workflow before Padé resummation. / [CN] 弹性行按 (deuteron-row, q-shell) 分块存储，因为在 Sean Miller
+// 的工作流里，Padé 重求和前只需要这部分最小子集。
+inline size_t elastic_row_storage_index(size_t idx_d_row,
+										size_t idx_q_com,
+										size_t num_q_com){
+	return idx_d_row*num_q_com + idx_q_com;
+}
+
+inline size_t elastic_value_storage_index(size_t idx_d_row,
+										  size_t idx_d_col,
+										  size_t idx_q_com,
+										  size_t num_deuteron_states,
+										  size_t num_q_com){
+	return idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
+}
+
+inline size_t breakup_value_storage_index(size_t idx_d_row,
+										  size_t idx_BU_chn,
+										  size_t num_BU_chns){
+	return idx_d_row*num_BU_chns + idx_BU_chn;
+}
+
+// [EN] Bundle the repeated elastic on-shell bookkeeping so the hot loops can read more like the multiple-scattering
+// formulas in the paper and less like raw index arithmetic. / [CN] 把重复出现的弹性 on-shell bookkeeping 打包起来，
+// 这样热点循环读起来会更像论文里的多重散射公式，而不是裸索引运算。
+inline elastic_on_shell_index make_elastic_on_shell_index(size_t idx_d_row,
+														  size_t idx_d_col,
+														  size_t idx_q_com,
+														  const int* deuteron_idx_array,
+														  const int* q_com_idx_array,
+														  size_t num_deuteron_states,
+														  size_t num_q_com,
+														  size_t Nq_WP,
+														  size_t Np_WP){
+	elastic_on_shell_index index = {};
+	index.alpha_row = deuteron_idx_array[idx_d_row];
+	index.alpha_col = deuteron_idx_array[idx_d_col];
+	index.q_idx = q_com_idx_array[idx_q_com];
+	index.row_storage_idx = elastic_row_storage_index(idx_d_row, idx_q_com, num_q_com);
+	index.col_storage_idx = dense_packet_index(index.alpha_col,
+												 index.q_idx,
+												 elastic_bound_packet_index,
+												 Nq_WP,
+												 Np_WP);
+	index.value_storage_idx = elastic_value_storage_index(idx_d_row,
+															idx_d_col,
+															idx_q_com,
+															num_deuteron_states,
+															num_q_com);
+	return index;
+}
+
+// [EN] Row compaction is purely an acceleration device: skip rows whose observed on-shell elements have already
+// converged, but leave the active rows untouched. / [CN] 行压缩纯粹是加速手段：跳过那些其可观测 on-shell 元素已经收敛的行，
+// 但对仍然活动的行不做任何代数近似。
+bool row_has_only_converged_targets(size_t idx_d_row,
+									size_t idx_q_com,
+									size_t num_deuteron_states,
+									size_t num_q_com,
+									const bool* pade_approximants_conv_array,
+									const bool* pade_approximants_BU_conv_array,
+									const channel_os_indexing& chn_os_indexing,
+									bool include_breakup_channels){
+	for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
+		size_t idx_NDOS = elastic_value_storage_index(idx_d_row,
+														 idx_d_col,
+														 idx_q_com,
+														 num_deuteron_states,
+														 num_q_com);
+		if (pade_approximants_conv_array[idx_NDOS]==false){
+			return false;
+		}
+	}
+
+	if (include_breakup_channels){
+		int BU_chn_start = chn_os_indexing.q_com_BU_idx_array[idx_q_com];
+		int BU_chn_end   = chn_os_indexing.q_com_BU_idx_array[idx_q_com+1];
+		for (size_t idx_BU_chn=BU_chn_start; idx_BU_chn<BU_chn_end; idx_BU_chn++){
+			size_t idx_NDOS = breakup_value_storage_index(idx_d_row,
+														 idx_BU_chn,
+														 chn_os_indexing.num_BU_chns);
+			if (pade_approximants_BU_conv_array[idx_NDOS]==false){
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+} // namespace
 
 // Helper function for in-place matrix transpose
 void inplace_transpose(double* A, int rows, int cols) {
@@ -13,17 +132,19 @@ void inplace_transpose(double* A, int rows, int cols) {
             }
         }
     } else { // Non-square matrix, requires a temporary buffer
-        double* B = new double[rows * cols];
+        std::vector<double> B(rows * cols);
         for (int i = 0; i < rows; ++i) {
             for (int j = 0; j < cols; ++j) {
                 B[j * rows + i] = A[i * cols + j];
             }
         }
-        memcpy(A, B, rows * cols * sizeof(double));
-        delete[] B;
+        memcpy(A, B.data(), rows * cols * sizeof(double));
     }
 }
 
+// [EN] This is the raw driving column PVC that appears in the AGS kernel before the left basis rotation by C^T.
+// Applying the sparse permutation first keeps the expensive part of the kernel sparse. / [CN] 这里计算的是 AGS 核中
+// 左乘 C^T 之前的原始驱动列 PVC；先施加稀疏置换算符，可以把核中最昂贵的部分保持为稀疏结构。
 void calculate_PVC_col(double*  col_array,
 					   size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
 					   size_t   Nalpha,      size_t Nq_WP,   size_t Np_WP,
@@ -70,6 +191,10 @@ void calculate_PVC_col(double*  col_array,
 	}
 }
 
+// [EN] CPVC = C^T P V C is the packet-space kernel that drives both the first Neumann term and every later
+// rescattering step. We form one dense column at a time because that matches both the sparse P123 access pattern
+// and the later chunked GEMM strategy. / [CN] CPVC = C^T P V C 是波包空间中的核，它既驱动第一项 Neumann 项，
+// 也驱动之后所有再散射步骤。这里按“每次一列”构造，是为了同时匹配稀疏 P123 的访问模式和后面分块 GEMM 的策略。
 void calculate_CPVC_col(double*  col_array,
 					    int* 	 row_to_nnz_array, 
 					    int* 	 nnz_to_row_array,
@@ -81,17 +206,17 @@ void calculate_CPVC_col(double*  col_array,
 					    double*  P123_val_array,
 					    int*     P123_row_array,
 					    size_t*  P123_col_array,
-					    size_t   P123_dim){
+					   size_t   P123_dim){
 	
 	/* Generate PVC-column */
-	double* PVC_col = new double [Nalpha*Nq_WP*Np_WP];
+	std::vector<double> PVC_col(Nalpha*Nq_WP*Np_WP);
 	/* Ensure PVC_col contains only zeroes */
 	for (size_t idx=0; idx<Nalpha*Nq_WP*Np_WP; idx++){
 		PVC_col[idx] = 0;
 	}
 	
 	//auto timestamp_start = std::chrono::system_clock::now();
-	calculate_PVC_col(PVC_col,
+	calculate_PVC_col(PVC_col.data(),
 					  idx_alpha_c, idx_p_c, idx_q_c,
 					  Nalpha,      Nq_WP,   Np_WP,
 					  VC_CM_array,
@@ -152,10 +277,11 @@ void calculate_CPVC_col(double*  col_array,
 	//timestamp_end = std::chrono::system_clock::now();
 	//std::chrono::duration<double>  time2 = timestamp_end - timestamp_start;
 	//printf("TIME CPVC:  %.6f \n", time2.count()); fflush(stdout);
-	
-	delete [] PVC_col;
 }
 
+// [EN] Only on-shell rows are ever observed in the elastic output, so the initial driving term A is assembled only
+// for those rows. This is the first major WPCD reduction compared with a full dense solve. / [CN] 最终弹性输出只会用到
+// on-shell 行，因此初始驱动项 A 也只为这些行构造；这是相对于完整稠密求解的第一层 WPCD 降维。
 void calculate_all_CPVC_rows(double*  row_arrays,
 							 int*	  q_com_idx_array,	  size_t num_q_com,
 					   		 int*     deuteron_idx_array, size_t num_deuteron_states,
@@ -175,7 +301,7 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 	#pragma omp parallel
 	{
 	/* Generate PVC-column */
-	double* PVC_col = new double [dense_dim];
+	std::vector<double> PVC_col(dense_dim);
 	/* Generate (C^T x PVC)-column */
 	double* CT_subarray     = NULL;
 	double* CT_subarray_row = NULL;
@@ -190,7 +316,7 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 				}
 				
 				/* Calculate PVC-column for alpha_i, p_i, q_r */
-				calculate_PVC_col(PVC_col,
+				calculate_PVC_col(PVC_col.data(),
 								  idx_alpha_c, idx_p_c, idx_q_c,
 								  Nalpha,      Nq_WP,   Np_WP,
 								  VC_CM_array,
@@ -202,27 +328,33 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 				/* Re-use PVC-column in all relevant calculations */
 				for (size_t i=0; i<num_deuteron_states; i++){
 					for (size_t j=0; j<num_q_com; j++){
-						/* Nucleon-deuteron on-shell (NDOS) indices
-						 * (deuteron bound-state p-index is alwasy 0 due to eigenvalue ordering in SWP construction) */
-						size_t idx_alpha_r = deuteron_idx_array[i];
-						size_t idx_p_r     = 0;
-						size_t idx_q_r     = q_com_idx_array[j];
-
-						size_t idx_NDOS = i*num_q_com + j;;
+						const elastic_on_shell_index ndos = make_elastic_on_shell_index(i,
+																						 0,
+																						 j,
+																						 deuteron_idx_array,
+																						 q_com_idx_array,
+																						 num_deuteron_states,
+																						 num_q_com,
+																						 Nq_WP,
+																						 Np_WP);
 
 						double inner_product_CPVC = 0;
 						/* Beginning of inner-product loops (index "i") */
 						for (size_t idx_alpha_i=0; idx_alpha_i<Nalpha; idx_alpha_i++){
 							
-							CT_subarray = CT_RM_array[idx_alpha_r*Nalpha + idx_alpha_i];
+							CT_subarray = CT_RM_array[ndos.alpha_row*Nalpha + idx_alpha_i];
 		
 							/* Only do inner-product if CT is not zero due to conservation laws */
 							if (CT_subarray!=NULL){
-								CT_subarray_row = &CT_subarray[idx_p_r*Np_WP];
+								CT_subarray_row = &CT_subarray[elastic_bound_packet_index*Np_WP];
 		
 								for (size_t idx_p_i=0; idx_p_i<Np_WP; idx_p_i++){
 								
-									size_t idx_PVC     = idx_alpha_i*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_i;
+									size_t idx_PVC     = dense_packet_index(idx_alpha_i,
+																			ndos.q_idx,
+																			idx_p_i,
+																			Nq_WP,
+																			Np_WP);
 									double PVC_element = PVC_col[idx_PVC];
 		
 									/* I'm not sure if this is the fastest ordering of the loops */
@@ -233,14 +365,13 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 							}
 						}
 				
-						size_t idx_CPVC = idx_alpha_c*Nq_WP*Np_WP + idx_q_c*Np_WP + idx_p_c;
-						row_arrays[idx_NDOS*dense_dim + idx_CPVC] = inner_product_CPVC;
+						size_t idx_CPVC = dense_packet_index(idx_alpha_c, idx_q_c, idx_p_c, Nq_WP, Np_WP);
+						row_arrays[ndos.row_storage_idx*dense_dim + idx_CPVC] = inner_product_CPVC;
 					}
 				}
 			}
 		}
 	}
-	delete [] PVC_col; 
 	}
 }
 
@@ -375,25 +506,25 @@ void faddeev_dense_solver(cdouble*  U_array,
 			for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
 
 				size_t idx_q_com		  = j;
+				const elastic_on_shell_index ndos = make_elastic_on_shell_index(idx_d_row,
+																				 idx_d_col,
+																				 idx_q_com,
+																				 deuteron_idx_array,
+																				 q_com_idx_array,
+																				 num_deuteron_states,
+																				 num_q_com,
+																				 Nq_WP,
+																				 Np_WP);
 
-				/* Nucleon-deuteron on-shell (NDOS) indices
-				 * (deuteron bound-state p-index is alwasy 0 due to eigenvalue ordering in SWP construction) */
-				size_t idx_alpha_NDOS_row = deuteron_idx_array[idx_d_row];
-				size_t idx_alpha_NDOS_col = deuteron_idx_array[idx_d_col];
-				size_t idx_p_NDOS 	  	  = 0;
-				size_t idx_q_NDOS 	   	  = q_com_idx_array[idx_q_com];
+				cdouble U_val = R_array[dense_packet_index(ndos.alpha_row,
+														 ndos.q_idx,
+														 elastic_bound_packet_index,
+														 Nq_WP,
+														 Np_WP)*dense_dim + ndos.col_storage_idx];
 
-				size_t idx_row_NDOS = idx_alpha_NDOS_row*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
-				size_t idx_col_NDOS = idx_alpha_NDOS_col*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
+				U_array[ndos.value_storage_idx] = U_val;
 
-				cdouble U_val = R_array[idx_row_NDOS*dense_dim + idx_col_NDOS];
-
-				size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
-
-				/* Set U-matrix element equal "best" PA */
-				U_array[idx_NDOS] = U_val;
-
-				printf("   - U-matrix element for alpha'=%ld, alpha=%ld, q=%ld: %.10e + %.10ei \n", idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, U_array[idx_NDOS].real(), U_array[idx_NDOS].imag());
+				printf("   - U-matrix element for alpha'=%ld, alpha=%ld, q=%ld: %.10e + %.10ei \n", ndos.alpha_row, ndos.alpha_col, ndos.q_idx, U_array[ndos.value_storage_idx].real(), U_array[ndos.value_storage_idx].imag());
 			}
 		}
 	}
@@ -421,6 +552,11 @@ void pade_method_solve(cdouble*  U_array,
 					   channel_os_indexing chn_os_indexing,
 					   run_params run_parameters,
 					   std::string file_identification){
+
+	// [EN] This routine implements the matrix version of the WPCD multiple-scattering expansion used in the Miller
+	// benchmarks: start from the driving term A=(C^T)PVC, generate Neumann terms A(GA)^n only on the physically
+	// needed on-shell rows, and use Padé resummation to recover stable elastic amplitudes when the raw series
+	// converges too slowly. / [CN] 该例程实现的是 Miller 基准工作中使用的 WPCD 多重散射矩阵算法：从驱动项 A=(C^T)PVC 出发，只在物理上需要的 on-shell 行上生成 A(GA)^n 的 Neumann 项，并用 Padé 重求和在原级数收敛过慢时恢复稳定的弹性振幅。
 						   
 	/* Print Pade-approximant convergences */
 	bool print_PA_convergences = false;
@@ -451,6 +587,9 @@ void pade_method_solve(cdouble*  U_array,
 	size_t NM_max = 14;
 	size_t num_neumann_terms = 2*NM_max+1;
 
+	// [EN] Chapter 7 rewrites the matrix AGS equation into a finite list of Neumann coefficients plus a Padé
+	// resummation step. These arrays are the concrete storage for that coefficient pipeline. / [CN] 讲稿第 7 章把矩阵
+	// AGS 方程改写成“有限个 Neumann 系数 + Padé 重求和”；下面这些数组就是这条系数流水线的具体存储。
 	/* Coefficients for calculating Pade approximant */
 	cdouble* a_coeff_array 	  = new cdouble [ num_neumann_terms * num_EL_A_vals];
 	cdouble* a_BU_coeff_array = NULL;//new cdouble [ num_neumann_terms * num_BU_A_vals];
@@ -507,6 +646,10 @@ void pade_method_solve(cdouble*  U_array,
 	bool*    pade_approximants_BU_conv_array = NULL;//new bool    [num_BU_A_vals];
 	size_t	 num_converged_BU_elements		 = 0;
 
+	// [EN] The CPVC kernel is generated in chunks because the full dense object is far larger than the active
+	// on-shell row set. Algebraically this still represents the same A=(C^T)PVC action described in the docs.
+	// / [CN] CPVC 核按 chunk 生成，是因为完整稠密对象远大于当前活动的 on-shell 行集；但从代数上看，它仍然是文档里
+	// 所说的同一个 A=(C^T)PVC 作用。
 	/* Define CPVC-chunks size */
 	size_t num_Gbytes_per_chunk  = 4;
 	size_t num_bytes_per_chunk   = num_Gbytes_per_chunk * std::pow(1024,3);
@@ -747,6 +890,10 @@ void pade_method_solve(cdouble*  U_array,
 	}
 
 	/* Set initial values for A_Kn_row_array, where K^n=1 for n=0 */
+	// [EN] The first stored object is a_0 = A, i.e. the driving term before any rescattering. In the notes this is
+	// the first term of the Neumann series, representing a single application of the kernel without additional G
+	// propagation. / [CN] 这里首先存储的是 a_0 = A，也就是没有任何再散射前的驱动项；按讲稿的说法，它对应 Neumann 级数的
+	// 第一项，表示只施加一次核而没有额外的 G 传播。
 	printf("     - Working on Pade approximant P[N,M] for N=%d, M=%d \n",0,0); fflush(stdout);
 	printf("       - Calculating on-shell rows of A*K^n for n=%d. \n", 0); fflush(stdout);
 	timestamp_start = std::chrono::system_clock::now();
@@ -770,51 +917,54 @@ void pade_method_solve(cdouble*  U_array,
 	for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 		for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
 			for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
-				/* Nucleon-deuteron on-shell (NDOS) indices
-				* (deuteron bound-state p-index is alwasy 0 due to eigenvalue ordering in SWP construction) */
-				size_t idx_alpha_NDOS_row = deuteron_idx_array[idx_d_row];
-				size_t idx_alpha_NDOS_col = deuteron_idx_array[idx_d_col];
-				size_t idx_q_NDOS 	 	  = q_com_idx_array[idx_q_com];
-
-				/* Store coefficient */
-				size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
+				const elastic_on_shell_index ndos = make_elastic_on_shell_index(idx_d_row,
+																				 idx_d_col,
+																				 idx_q_com,
+																				 deuteron_idx_array,
+																				 q_com_idx_array,
+																				 num_deuteron_states,
+																				 num_q_com,
+																				 Nq_WP,
+																				 Np_WP);
 
 				/* Store indices of coefficient */
-				comment_array[idx_NDOS] =   "\t#\t alpha'-idx=" + std::to_string(idx_alpha_NDOS_row)
-										  + "\t alpha-idx="+ std::to_string(idx_alpha_NDOS_col)
-										  + "\t q-idx=" + std::to_string(idx_q_NDOS);
+				comment_array[ndos.value_storage_idx] =   "\t#\t alpha'-idx=" + std::to_string(ndos.alpha_row)
+													   + "\t alpha-idx="+ std::to_string(ndos.alpha_col)
+													   + "\t q-idx=" + std::to_string(ndos.q_idx);
 			}
 		}
 	}
 	
+	// [EN] a_0 is the driving term itself: one application of A=(C^T)PVC with no intermediate propagation. Every
+	// later coefficient adds one more G propagation and one more rescattering by the same kernel. / [CN] a_0 就是驱动项本身：
+	// 只作用一次 A=(C^T)PVC，中间没有传播；之后每一阶都会再多插入一次 G 传播和一次同一核的再散射。
 	/* First Neumann-term */
 	printf("       - Extracting on-shell Neumann-series terms a_n=A*K^n for n=%d. \n",0); fflush(stdout);
 	/* Extract elastic terms */
 	for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 		for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
 			for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
-				/* Nucleon-deuteron on-shell (NDOS) indices
-				 * (deuteron bound-state p-index is alwasy 0 due to eigenvalue ordering in SWP construction) */
-				size_t idx_alpha_NDOS_row = deuteron_idx_array[idx_d_row];
-				size_t idx_alpha_NDOS_col = deuteron_idx_array[idx_d_col];
-				size_t idx_q_NDOS 	  = q_com_idx_array[idx_q_com];
-				size_t idx_p_NDOS 	  = 0;
-
-				size_t idx_row_NDOS   = idx_d_row*num_q_com + idx_q_com;
-				size_t idx_col_NDOS   = idx_alpha_NDOS_col*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
+				const elastic_on_shell_index ndos = make_elastic_on_shell_index(idx_d_row,
+																				 idx_d_col,
+																				 idx_q_com,
+																				 deuteron_idx_array,
+																				 q_com_idx_array,
+																				 num_deuteron_states,
+																				 num_q_com,
+																				 Nq_WP,
+																				 Np_WP);
 
 				/* Calculate coefficient */
-				cdouble a_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
+				cdouble a_coeff = re_A_An_row_array_prev[ndos.row_storage_idx*dense_dim + ndos.col_storage_idx];
 
 				/* Store coefficient */
-				size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
-				a_coeff_array[idx_NDOS*num_neumann_terms] = a_coeff;
+				a_coeff_array[ndos.value_storage_idx*num_neumann_terms] = a_coeff;
 
 				/* Store coefficient in print-to-file format */
-				neumann_store_array[idx_NDOS] = a_coeff;
+				neumann_store_array[ndos.value_storage_idx] = a_coeff;
 				
 				if (print_neumann_terms){
-					printf("         - Neumann term %d for alpha'=%ld, alpha=%ld, q=%ld: %.16e + %.16ei \n", 0, idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, a_coeff.real(), a_coeff.imag());
+					printf("         - Neumann term %d for alpha'=%ld, alpha=%ld, q=%ld: %.16e + %.16ei \n", 0, ndos.alpha_row, ndos.alpha_col, ndos.q_idx, a_coeff.real(), a_coeff.imag());
 					fflush(stdout);
 				}
 			}
@@ -839,7 +989,9 @@ void pade_method_solve(cdouble*  U_array,
 					cdouble a_BU_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
 					
 					/* Store coefficient */
-					size_t idx_NDOS = idx_d_row*chn_os_indexing.num_BU_chns + idx_BU_chn;
+					size_t idx_NDOS = breakup_value_storage_index(idx_d_row,
+																 idx_BU_chn,
+																 chn_os_indexing.num_BU_chns);
 					a_BU_coeff_array[idx_NDOS*num_neumann_terms] = a_BU_coeff;
 				}
 			}
@@ -906,7 +1058,10 @@ void pade_method_solve(cdouble*  U_array,
 
 			double timestamp_neumann_start = omp_get_wtime();
 
-			/* Calculate all a-coefficients for calculated CPVC-column */
+			// [EN] The Neumann recursion is implemented exactly as in the lecture notes: first multiply the previous
+			// term by the diagonal channel resolvent G, then apply the CPVC kernel to generate the next rescattering
+			// contribution. / [CN] Neumann 递推严格按照讲稿里的顺序实现：先把上一阶乘上对角的通道分辨算符 G，再施加 CPVC
+			// 核，生成下一阶再散射贡献。
 			double timestamp_resolvent_start = omp_get_wtime();
 			printf("       - Multiplying in resolvent with An. \n"); fflush(stdout);
 			for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
@@ -927,39 +1082,22 @@ void pade_method_solve(cdouble*  U_array,
 			double timestamp_resolvent_end    = omp_get_wtime();
 			time_resolvent = timestamp_resolvent_end - timestamp_resolvent_start;
 
+			// [EN] Once some on-shell amplitudes have converged, there is no value in pushing their full dense rows
+			// through later rescattering steps. Compacting only the non-converged rows is a pure algebraic shortcut:
+			// it preserves the exact iteration on the active rows while reducing GEMM cost. / [CN] 当部分 on-shell
+			// 振幅已经收敛后，就没有必要再把它们对应的整条稠密行送入后续再散射步骤；这里只压缩未收敛的行是纯代数层面的加速，在保持活动行迭代完全一致的同时降低了 GEMM 成本。
 			size_t num_non_conv_rows = 0;
 			for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 				for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
-					/* Nucleon-deuteron on-shell (NDOS) indices
-					 * (deuteron bound-state p-index is alwasy 0 due to eigenvalue ordering in SWP construction) */
-					size_t idx_alpha_NDOS_row = deuteron_idx_array[idx_d_row];
-					size_t idx_p_NDOS 	  = 0;
-					size_t idx_q_NDOS 	  = q_com_idx_array[idx_q_com];
-
-					size_t idx_row_NDOS   = idx_d_row*num_q_com + idx_q_com;
-
-					/* See if row contains unconverged, on-shell elements */
-					bool row_conv = true;
-					/* Check elastic channels */
-					for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
-						size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
-						if (pade_approximants_conv_array[idx_NDOS]==false){
-							row_conv = false;
-						}
-					}
-					/* Check breakup channels */
-					if (run_parameters.include_breakup_channels){
-						int BU_chn_start = chn_os_indexing.q_com_BU_idx_array[idx_q_com];
-						int BU_chn_end   = chn_os_indexing.q_com_BU_idx_array[idx_q_com+1];
-						for (size_t idx_BU_chn=BU_chn_start; idx_BU_chn<BU_chn_end; idx_BU_chn++){
-							size_t idx_NDOS = idx_d_row*chn_os_indexing.num_BU_chns + idx_BU_chn;
-							if (pade_approximants_BU_conv_array[idx_NDOS]==false){
-								row_conv = false;
-							}
-						}
-					}
-					
-					if (row_conv==false){
+					size_t idx_row_NDOS = elastic_row_storage_index(idx_d_row, idx_q_com, num_q_com);
+					if (row_has_only_converged_targets(idx_d_row,
+													   idx_q_com,
+													   num_deuteron_states,
+													   num_q_com,
+													   pade_approximants_conv_array,
+													   pade_approximants_BU_conv_array,
+													   chn_os_indexing,
+													   run_parameters.include_breakup_channels)==false){
 						for (size_t i=0; i<dense_dim; i++){
 							re_A_An_row_array_comp[num_non_conv_rows*dense_dim + i] = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + i];
 							im_A_An_row_array_comp[num_non_conv_rows*dense_dim + i] = im_A_An_row_array_prev[idx_row_NDOS*dense_dim + i];
@@ -972,6 +1110,9 @@ void pade_method_solve(cdouble*  U_array,
 			
 			printf("       - Calculating on-shell rows of A*K^n for n=%d. \n", n); fflush(stdout);
 			if (keep_CPVC_in_mem==false){
+				// [EN] The kernel columns are regenerated in chunks so the dense GEMM path can stream through the
+				// active part of CPVC without materializing the full dense matrix. / [CN] 这里按块重建核列，这样稠密 GEMM
+				// 路径就能流式处理 CPVC 的活动部分，而不必把整个稠密矩阵完整落在内存中。
 				for (size_t idx_col_chunk=0; idx_col_chunk<num_col_chunks; idx_col_chunk++){
 
 					double timestamp_CPVC_chunk_start = omp_get_wtime();
@@ -1087,40 +1228,41 @@ void pade_method_solve(cdouble*  U_array,
 				im_A_An_row_array_prev[i] = im_A_An_row_array[i];
 			}
 
-			/* Extract coefficients "a" for Pade approximant */
+			// [EN] Only the on-shell entries are fed into the Padé build. This follows the Miller workflow: compute the
+			// physically required scalar coefficient sequence a_n for each elastic/breakup amplitude, then resum those
+			// short sequences rather than the full matrix. / [CN] 只有 on-shell 元素会被送入 Padé 构造。这正对应 Miller
+			// 工作流：先为每个弹性/破裂振幅提取物理上需要的标量系数序列 a_n，再对这些短序列做重求和，而不是对整块矩阵重求和。
 			printf("       - Extracting on-shell Neumann-series terms a_n=A*K^n for n=%d. \n", n); fflush(stdout);
 			/* Extract elastic terms */
 			for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 				for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
 					for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
-						/* Nucleon-deuteron on-shell (NDOS) indices
-						 * (deuteron bound-state p-index is alwasy 0 due to eigenvalue ordering in SWP construction) */
-						size_t idx_alpha_NDOS_row = deuteron_idx_array[idx_d_row];
-						size_t idx_alpha_NDOS_col = deuteron_idx_array[idx_d_col];
-						size_t idx_p_NDOS 	  = 0;
-						size_t idx_q_NDOS 	  = q_com_idx_array[idx_q_com];
-
-						size_t idx_row_NDOS   = idx_d_row*num_q_com + idx_q_com;
-						size_t idx_col_NDOS   = idx_alpha_NDOS_col*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
-
-						size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
+						const elastic_on_shell_index ndos = make_elastic_on_shell_index(idx_d_row,
+																						 idx_d_col,
+																						 idx_q_com,
+																						 deuteron_idx_array,
+																						 q_com_idx_array,
+																						 num_deuteron_states,
+																						 num_q_com,
+																						 Nq_WP,
+																						 Np_WP);
 
 						/* Check if we've already reached convergence for this on-shell element */
-						if (pade_approximants_conv_array[idx_NDOS]==true){
+						if (pade_approximants_conv_array[ndos.value_storage_idx]==true){
 							continue;
 						}
 
 						/* Calculate coefficient */
-						cdouble a_coeff = {re_A_An_row_array[idx_row_NDOS*dense_dim + idx_col_NDOS], im_A_An_row_array[idx_row_NDOS*dense_dim + idx_col_NDOS]};
+						cdouble a_coeff = {re_A_An_row_array[ndos.row_storage_idx*dense_dim + ndos.col_storage_idx], im_A_An_row_array[ndos.row_storage_idx*dense_dim + ndos.col_storage_idx]};
 
 						/* Store coefficient */
-						a_coeff_array[idx_NDOS*num_neumann_terms + n] = a_coeff;
+						a_coeff_array[ndos.value_storage_idx*num_neumann_terms + n] = a_coeff;
 
 						/* Store coefficient in print-to-file format */
-						neumann_store_array[idx_NDOS] = a_coeff;
+						neumann_store_array[ndos.value_storage_idx] = a_coeff;
 
 						if (print_neumann_terms){
-							printf("         - Neumann term %d for alpha'=%ld, alpha=%ld, q=%ld: %.16e + %.16ei \n", n, idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, a_coeff.real(), a_coeff.imag());
+							printf("         - Neumann term %d for alpha'=%ld, alpha=%ld, q=%ld: %.16e + %.16ei \n", n, ndos.alpha_row, ndos.alpha_col, ndos.q_idx, a_coeff.real(), a_coeff.imag());
 						}
 					}
 				}
@@ -1140,7 +1282,9 @@ void pade_method_solve(cdouble*  U_array,
 							size_t idx_row_NDOS   = idx_d_row*num_q_com + idx_q_com;
 							size_t idx_col_NDOS   = idx_alpha_NDOS*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
 
-							size_t idx_NDOS = idx_d_row*chn_os_indexing.num_BU_chns + idx_BU_chn;
+							size_t idx_NDOS = breakup_value_storage_index(idx_d_row,
+																		 idx_BU_chn,
+																		 chn_os_indexing.num_BU_chns);
 
 							/* Check if we've already reached convergence for this on-shell element */
 							if (pade_approximants_BU_conv_array[idx_NDOS]==true){
@@ -1186,12 +1330,20 @@ void pade_method_solve(cdouble*  U_array,
 		delete [] times_array;
 
 		printf("       - Calculating Pade approximants PA[%ld,%ld]. \n", NM, NM); fflush(stdout);
+		// [EN] Padé resummation is what turns a slowly convergent or even divergent Neumann history into stable
+		// amplitudes. Each on-shell element is treated independently because different channels can converge at very
+		// different rates. / [CN] Padé 重求和是把收敛缓慢甚至发散的 Neumann 历史转化为稳定振幅的关键。这里每个 on-shell
+		// 元素独立处理，因为不同通道的收敛速度可能相差很大。
 		/* Calculate Pade approximants (PA) for elastic amplitudes */
 		for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 			for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
 				for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
 
-					size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
+					size_t idx_NDOS = elastic_value_storage_index(idx_d_row,
+															   idx_d_col,
+															   idx_q_com,
+															   num_deuteron_states,
+															   num_q_com);
 
 					/* Check and skip if we've already reached convergence for this on-shell element */
 					if (pade_approximants_conv_array[idx_NDOS]==true){
@@ -1256,7 +1408,9 @@ void pade_method_solve(cdouble*  U_array,
 				for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 					for (size_t idx_BU_chn=BU_chn_start; idx_BU_chn<BU_chn_end; idx_BU_chn++){
 
-						size_t idx_NDOS = idx_d_row*chn_os_indexing.num_BU_chns + idx_BU_chn;
+						size_t idx_NDOS = breakup_value_storage_index(idx_d_row,
+																 idx_BU_chn,
+																 chn_os_indexing.num_BU_chns);
 
 						/* Check and skip if we've already reached convergence for this on-shell element */
 						if (pade_approximants_BU_conv_array[idx_NDOS]==true){
@@ -1318,22 +1472,27 @@ void pade_method_solve(cdouble*  U_array,
 	}
 
 	printf("     - Extracting on-shell U-matrix elements \n"); fflush(stdout);
+	// [EN] After convergence selection, the final U elements are just the best Padé values written back into the
+	// elastic and breakup storage layout expected by the rest of the code. / [CN] 在选定收敛阶数后，最终的 U 元素
+	// 就是把最佳 Padé 值回写到程序其余部分期望的弹性/破裂存储布局中。
 	/* Set on-shell elastic U-matrix elements equal "best" PA */
 	for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 		for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
 			for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
-				/* Nucleon-deuteron on-shell (NDOS) indices
-				 * (deuteron bound-state p-index is alwasy 0 due to eigenvalue ordering in SWP construction) */
-				size_t idx_alpha_NDOS_row = deuteron_idx_array[idx_d_row];
-				size_t idx_alpha_NDOS_col = deuteron_idx_array[idx_d_col];
-				size_t idx_q_NDOS 	   	  = q_com_idx_array[idx_q_com];
+				const elastic_on_shell_index ndos = make_elastic_on_shell_index(idx_d_row,
+																				 idx_d_col,
+																				 idx_q_com,
+																				 deuteron_idx_array,
+																				 q_com_idx_array,
+																				 num_deuteron_states,
+																				 num_q_com,
+																				 Nq_WP,
+																				 Np_WP);
 
-				size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
+				size_t idx_best_PA = pade_approximants_idx_array[ndos.value_storage_idx];
 
-				size_t idx_best_PA = pade_approximants_idx_array[idx_NDOS];
-
-				U_array[idx_NDOS] = pade_approximants_array[idx_NDOS*(NM_max+1) + idx_best_PA];
-				printf("       - U-matrix element for alpha'=%ld, alpha=%ld, q=%ld: %.10e + %.10ei \n", idx_alpha_NDOS_row, idx_alpha_NDOS_col, idx_q_NDOS, U_array[idx_NDOS].real(), U_array[idx_NDOS].imag());
+				U_array[ndos.value_storage_idx] = pade_approximants_array[ndos.value_storage_idx*(NM_max+1) + idx_best_PA];
+				printf("       - U-matrix element for alpha'=%ld, alpha=%ld, q=%ld: %.10e + %.10ei \n", ndos.alpha_row, ndos.alpha_col, ndos.q_idx, U_array[ndos.value_storage_idx].real(), U_array[ndos.value_storage_idx].imag());
 			}
 		}
 	}
@@ -1349,7 +1508,9 @@ void pade_method_solve(cdouble*  U_array,
 					size_t idx_q_NDOS 	  = chn_os_indexing.alphapq_idx_array[idx_BU_chn*3 + 1];
 					size_t idx_p_NDOS 	  = chn_os_indexing.alphapq_idx_array[idx_BU_chn*3 + 2];
 
-					size_t idx_NDOS = idx_d_row*chn_os_indexing.num_BU_chns + idx_BU_chn;
+					size_t idx_NDOS = breakup_value_storage_index(idx_d_row,
+																 idx_BU_chn,
+																 chn_os_indexing.num_BU_chns);
 
 					size_t idx_best_PA = pade_approximants_BU_idx_array[idx_NDOS];
 
