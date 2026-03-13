@@ -24,7 +24,7 @@ void find_on_shell_bins(solution_configuration& solve_config,
 	int     num_unco_chns = swp_states.num_2N_unco_states;
 	int     num_coup_chns = swp_states.num_2N_coup_states;
 
-    /* Use q-momentum bin ENERGY mid-points as on-shell energies if no default input is given */
+	    /* Use q-bin midpoints to derive on-shell solver Tlab values [MeV] for bin selection */
 	std::vector<size_t> q_WP_idx_vec;
 
 	/* Pointer to either p_SWP_unco_array or p_SWP_coup_array,

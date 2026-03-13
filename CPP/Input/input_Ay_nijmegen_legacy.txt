@@ -1,4 +1,4 @@
-# Legacy 190 MeV/u dpol-p profile (Nijmegen potential)
+# Legacy Tlab = 190 MeV d+p profile (Nijmegen potential)
 # Kept for reproducibility of earlier exploratory runs.
 
 two_J_3N_max=1
@@ -40,6 +40,6 @@ PSI_start=-1
 PSI_end=-1
 
 # IO paths (root-relative)
-energy_input_file=CPP/Input/lab_energies_190MeV.txt
+energy_input_file=CPP/Input/tlab_190MeV.txt
 output_folder=CPP/Output
 P123_folder=CPP/Output

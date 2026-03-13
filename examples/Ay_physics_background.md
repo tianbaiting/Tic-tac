@@ -37,14 +37,19 @@ $$A_y(\theta) = \frac{\sigma_{\uparrow}(\theta) - \sigma_{\downarrow}(\theta)}{\
 - **沿y轴极化**：通过适当的磁场配置实现
 - **极化度范围**：-1 ≤ P ≤ +1
 
-## 3. 190 MeV/u 的物理意义
+## 3. Tlab = 190 MeV 的仓库约定
 
 ### 3.1 能量特点
 
-190 MeV/u（每核子190 MeV）对应：
-- **总实验室动能**：T_lab = 380 MeV（氘核）
-- **质心系能量**：E_cm ≈ 135.6 MeV
-- **物理区域**：中等能量区域
+本仓库的 C++ core 把输入解释为 `Tlab [MeV]`：
+- **solver 输入**：`Tlab = 190 MeV`
+- **solver 输出对应的离散点**：通常是接近 `190 MeV` 的 on-shell `Tlab`
+- **对应的 `Ecm`**：由 core 内部换算得到，数值取决于离散后的 on-shell 点
+
+需要避免的混淆：
+- `380 MeV` 不是本仓库的 solver 输入
+- `135.6 MeV` 也不是本仓库的 solver 输入
+- 外部资料中的 `190 MeV/u` 只是实验基准标签；仓库接口统一使用 `Tlab [MeV]`
 
 ### 3.2 这个能量的重要性
 

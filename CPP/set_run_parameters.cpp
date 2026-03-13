@@ -522,9 +522,9 @@ void show_usage(){
 			  << seperationLine
 			  << std::endl;
 	
-	std::cout << "energy_input_file:        Sets in which file in Input to read for Tlab energies used\n"
-			  << "                          in U-matrix calculation.\n"
-			  << "Example:                  energy_input_file=Tlabs -> Program reads file <Tlabs.txt> \n"
+		std::cout << "energy_input_file:        Sets which .txt file contains solver Tlab values in MeV\n"
+				  << "                          used in the U-matrix calculation.\n"
+				  << "Example:                  energy_input_file=Tlabs -> Program reads file <Tlabs.txt> \n"
 			  << seperationLine
 			  << std::endl;
 	

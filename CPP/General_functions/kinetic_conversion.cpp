@@ -18,7 +18,7 @@ double mu1_free(){
 	return Mn*M12/(Mn + M12);
 }
 
-/* Converts CoM momentum to Lab kinetic energy */
+/* Converts nd c.m. momentum to the solver Tlab kinetic energy [MeV] */
 double com_momentum_to_lab_energy(double q_com, double Eb){
 	
 	double Md = deuteron_mass(Eb);
@@ -29,18 +29,18 @@ double com_momentum_to_lab_energy(double q_com, double Eb){
 	return 0.5*(-b + sqrt(b*b - 4*c));
 }
 
-/* Converts Lab kinetic energy to CoM momentum (assuming p+d scattering) */
+/* Converts solver Tlab kinetic energy [MeV] to nd c.m. momentum */
 double lab_energy_to_com_momentum(double T_lab, double Eb){
 	double Md = deuteron_mass(Eb);
 	return sqrt( Md*Md*T_lab*(T_lab + 2*Mp) / ( (Mp+Md)*(Mp+Md) + 2*T_lab*Md ) );
 }
 
-/* Converts 3N CoM kinetic energy to q-momentum for nucleon-deuteron scattering */
+/* Converts the solver 3N c.m. kinetic energy Ecm [MeV] to q-momentum */
 double com_energy_to_com_q_momentum(double E_com){
 	return sqrt(4*E_com*MN/3);
 }
 
-/* Converts 3N q-momentum to CoM kinetic energy for nucleon-deuteron scattering */
+/* Converts q-momentum to the solver 3N c.m. kinetic energy Ecm [MeV] */
 double com_q_momentum_to_com_energy(double q_com){
 	return 3*q_com*q_com/(4*MN);
 }

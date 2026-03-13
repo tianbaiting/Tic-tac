@@ -1,19 +1,21 @@
-# 190 MeV/u dpol-p：从 Tic-tac U 矩阵到截面与 iT11
+# Tlab = 190 MeV dpol-p：从 Tic-tac U 矩阵到截面与 iT11
 
 详细算法流程（离散化、Faddeev 求解、U 到可观测量映射）请看：
 - `docs/algorithm_flow_and_logic.md`
 
 ## 1. 目标
-对 `data/DataOfCrosssectionAndPol` 的 190 MeV/u 极化氘核-质子数据做求解器驱动验证：
+对 `data/DataOfCrosssectionAndPol` 的极化氘核-质子基准数据做求解器驱动验证：
 - 微分截面 `dSigma/dOmega(theta)`
 - 张量极化观测量 `iT11(theta)`
 
 流程不使用实验曲线插值回放。
 
+说明：外部资料常把该实验基准写成 `190 MeV/u`。本仓库与 C++ core 保持一致，solver 输入统一使用 `Tlab [MeV]`，维护点为 `Tlab = 190 MeV`。
+
 ## 2. 运行命令
 ```bash
-python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab 190 --reuse-p123
-python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190
+python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab-mev 190 --reuse-p123
+python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab-mev 190
 ```
 
 ## 3. Experiment Data 与 Faddeev Simulation 的计算链路
@@ -58,14 +60,14 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
    - `dSigma relative RMSE = sqrt(mean(((pred-exp)/exp)^2))`
 
 ## 4. 关键参数
-- `target_tlab=190`（190 MeV/u 对应验证目标）
+- `target_tlab_mev=190`
 - 求解器主参数：`two_J_3N_max=1, J_2N_max=2, Np_WP=20, Nq_WP=20, potential_model=LO_internal`
 - 评估阈值：`ay_rmse_pass=0.02`, `dsigma_rel_rmse_pass=0.05`, `energy_delta_pass=40`
 
 ## 5. 当前结果（以本地最新运行为准）
 不要在文档中手写固定数值，直接读取本次运行输出：
-- `output/deuteron_proton_Ay/solver_validation_190MeV.json`
-- `output/deuteron_proton_Ay/solver_validation_190MeV.txt`
+- `output/deuteron_proton_Ay/solver_validation_tlab_190MeV.json`
+- `output/deuteron_proton_Ay/solver_validation_tlab_190MeV.txt`
 
 快速查看关键字段：
 
@@ -73,13 +75,13 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 python3 - <<'PY'
 import json
 from pathlib import Path
-p = Path('output/deuteron_proton_Ay/solver_validation_190MeV.json')
+p = Path('output/deuteron_proton_Ay/solver_validation_tlab_190MeV.json')
 if not p.exists():
     raise SystemExit('validation JSON not found')
 j = json.loads(p.read_text())
 best = j.get('best_energy', {})
-print('target_tlab=', j.get('target_tlab'))
-print('best_tlab=', best.get('tlab'), 'delta=', best.get('delta_tlab'))
+print('target_tlab_mev=', j.get('target_tlab_mev'))
+print('best_tlab_mev=', best.get('tlab_mev'), 'delta=', best.get('abs_delta_tlab_mev'))
 print('iT11 RMSE=', best.get('it11_rmse'), 'MAE=', best.get('it11_mae'))
 print('dSigma RMSE=', best.get('dsigma_rmse'), 'relative RMSE=', best.get('dsigma_rel_rmse'))
 print('status=', j.get('status'))
@@ -88,8 +90,8 @@ PY
 ```
 
 输出文件：
-- `output/deuteron_proton_Ay/solver_validation_190MeV.txt`
-- `output/deuteron_proton_Ay/solver_validation_190MeV.json`
+- `output/deuteron_proton_Ay/solver_validation_tlab_190MeV.txt`
+- `output/deuteron_proton_Ay/solver_validation_tlab_190MeV.json`
 - `output/deuteron_proton_Ay/best_energy_iT11_curve.csv`
 - `output/deuteron_proton_Ay/best_energy_dsigma_curve.csv`
 - `output/deuteron_proton_Ay/best_energy_iT11_comparison.svg`

@@ -12,9 +12,9 @@
 ## Build, Test, and Development Commands
 - `cd CPP && make -j` builds the solver used by current workflows (`CPP/run`).
 - `./CPP/run CPP/Input/input.txt` runs with an input file.
-- `./CPP/run Np_WP=30 Nq_WP=30 energy_input_file=CPP/Input/lab_energies_190MeV.txt` runs with inline overrides.
-- `python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab 190` runs 190 MeV/u solver output generation.
-- `python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190` validates against experiment.
+- `./CPP/run Np_WP=30 Nq_WP=30 energy_input_file=CPP/Input/tlab_190MeV.txt` runs with inline overrides.
+- `python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab-mev 190` runs solver output generation for `Tlab = 190 MeV`.
+- `python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab-mev 190` validates against experiment.
 - `python3 -m unittest tests/test_190mev_data_pipeline.py` runs the core regression test.
 
 ## Coding Style & Naming Conventions

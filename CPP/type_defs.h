@@ -64,9 +64,9 @@ typedef struct swp_statespace{
  * energies and corresponding bins, as well as deuteron channels, for ALL 3N channels */ 
 typedef struct solution_configuration{
 	size_t  num_T_lab;				// Number of on-shell bins/energies to calculate
-	double* T_lab_array;			// On-shell lab  energies  (T_lab)
-	double* q_com_array;			// On-shell c.m. q-momenta (q_com)
-	double* E_com_array;			// On-shell c.m. energies  (E_com)
+		double* T_lab_array;			// On-shell solver Tlab kinetic energies [MeV]
+		double* q_com_array;			// On-shell c.m. q-momenta (q_com)
+		double* E_com_array;			// On-shell solver Ecm kinetic energies [MeV]
 	int*    q_com_idx_array;		// Index-array for on-shell q-bin (used for elastic scattering)
 	int**   deuteron_idx_arrays;	// Index-arrays deuteron-channels in all 3N-channels
 	int*    deuteron_num_array;		// Contains number of deuteron-channels in all 3N-channels
@@ -166,4 +166,3 @@ typedef struct bounds_mesh_table{
 //} Psparse_table;
 
 #endif // TYPE_DEFS_H
-

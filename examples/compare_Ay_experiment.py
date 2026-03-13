@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Purpose:
-  Compare solver-driven observables against 190 MeV/u experiment data.
+  Compare solver-driven observables against the maintained Tlab benchmark in MeV.
 
 What this script does:
   1) Read solver U-matrix files from solver_out.
@@ -27,7 +27,7 @@ Usage:
   python3 examples/compare_Ay_experiment.py \
     --work-dir output/deuteron_proton_Ay \
     --solver-out-dir output/deuteron_proton_Ay/solver_out \
-    --target-tlab 190 \
+    --target-tlab-mev 190 \
     --dsigma-unit fm2/sr
 """
 
@@ -50,6 +50,7 @@ from observable_units import (
     normalize_dsigma_unit,
 )
 from solver_u_file_utils import detect_parity_symbol, select_latest_u_file_family
+from tlab_utils import format_tlab_label
 
 
 @dataclass
@@ -505,7 +506,7 @@ def _write_comparison_svg(
     path.write_text("\n".join(svg) + "\n", encoding="utf-8")
 
 
-def run_solver_if_requested(work_dir: Path, regenerate: bool, target_tlab: float) -> None:
+def run_solver_if_requested(work_dir: Path, regenerate: bool, target_tlab_mev: float) -> None:
     if not regenerate:
         return
 
@@ -514,8 +515,8 @@ def run_solver_if_requested(work_dir: Path, regenerate: bool, target_tlab: float
         "examples/deuteron_proton_Ay.py",
         "--work-dir",
         str(work_dir),
-        "--target-tlab",
-        str(target_tlab),
+        "--target-tlab-mev",
+        str(target_tlab_mev),
         "--reuse-p123",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -534,13 +535,13 @@ def build_report_text(summary: Dict[str, object]) -> str:
     dsigma_unit_text = _unit_to_axis_suffix(dsigma_unit)
 
     lines: List[str] = []
-    lines.append("190 MeV/u dpol-p: Tic-tac U-matrix -> observables")
-    lines.append("================================================")
+    lines.append("d + p validation from Tic-tac U-matrix")
+    lines.append("======================================")
     lines.append(f"status: {summary['status']}")
     lines.append(f"reason: {summary['status_reason']}")
-    lines.append(f"target_tlab: {summary['target_tlab']:.3f} MeV")
-    lines.append(f"best_tlab: {best['tlab']:.3f} MeV")
-    lines.append(f"abs_delta_tlab: {best['delta_tlab']:.3f} MeV")
+    lines.append(f"target_tlab_mev: {summary['target_tlab_mev']:.3f}")
+    lines.append(f"best_tlab_mev: {best['tlab_mev']:.3f}")
+    lines.append(f"abs_delta_tlab_mev: {best['abs_delta_tlab_mev']:.3f}")
     lines.append("")
 
     lines.append("Best-energy metrics:")
@@ -575,7 +576,7 @@ def build_report_text(summary: Dict[str, object]) -> str:
     for item in summary["energies"]:
         lines.append(
             "  "
-            f"Tlab={item['tlab']:.3f} MeV, "
+            f"Tlab={item['tlab_mev']:.3f} MeV, "
             f"iT11_rmse={item['it11_rmse']:.6f}, "
             f"dSigma_rel_rmse={item['dsigma_rel_rmse']:.6f}"
         )
@@ -585,12 +586,13 @@ def build_report_text(summary: Dict[str, object]) -> str:
     lines.append("  This workflow predicts observables from solver-produced U-matrix elements only.")
     lines.append("  Experimental data is used only for residual evaluation.")
     lines.append("  No interpolation or fitting to experimental curves is performed in prediction.")
+    lines.append("  External references often call this benchmark '190 MeV/u'; this repository uses solver input Tlab [MeV].")
 
     return "\n".join(lines) + "\n"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Validate Tic-tac solver output against 190MeV/u dpol-p data")
+    parser = argparse.ArgumentParser(description="Validate Tic-tac solver output against a target Tlab benchmark in MeV")
     parser.add_argument("--work-dir", default="output/deuteron_proton_Ay", help="Working/output directory")
     parser.add_argument(
         "--solver-out-dir",
@@ -613,7 +615,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=list(SUPPORTED_DSIGMA_UNITS),
         help="Output unit for dSigma/dOmega in reports, CSV, and plots",
     )
-    parser.add_argument("--target-tlab", type=float, default=190.0)
+    parser.add_argument("--target-tlab-mev", type=float, default=190.0)
     parser.add_argument("--regenerate", action="store_true", help="Run solver before comparison")
     parser.add_argument("--ay-rmse-pass", type=float, default=0.02)
     parser.add_argument("--dsigma-rel-rmse-pass", type=float, default=0.05)
@@ -637,7 +639,7 @@ def main() -> int:
     dsigma_data = (root / args.dsigma_data).resolve()
 
     work_dir.mkdir(parents=True, exist_ok=True)
-    run_solver_if_requested(work_dir, args.regenerate, args.target_tlab)
+    run_solver_if_requested(work_dir, args.regenerate, args.target_tlab_mev)
 
     # Solver branch: U files -> parsed channel points.
     u_files = find_latest_solver_u_files(solver_out_dir)
@@ -673,9 +675,9 @@ def main() -> int:
         dsigma_metrics = fit["dsigma_metrics"]
 
         enriched_item: Dict[str, object] = {
-            "tlab": item["tlab"],
-            "ecm_weighted": item["ecm_weighted"],
-            "delta_tlab": abs(float(item["tlab"]) - args.target_tlab),
+            "tlab_mev": item["tlab"],
+            "ecm_weighted_mev": item["ecm_weighted"],
+            "abs_delta_tlab_mev": abs(float(item["tlab"]) - args.target_tlab_mev),
             "it11_mae": it11_metrics["mae"],
             "it11_rmse": it11_metrics["rmse"],
             "it11_max_abs_error": it11_metrics["max_abs_error"],
@@ -710,12 +712,12 @@ def main() -> int:
         enriched.append(enriched_item)
 
     # Select closest available solver energy to the requested target and emit artifacts.
-    best = min(enriched, key=lambda item: float(item["delta_tlab"]))
+    best = min(enriched, key=lambda item: float(item["abs_delta_tlab_mev"]))
 
     pass_flag = (
         float(best["it11_rmse"]) <= args.ay_rmse_pass
         and float(best["dsigma_rel_rmse"]) <= args.dsigma_rel_rmse_pass
-        and float(best["delta_tlab"]) <= args.energy_delta_pass
+        and float(best["abs_delta_tlab_mev"]) <= args.energy_delta_pass
     )
 
     ay_csv = work_dir / "best_energy_iT11_curve.csv"
@@ -741,7 +743,7 @@ def main() -> int:
     )
     _write_comparison_svg(
         ay_svg,
-        title=f"iT11 Comparison (best Tlab={best['tlab']:.3f} MeV)",
+        title=f"iT11 Comparison (best Tlab={best['tlab_mev']:.3f} MeV)",
         x_label="theta_cm (deg)",
         y_label="iT11",
         angles=best["it11_curve"]["angles_deg"],
@@ -751,7 +753,7 @@ def main() -> int:
     )
     _write_comparison_svg(
         dsigma_svg,
-        title=f"dSigma/dOmega Comparison (best Tlab={best['tlab']:.3f} MeV)",
+        title=f"dSigma/dOmega Comparison (best Tlab={best['tlab_mev']:.3f} MeV)",
         x_label="theta_cm (deg)",
         y_label=f"dSigma/dOmega [{_unit_to_axis_suffix(dsigma_output_unit)}]",
         angles=best["dsigma_curve"]["angles_deg"],
@@ -767,7 +769,7 @@ def main() -> int:
             if pass_flag
             else "best solver-based predicted observables exceed thresholds"
         ),
-        "target_tlab": args.target_tlab,
+        "target_tlab_mev": args.target_tlab_mev,
         "thresholds": {
             "ay_rmse_pass": args.ay_rmse_pass,
             "dsigma_rel_rmse_pass": args.dsigma_rel_rmse_pass,
@@ -800,8 +802,9 @@ def main() -> int:
         },
     }
 
-    json_file = work_dir / "solver_validation_190MeV.json"
-    txt_file = work_dir / "solver_validation_190MeV.txt"
+    tlab_label = format_tlab_label(args.target_tlab_mev)
+    json_file = work_dir / f"solver_validation_tlab_{tlab_label}.json"
+    txt_file = work_dir / f"solver_validation_tlab_{tlab_label}.txt"
 
     json_file.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     txt_file.write_text(build_report_text(summary), encoding="utf-8")

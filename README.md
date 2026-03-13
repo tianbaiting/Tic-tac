@@ -1,13 +1,15 @@
 # Tic-tac
 
+forked from https://github.com/seanbsm/Tic-tac. and reconstructed. 
+
 Tic-tac is a three-nucleon Faddeev-equation solver (wave-packet discretization, WPCD) for nucleon-deuteron scattering.
-This repository includes the core solver, input/config workflow, and a validated 190 MeV/u dpol-p comparison pipeline.
+This repository includes the core solver, input/config workflow, and a validated Tlab-aligned dpol-p comparison pipeline for the benchmark often labeled 190 MeV/u.
 
 ## Scope
 
 - Solve elastic nd/pd amplitudes (`U_PW_elements_*`).
 - Build WP/SWP state spaces and solve AGS/Faddeev equations.
-- Validate 190 MeV/u polarized deuteron-proton observables against experimental data in `data/DataOfCrosssectionAndPol`.
+- Validate the maintained `Tlab = 190 MeV` polarized deuteron-proton benchmark against experimental data in `data/DataOfCrosssectionAndPol`.
 
 ## Repository Layout
 
@@ -51,8 +53,8 @@ If you need command help from solver:
 Canonical hand-written input files are kept in `CPP/Input/`:
 
 - `CPP/Input/input.txt`: baseline profile
-- `CPP/Input/input_Ay_test.txt`: lower-cost 190 MeV/u quick test profile
-- `CPP/Input/input_Ay_fixed.txt`: refined 190 MeV/u profile
+- `CPP/Input/input_Ay_test.txt`: lower-cost `Tlab = 190 MeV` quick test profile
+- `CPP/Input/input_Ay_fixed.txt`: refined `Tlab = 190 MeV` profile
 - `CPP/Input/input_Ay_nijmegen_legacy.txt`: legacy Nijmegen profile (kept for reproducibility)
 
 Run from repository root:
@@ -61,18 +63,20 @@ Run from repository root:
 ./CPP/run CPP/Input/input.txt
 ```
 
-## 190 MeV/u dpol-p Workflow
+## Tlab = 190 MeV dpol-p Workflow
+
+External references often call this benchmark `190 MeV/u`. In this repository, solver-facing inputs are always `Tlab [MeV]` to match the C++ core.
 
 ### 1. Run solver
 
 ```bash
-python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab 190 --reuse-p123
+python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab-mev 190 --reuse-p123
 ```
 
 ### 2. Validate against experiment
 
 ```bash
-python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190
+python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab-mev 190
 ```
 
 `dSigma/dOmega` output unit can be selected with `--dsigma-unit`:
@@ -85,12 +89,12 @@ python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay -
 micromamba run -n anaroot-env python examples/plot_validation_curves.py --work-dir output/deuteron_proton_Ay
 ```
 
-## Multi-Energy dpol-p Observables (70/135/190 MeV/u)
+## Multi-Tlab dpol-p Observables (70/135/190 MeV)
 
 Run solver-driven (Faddeev `U` -> observables) pipeline:
 
 ```bash
-python3 examples/run_dpol_p_observables.py --work-dir output/dpol_p_observables --energies 70,135,190
+python3 examples/run_dpol_p_observables.py --work-dir output/dpol_p_observables --target-tlabs-mev 70,135,190
 ```
 
 Plot all observables (`dSigma/dOmega`, `iT11`, `T20`, `T21`, `T22`) with matplotlib:
@@ -102,7 +106,7 @@ micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py --work-
 To generate curves in `fm^2/sr` instead of `mb/sr`:
 
 ```bash
-python3 examples/run_dpol_p_observables.py --work-dir output/dpol_p_observables --energies 70,135,190 --dsigma-unit fm2/sr
+python3 examples/run_dpol_p_observables.py --work-dir output/dpol_p_observables --target-tlabs-mev 70,135,190 --dsigma-unit fm2/sr
 ```
 
 Detailed algorithm and output hierarchy:
@@ -115,8 +119,8 @@ Tic-tac tunable parameters and practical tuning order:
 
 Generated under `output/deuteron_proton_Ay/`:
 
-- `solver_validation_190MeV.txt`
-- `solver_validation_190MeV.json`
+- `solver_validation_tlab_190MeV.txt`
+- `solver_validation_tlab_190MeV.json`
 - `best_energy_iT11_curve.csv`
 - `best_energy_dsigma_curve.csv`
 - `best_energy_exp_vs_faddeev_annotated.png` (single annotated comparison figure)

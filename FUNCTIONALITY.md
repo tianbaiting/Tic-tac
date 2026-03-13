@@ -25,11 +25,11 @@ Parameter reference:
 - `docs/tictac_parameter_tuning.md`
 
 ## Validated Workflows
-- 190 MeV/u dpol-p solver output + experiment comparison:
+- `Tlab = 190 MeV` dpol-p solver output + experiment comparison:
   - `examples/deuteron_proton_Ay.py`
   - `examples/compare_Ay_experiment.py`
   - `examples/plot_validation_curves.py`
-- Multi-energy observables (70/135/190 MeV/u):
+- Multi-Tlab observables (`70/135/190 MeV`):
   - `examples/run_dpol_p_observables.py`
   - `examples/plot_dpol_p_observables.py`
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Purpose:
-  Plot validation curves for the 190 MeV/u workflow in `output/deuteron_proton_Ay`.
+  Plot validation curves for the maintained Tlab benchmark workflow in `output/deuteron_proton_Ay`.
 
 Data flow (left -> right):
-  best_energy_iT11_curve.csv + best_energy_dsigma_curve.csv + solver_validation_190MeV.json
+  best_energy_iT11_curve.csv + best_energy_dsigma_curve.csv + solver_validation_tlab_190MeV.json
     -> parse curve values and summary metrics
     -> single-panel + combined-panel matplotlib plots
     -> PNG files in work directory
@@ -101,7 +101,7 @@ def make_combined_plot(
     dsigma_y_label: str,
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5.4), dpi=140)
-    fig.suptitle("Experiment vs Faddeev Simulation (190 MeV/u d + p)", fontsize=15, fontweight="bold")
+    fig.suptitle("Experiment vs Faddeev Simulation (solver Tlab benchmark)", fontsize=15, fontweight="bold")
 
     best_tlab = annotation.get("best_tlab", math.nan)
     target_tlab = annotation.get("target_tlab", math.nan)
@@ -171,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-dir", default="output/deuteron_proton_Ay", help="Validation output directory")
     parser.add_argument("--it11-csv", default="best_energy_iT11_curve.csv")
     parser.add_argument("--dsigma-csv", default="best_energy_dsigma_curve.csv")
-    parser.add_argument("--summary-json", default="solver_validation_190MeV.json")
+    parser.add_argument("--summary-json", default="solver_validation_tlab_190MeV.json")
     return parser
 
 
@@ -193,8 +193,8 @@ def main() -> int:
     dsigma_unit = str(units.get("dsigma_output", "mb/sr"))
     dsigma_unit_text = "fm^2/sr" if dsigma_unit == "fm2/sr" else dsigma_unit
     annotation = {
-        "target_tlab": float(summary.get("target_tlab", math.nan)),
-        "best_tlab": float(best.get("tlab", math.nan)),
+        "target_tlab": float(summary.get("target_tlab_mev", math.nan)),
+        "best_tlab": float(best.get("tlab_mev", math.nan)),
         "it11_rmse": float(best.get("it11_rmse", math.nan)),
         "it11_mae": float(best.get("it11_mae", math.nan)),
         "it11_max_abs_error": float(best.get("it11_max_abs_error", math.nan)),
@@ -215,7 +215,7 @@ def main() -> int:
         model_vals=it11_model,
         exp_label=it11_exp_label,
         model_label=it11_model_label,
-        title="190 MeV/u dpol-p: iT11 (Experiment vs Model)",
+        title="Tlab benchmark d + p: iT11 (Experiment vs Model)",
         y_label="iT11",
         out_file=it11_png,
         log_y=False,
@@ -226,7 +226,7 @@ def main() -> int:
         model_vals=ds_model,
         exp_label=ds_exp_label,
         model_label=ds_model_label,
-        title="190 MeV/u dpol-p: dSigma/dOmega (Experiment vs Model)",
+        title="Tlab benchmark d + p: dSigma/dOmega (Experiment vs Model)",
         y_label=f"dSigma/dOmega [{dsigma_unit_text}]",
         out_file=dsigma_png,
         log_y=True,

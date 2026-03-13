@@ -1,4 +1,4 @@
-# dpol-p 多能量观测量计算（70/135/190 MeV/u）
+# dpol-p 多 Tlab 观测量计算（70/135/190 MeV）
 
 ## 1. 目标
 用 Tic-tac/Faddeev 求解器直接输出的 `U_PW_elements` 计算以下可观测量：
@@ -16,7 +16,7 @@
 ```bash
 python3 examples/run_dpol_p_observables.py \
   --work-dir output/dpol_p_observables \
-  --energies 70,135,190 \
+  --target-tlabs-mev 70,135,190 \
   --dsigma-unit mb/sr
 ```
 
@@ -56,7 +56,7 @@ micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py \
 `output/dpol_p_observables/`
 
 - `inputs/`
-  - `target_energies_mev_per_u.txt`
+  - `target_tlabs_mev.txt`
   - `solver_input_snapshot.txt`
 - `solver/`
   - `solver_run.log`
@@ -65,13 +65,13 @@ micromamba run -n anaroot-env python examples/plot_dpol_p_observables.py \
 - `analysis/`
   - `summary.json`
   - `summary.txt`
-  - `energy_070MeVu/`、`energy_135MeVu/`、`energy_190MeVu/`
+  - `tlab_070MeV/`、`tlab_135MeV/`、`tlab_190MeV/`
     - `observables_model.csv`
     - `metadata.json`
     - `observables_experiment_190.csv`（仅 190，后验对比）
     - `comparison_experiment_190.json`（仅 190，后验指标）
 - `figures/`
-  - `energy_070MeVu_observables.png`
-  - `energy_135MeVu_observables.png`
-  - `energy_190MeVu_observables.png`
+  - `tlab_070MeV_observables.png`
+  - `tlab_135MeV_observables.png`
+  - `tlab_190MeV_observables.png`
   - `overview_observables_multi_energy.png`

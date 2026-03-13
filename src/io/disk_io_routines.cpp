@@ -626,8 +626,8 @@ void store_U_BU_matrix_elements_txt(std::complex<double>*    U_array,
 	result_file << "# J:                           Pair total angular momentum  \n";
 	result_file << "# l:                           Spectator orbital angular momentum  \n";
 	result_file << "# j:                           Spectator total angular momentum  \n";
-	result_file << "# Tlab:                        Laboratory scattering/kinetic energy  \n";
-	result_file << "# Ecm:                         Centre-of-mass scattering/kinetic energy  \n";
+		result_file << "# Tlab:                        Solver laboratory scattering/kinetic energy [MeV]  \n";
+		result_file << "# Ecm:                         Solver centre-of-mass scattering/kinetic energy [MeV] (not total relativistic energy)  \n";
 	result_file << "# qcm:                         Spectator centre-of-mass momentum bin midpoint \n";
 	result_file << "# qlo:                         Spectator centre-of-mass momentum bin lower boundary \n";
 	result_file << "# qup:                         Spectator centre-of-mass momentum bin upper boundary \n";
@@ -809,8 +809,8 @@ void store_U_matrix_elements_txt(std::complex<double>*    U_array,
 	result_file << "# Uij:   U-matrix element in MeV with row-idx i and col-idx j (NOTE in wave-packet representation!)  \n";
 	result_file << "# l:     Spectator nucleon orbital angular momentum  \n";
 	result_file << "# j:     Spectator nucleon total angular momentum  \n";
-	result_file << "# Tlab:  Laboratory scattering/kinetic energy  \n";
-	result_file << "# Ecm:   Centre-of-mass scattering/kinetic energy  \n";
+		result_file << "# Tlab:  Solver laboratory scattering/kinetic energy [MeV]  \n";
+		result_file << "# Ecm:   Solver centre-of-mass scattering/kinetic energy [MeV] (not total relativistic energy)  \n";
 	result_file << "# q_idx: Index of on-shell q-momentum bin correponding to Tlab/Ecm  \n";
 	result_file << "# \n";
 	result_file << "# ################################################################################################### \n";

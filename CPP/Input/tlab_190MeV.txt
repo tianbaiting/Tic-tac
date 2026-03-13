@@ -1,0 +1,5 @@
+# d + p solver input file
+# Core convention: each entry is Tlab [MeV]
+# Maintained benchmark point for the validation workflow
+
+190.0

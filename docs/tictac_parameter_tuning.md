@@ -6,7 +6,7 @@
 
 支持两种输入：
 - 输入文件：`./CPP/run CPP/Input/input.txt`
-- 命令行 `key=value`：`./CPP/run Np_WP=30 Nq_WP=30 energy_input_file=CPP/Input/lab_energies_190MeV.txt`
+- 命令行 `key=value`：`./CPP/run Np_WP=30 Nq_WP=30 energy_input_file=CPP/Input/tlab_190MeV.txt`
 
 仓库内手写输入模板统一放在 `CPP/Input/`，避免散落在根目录或其他目录。
 

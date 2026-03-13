@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Purpose:
-  Fast smoke test for the maintained 190 MeV/u pipeline.
+  Fast smoke test for the maintained Tlab benchmark pipeline.
 
 Data flow (left -> right):
   CLI args
@@ -12,7 +12,7 @@ Data flow (left -> right):
 
 Calls / dependencies:
   - External process wrapper around scripts in `examples/`.
-  - Reads `solver_validation_190MeV.json` when present.
+  - Reads `solver_validation_tlab_*.json` when present.
 
 Usage:
   python3 examples/quick_Ay_test.py --work-dir output/quick_Ay_test --plot
@@ -26,6 +26,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import List
+
+from tlab_utils import format_tlab_label
 
 
 def run_command(cmd: List[str], cwd: Path, timeout_s: int) -> int:
@@ -54,9 +56,9 @@ def run_command(cmd: List[str], cwd: Path, timeout_s: int) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Quick Tic-tac 190 MeV/u smoke validation")
+    parser = argparse.ArgumentParser(description="Quick Tic-tac Tlab smoke validation")
     parser.add_argument("--work-dir", default="output/quick_Ay_test", help="Working directory")
-    parser.add_argument("--target-tlab", type=float, default=190.0)
+    parser.add_argument("--target-tlab-mev", type=float, default=190.0)
     parser.add_argument("--two-j-3n-max", type=int, default=1)
     parser.add_argument("--j-2n-max", type=int, default=2)
     parser.add_argument("--np", type=int, default=20)
@@ -87,8 +89,8 @@ def main() -> int:
         str(root / "examples" / "deuteron_proton_Ay.py"),
         "--work-dir",
         str(work_dir),
-        "--target-tlab",
-        str(args.target_tlab),
+        "--target-tlab-mev",
+        str(args.target_tlab_mev),
         "--two-j-3n-max",
         str(args.two_j_3n_max),
         "--j-2n-max",
@@ -131,29 +133,25 @@ def main() -> int:
         str(work_dir),
         "--solver-out-dir",
         str(work_dir / "solver_out"),
-        "--target-tlab",
-        str(args.target_tlab),
+        "--target-tlab-mev",
+        str(args.target_tlab_mev),
     ]
     rc = run_command(compare_cmd, root, timeout_s=180)
 
     # Step 3: optional lightweight summary extraction for CI/smoke visibility.
-    summary_path = work_dir / "solver_validation_190MeV.json"
+    summary_label = format_tlab_label(args.target_tlab_mev)
+    summary_path = work_dir / f"solver_validation_tlab_{summary_label}.json"
     if summary_path.exists():
         try:
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
             best = payload.get("best_energy", {})
-            metrics = payload.get("metrics", {})
             print("[SUMMARY]")
             print(
-                f"best_tlab={best.get('tlab', 'NA')} "
-                f"target={payload.get('target_tlab', 'NA')} "
-                f"delta={best.get('delta_to_target', 'NA')}"
+                f"best_tlab_mev={best.get('tlab_mev', 'NA')} "
+                f"target_tlab_mev={payload.get('target_tlab_mev', 'NA')} "
+                f"abs_delta_tlab_mev={best.get('abs_delta_tlab_mev', 'NA')}"
             )
-            print(
-                f"iT11_rmse={metrics.get('it11_rmse', 'NA')} "
-                f"dSigma_rel_rmse={metrics.get('dsigma_relative_rmse', 'NA')} "
-                f"pass={payload.get('pass_threshold', 'NA')}"
-            )
+            print(f"status={payload.get('status', 'NA')}")
         except Exception as exc:
             print(f"[WARN] Failed to parse summary JSON: {exc}")
 
@@ -163,6 +161,8 @@ def main() -> int:
             str(root / "examples" / "plot_validation_curves.py"),
             "--work-dir",
             str(work_dir),
+            "--summary-json",
+            summary_path.name,
         ]
         _ = run_command(plot_cmd, root, timeout_s=180)
 

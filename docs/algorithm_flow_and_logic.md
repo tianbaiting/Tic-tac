@@ -1,4 +1,4 @@
-# Tic-tac 算法流程与逻辑（面向 190 MeV/u dpol-p）
+# Tic-tac 算法流程与逻辑（面向 Tlab = 190 MeV dpol-p）
 
 ## 1. 文档目标
 本文档解释本仓库如何从输入能量与势模型出发，经过 Faddeev/WPCD 数值求解，得到 `U` 矩阵，再生成与实验数据对比的
@@ -7,6 +7,8 @@
 
 对应验证管线见：`docs/dpol_p_190MeV_validation.md`。
 参数调优与输入项说明见：`docs/tictac_parameter_tuning.md`。
+
+说明：外部资料常把该实验基准记为 `190 MeV/u`。本仓库所有 solver 接口统一使用 `Tlab [MeV]`，与 C++ core 的定义保持一致。
 
 ## 2. ctags 入口约定（替代行号）
 为避免文档因代码增删而失效，本文统一使用“符号入口（tag）”而非固定行号。
@@ -124,14 +126,14 @@ rg '^make_fwp_statespace\t' tags
 - 截面 `relative RMSE`
 
 结果写入：
-- `output/deuteron_proton_Ay/solver_validation_190MeV.txt`
-- `output/deuteron_proton_Ay/solver_validation_190MeV.json`
+- `output/deuteron_proton_Ay/solver_validation_tlab_190MeV.txt`
+- `output/deuteron_proton_Ay/solver_validation_tlab_190MeV.json`
 - 对比图（`png/svg`）与曲线（`csv`）。
 
-## 9. 190 MeV/u 复现实验命令
+## 9. Tlab = 190 MeV 复现实验命令
 ```bash
-python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab 190 --reuse-p123
-python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab 190
+python3 examples/deuteron_proton_Ay.py --work-dir output/deuteron_proton_Ay --target-tlab-mev 190 --reuse-p123
+python3 examples/compare_Ay_experiment.py --work-dir output/deuteron_proton_Ay --solver-out-dir output/deuteron_proton_Ay/solver_out --target-tlab-mev 190
 micromamba run -n anaroot-env python examples/plot_validation_curves.py --work-dir output/deuteron_proton_Ay
 ```
 

@@ -5,7 +5,7 @@ Purpose:
   `examples/run_dpol_p_observables.py`.
 
 Data flow (left -> right):
-  analysis/summary.json + analysis/energy_*/observables_model.csv
+  analysis/summary.json + analysis/tlab_*/observables_model.csv
     (+ optional observables_experiment_190.csv for 190 MeV comparison)
     -> matplotlib plotting
     -> figures/*.png
@@ -115,7 +115,7 @@ def plot_single_energy(
     axes[1, 2].axis("off")
 
     fig.suptitle(
-        f"d + p observables (target {target_tlab:.1f} MeV/u, solver {solver_tlab:.3f} MeV)",
+        f"d + p observables (target Tlab={target_tlab:.1f} MeV, solver Tlab={solver_tlab:.3f} MeV)",
         fontsize=14,
         fontweight="bold",
     )
@@ -163,7 +163,7 @@ def plot_overview(
     colors = ["#dc2626", "#1d4ed8", "#059669", "#a16207", "#7c3aed"]
     for idx, (target_tlab, solver_tlab, model) in enumerate(all_model):
         color = colors[idx % len(colors)]
-        label = f"target {target_tlab:.1f}, solver {solver_tlab:.3f} MeV"
+        label = f"target Tlab={target_tlab:.1f} MeV, solver Tlab={solver_tlab:.3f} MeV"
         theta = model["theta_deg"]
         for ax, key in zip(ax_list, OBS_KEYS):
             ax.plot(theta, model[key], color=color, lw=1.8, label=label)
@@ -223,7 +223,7 @@ def main() -> int:
 
     # One figure per target energy: model curve and optional experiment overlay.
     for entry in energy_entries:
-        target_tlab = float(entry["target_tlab_mev_per_u"])
+        target_tlab = float(entry["target_tlab_mev"])
         solver_tlab = float(entry["selected_solver_tlab_mev"])
         energy_dir = Path(str(entry["analysis_dir"]))
         model_csv = energy_dir / "observables_model.csv"
