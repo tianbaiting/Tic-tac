@@ -24,6 +24,14 @@ add_executable(test_coupling_coefficients
 target_link_libraries(test_coupling_coefficients ${GSL_LIBRARIES})
 add_test(NAME coupling_coefficients COMMAND test_coupling_coefficients)
 
-# L2: Spin-isospin algebra tests (added in Task 3)
+# L2: Spin-isospin algebra tests
+add_executable(test_spin_isospin_algebra
+    test_spin_isospin_algebra.cpp
+    ${TEST_UTIL_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
+)
+target_link_libraries(test_spin_isospin_algebra ${GSL_LIBRARIES})
+add_test(NAME spin_isospin_algebra COMMAND test_spin_isospin_algebra)
+
 # L2: 3NF matrix element tests (added in Task 5)
 # L3: 3NF symmetry tests (added in Task 7)
