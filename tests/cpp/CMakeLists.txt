@@ -33,5 +33,18 @@ add_executable(test_spin_isospin_algebra
 target_link_libraries(test_spin_isospin_algebra ${GSL_LIBRARIES})
 add_test(NAME spin_isospin_algebra COMMAND test_spin_isospin_algebra)
 
-# L2: 3NF matrix element tests (added in Task 5)
+# L2: 3NF matrix element tests
+set(TEST_3NF_SOURCES
+    ${TEST_UTIL_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
+)
+add_executable(test_3nf_matrix_elements
+    test_3nf_matrix_elements.cpp
+    ${TEST_3NF_SOURCES}
+)
+target_link_libraries(test_3nf_matrix_elements ${GSL_LIBRARIES} ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+add_test(NAME 3nf_matrix_elements COMMAND test_3nf_matrix_elements)
+
 # L3: 3NF symmetry tests (added in Task 7)
