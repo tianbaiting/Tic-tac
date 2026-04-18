@@ -28,7 +28,7 @@ static pw_3N_statespace make_test_pw_states() {
 }
 
 void test_contact_zero_when_cE_zero() {
-    chiral_N2LO_3NF tnf(0.0, 0.0, 500.0);  // c_D=0, c_E=0
+    chiral_N2LO_3NF tnf(0.0, 0.0, 500.0, 0.0, 0.0, 0.0);  // c_D=0, c_E=0, c1=c3=c4=0
     pw_3N_statespace pw = make_test_pw_states();
     for (int a = 0; a < pw.Nalpha; a++) {
         double val = tnf.W1_element(a, a, 1.0, 1.0, 1.0, 1.0, pw);
@@ -37,7 +37,7 @@ void test_contact_zero_when_cE_zero() {
 }
 
 void test_contact_diagonal() {
-    chiral_N2LO_3NF tnf(0.0, -0.398, 500.0);  // c_E only
+    chiral_N2LO_3NF tnf(0.0, -0.398, 500.0, 0.0, 0.0, 0.0);  // c_E only
     pw_3N_statespace pw = make_test_pw_states();
     for (int a = 0; a < pw.Nalpha; a++) {
         for (int b = 0; b < pw.Nalpha; b++) {
@@ -52,7 +52,7 @@ void test_contact_diagonal() {
 }
 
 void test_1pe_ct_zero_when_cD_zero() {
-    chiral_N2LO_3NF tnf(0.0, -0.398, 500.0);  // c_D=0
+    chiral_N2LO_3NF tnf(0.0, -0.398, 500.0, 0.0, 0.0, 0.0);  // c_D=0, c1=c3=c4=0
     pw_3N_statespace pw = make_test_pw_states();
     for (int a = 0; a < pw.Nalpha; a++) {
         for (int b = 0; b < pw.Nalpha; b++) {
@@ -67,7 +67,7 @@ void test_1pe_ct_zero_when_cD_zero() {
 }
 
 void test_1pe_ct_nonzero_when_cD_set() {
-    chiral_N2LO_3NF tnf(-0.2, 0.0, 500.0);  // c_D=-0.2, c_E=0
+    chiral_N2LO_3NF tnf(-0.2, 0.0, 500.0, 0.0, 0.0, 0.0);  // c_D=-0.2, c_E=0, c1=c3=c4=0
     pw_3N_statespace pw = make_test_pw_states();
     bool found_nonzero = false;
     for (int a = 0; a < pw.Nalpha && !found_nonzero; a++) {
@@ -88,6 +88,37 @@ void test_1pe_ct_nonzero_when_cD_set() {
     }
 }
 
+void test_2pe_zero_when_c1c3c4_zero() {
+    // With c1=c3=c4=0, 2PE contributes nothing; diagonal elements should match contact+1PE-CT only
+    chiral_N2LO_3NF tnf_no2pe(0.0, -0.398, 500.0, 0.0, 0.0, 0.0);
+    chiral_N2LO_3NF tnf_with2pe(0.0, -0.398, 500.0, 0.0, 0.0, 0.0);  // same: c1=c3=c4=0
+    pw_3N_statespace pw = make_test_pw_states();
+    for (int a = 0; a < pw.Nalpha; a++) {
+        double val_no = tnf_no2pe.W1_element(a, a, 1.5, 0.8, 1.2, 1.0, pw);
+        double val_with = tnf_with2pe.W1_element(a, a, 1.5, 0.8, 1.2, 1.0, pw);
+        check_close("2PE_zero_c1c3c4_zero", val_with, val_no);
+    }
+}
+
+void test_2pe_nonzero_when_c1c3_set() {
+    // With Idaho c1,c3 set, diagonal elements should differ from the c1=c3=0 case
+    chiral_N2LO_3NF tnf_no2pe(0.0, 0.0, 500.0, 0.0, 0.0, 0.0);
+    chiral_N2LO_3NF tnf_2pe(0.0, 0.0, 500.0, -0.81, -3.2, 0.0);  // Idaho c1,c3
+    pw_3N_statespace pw = make_test_pw_states();
+    bool found_diff = false;
+    for (int a = 0; a < pw.Nalpha && !found_diff; a++) {
+        double val_no = tnf_no2pe.W1_element(a, a, 1.5, 0.8, 1.2, 1.0, pw);
+        double val_2pe = tnf_2pe.W1_element(a, a, 1.5, 0.8, 1.2, 1.0, pw);
+        if (std::abs(val_2pe - val_no) > 1e-15) found_diff = true;
+    }
+    if (!found_diff) {
+        std::printf("FAIL 2PE_nonzero: no diagonal elements differ with c1=-0.81, c3=-3.2\n");
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
 int main() {
     std::printf("=== L2: 3NF Matrix Element Tests ===\n\n");
 
@@ -95,6 +126,8 @@ int main() {
     test_contact_diagonal();
     test_1pe_ct_zero_when_cD_zero();
     test_1pe_ct_nonzero_when_cD_set();
+    test_2pe_zero_when_c1c3c4_zero();
+    test_2pe_nonzero_when_c1c3_set();
 
     std::printf("\n%d passed, %d failed\n", g_passes, g_failures);
     return g_failures > 0 ? 1 : 0;
