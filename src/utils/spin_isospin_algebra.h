@@ -35,6 +35,11 @@ double reduced_me_sigma1_dot_sigma3(int L_prime, int S_prime, int J_2N_prime,
                                      int L, int S, int J_2N,
                                      int l, int two_j_1N);
 
+// tau_1 . tau_3 matrix element in the pair isospin basis.
+// Returns <((1/2,1/2)T', 1/2)T_3N | tau_1.tau_3 | ((1/2,1/2)T, 1/2)T_3N>
+// Arguments: T_prime, T are regular integers; two_T_3N is twice-integer.
+double tau1_dot_tau3(int T_prime, int T, int two_T_3N);
+
 // Rank-2 tensor operator decomposition.
 // Placeholder — full implementation in Task 6.
 double reduced_me_sigma_q_tensor(int L_prime, int S_prime, int J_2N,
