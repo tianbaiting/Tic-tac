@@ -47,4 +47,10 @@ add_executable(test_3nf_matrix_elements
 target_link_libraries(test_3nf_matrix_elements ${GSL_LIBRARIES} ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 add_test(NAME 3nf_matrix_elements COMMAND test_3nf_matrix_elements)
 
-# L3: 3NF symmetry tests (added in Task 7)
+# L3: 3NF symmetry tests
+add_executable(test_3nf_symmetries
+    test_3nf_symmetries.cpp
+    ${TEST_3NF_SOURCES}
+)
+target_link_libraries(test_3nf_symmetries ${GSL_LIBRARIES} ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+add_test(NAME 3nf_symmetries COMMAND test_3nf_symmetries)
