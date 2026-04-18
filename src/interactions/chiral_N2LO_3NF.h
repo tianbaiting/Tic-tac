@@ -250,8 +250,7 @@ private:
 		double scalar = (1.0/3.0) * sig23 * tau23 * (c1_part + c3_part) * prop;
 
 		// Overall coefficient: g_A² / (4 f_π⁴)
-		double fpi_fm = fpi / hbarc;
-		double coeff = m_gA * m_gA / (4.0 * fpi_fm * fpi_fm * fpi_fm * fpi_fm);
+		double coeff = m_gA * m_gA / (4.0 * m_fpi4_inv);
 
 		// Gaussian regulator
 		double inv_L2 = 1.0 / (m_Lambda * m_Lambda);
