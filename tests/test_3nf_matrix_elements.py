@@ -17,7 +17,7 @@ LAMBDA_CHI_MEV = 700.0
 FPI_FM = FPI_MEV / HBARC
 MPI_FM = MPI_MEV / HBARC
 LAMBDA_CHI_FM = LAMBDA_CHI_MEV / HBARC
-FPI4_INV = FPI_FM ** 4
+FPI4 = FPI_FM ** 4
 
 
 def gaussian_regulator(p, q, Lambda_fm):
@@ -27,21 +27,27 @@ def gaussian_regulator(p, q, Lambda_fm):
 def w1_contact(T_2N, c_E, p_r, q_r, p_c, q_c, Lambda_fm):
     """Contact term W^(1)_CT for diagonal alpha."""
     tau23 = 2.0 * T_2N * (T_2N + 1) - 3.0
-    coeff = c_E / (FPI4_INV * LAMBDA_CHI_FM)
+    coeff = c_E / (FPI4 * LAMBDA_CHI_FM)
     f_bra = gaussian_regulator(p_r, q_r, Lambda_fm)
     f_ket = gaussian_regulator(p_c, q_c, Lambda_fm)
     return coeff * tau23 * f_bra * f_ket
 
 
-def w1_2pe_scalar(S_2N, T_2N, c1, c3, p_r, q_r, p_c, q_c, Lambda_fm):
+def w1_2pe_scalar(S_2N, T_2N, c1_gev, c3_gev, p_r, q_r, p_c, q_c, Lambda_fm):
     """2PE scalar (rank-0) term W^(1)_2PE for diagonal alpha.
+
+    c1_gev, c3_gev are in GeV⁻¹ (as published). Convert to fm internally.
 
     Implements the monopole/scalar approximation:
       (sigma2.q2)(sigma3.q3) -> (1/3)(sigma2.sigma3)(q2.q3)
     with angle-averaged pion propagators.
     """
-    if c1 == 0.0 and c3 == 0.0:
+    if c1_gev == 0.0 and c3_gev == 0.0:
         return 0.0
+
+    # Convert GeV⁻¹ → fm: multiply by ℏc[MeV·fm] / 1000[MeV/GeV]
+    c1 = c1_gev * HBARC / 1000.0
+    c3 = c3_gev * HBARC / 1000.0
 
     sig23 = 2.0 * S_2N * (S_2N + 1) - 3.0
     tau23 = 2.0 * T_2N * (T_2N + 1) - 3.0

@@ -401,11 +401,11 @@ void show_usage(){
 			  << seperationLine
 			  << std::endl;
 
-	std::cout << "three_nucleon_force:      Sets which three-nucleon force (3NF) model is used. Currently\n"
-			  << "                          supported: (none). Additional models (chiral_N2LO etc.) will\n"
-			  << "                          be added incrementally. When set to \"none\", the solver\n"
-			  << "                          reproduces the 2NF-only code path exactly.\n"
-			  << "Example:                  three_nucleon_force=none -> Disable 3NF (default).\n"
+	std::cout << "three_nucleon_force:      Sets which three-nucleon force (3NF) model is used.\n"
+			  << "                          Supported: none, chiral_N2LO, gaussian_stub.\n"
+			  << "                          When set to \"none\", the solver reproduces the 2NF-only\n"
+			  << "                          code path exactly.\n"
+			  << "Example:                  three_nucleon_force=chiral_N2LO\n"
 			  << seperationLine
 			  << std::endl;
 

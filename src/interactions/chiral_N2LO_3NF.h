@@ -33,12 +33,12 @@ public:
 		, m_c_E(c_E)
 		, m_Lambda(Lambda_3NF_MeV / hbarc)           // Convert MeV → fm⁻¹
 		, m_Lambda_chi(700.0 / hbarc)                 // Λ_χ = 700 MeV → fm⁻¹
-		, m_fpi4_inv((fpi/hbarc)*(fpi/hbarc)*(fpi/hbarc)*(fpi/hbarc))  // (f_π/ħc)⁴ in fm⁻⁴
+		, m_fpi4((fpi/hbarc)*(fpi/hbarc)*(fpi/hbarc)*(fpi/hbarc))  // (f_π/ħc)⁴ in fm⁻⁴
 		, m_gA(gA)                                    // Axial coupling constant (dimensionless)
 		, m_mpi_fm(mpi / hbarc)                       // Pion mass in fm⁻¹
-		, m_c1(c1)                                    // c₁ LEC (GeV⁻¹, from 2NF)
-		, m_c3(c3)                                    // c₃ LEC (GeV⁻¹, from 2NF)
-		, m_c4(c4)                                    // c₄ LEC (GeV⁻¹, from 2NF) — reserved for tensor part
+		, m_c1(c1 * hbarc / 1000.0)                   // c₁ LEC: GeV⁻¹ → fm
+		, m_c3(c3 * hbarc / 1000.0)                   // c₃ LEC: GeV⁻¹ → fm
+		, m_c4(c4 * hbarc / 1000.0)                   // c₄ LEC: GeV⁻¹ → fm — reserved for tensor part
 	{
 	}
 
@@ -87,12 +87,12 @@ private:
 	double m_c_E;
 	double m_Lambda;       // 3NF cutoff in fm⁻¹
 	double m_Lambda_chi;   // Chiral symmetry breaking scale in fm⁻¹
-	double m_fpi4_inv;     // (f_π/ħc)⁴ in fm⁻⁴
+	double m_fpi4;         // f_π⁴ in fm⁻⁴ = (f_π[MeV]/ħc)⁴
 	double m_gA;           // Axial coupling constant (dimensionless)
 	double m_mpi_fm;       // Pion mass in fm⁻¹
-	double m_c1;           // c₁ LEC (GeV⁻¹, from 2NF)
-	double m_c3;           // c₃ LEC (GeV⁻¹, from 2NF)
-	double m_c4;           // c₄ LEC (GeV⁻¹, from 2NF) — reserved for tensor part
+	double m_c1;           // c₁ LEC in fm (converted from GeV⁻¹)
+	double m_c3;           // c₃ LEC in fm (converted from GeV⁻¹)
+	double m_c4;           // c₄ LEC in fm (converted from GeV⁻¹) — reserved for tensor part
 
 	// [EN] 3N contact term (c_E): diagonal in all quantum numbers α.
 	//   W^(1)_CT(α',p',q'; α,p,q) = c_E/(f_π⁴ Λ_χ) × [2T_2N(T_2N+1) - 3]
@@ -128,7 +128,7 @@ private:
 		double f_ket = std::exp(-(p_c*p_c + 0.75*q_c*q_c) * inv_L2);
 
 		// Overall coefficient: c_E / (f_π⁴ × Λ_χ) in fm⁵ (all in fm⁻¹ units)
-		double coeff = m_c_E / (m_fpi4_inv * m_Lambda_chi);
+		double coeff = m_c_E / (m_fpi4 * m_Lambda_chi);
 
 		return coeff * tau_dot_tau * f_bra * f_ket;
 	}
@@ -195,7 +195,7 @@ private:
 		double pion_factor = q3_sq_avg / (q3_sq_avg + m_mpi_fm * m_mpi_fm) / 3.0;
 
 		// Overall coefficient: -c_D * gA / (8 * f_π⁴ * Λ_χ) × 2 (pair symmetry)
-		double coeff = -m_c_D * m_gA / (8.0 * m_fpi4_inv * m_Lambda_chi) * 2.0;
+		double coeff = -m_c_D * m_gA / (8.0 * m_fpi4 * m_Lambda_chi) * 2.0;
 
 		return coeff * f_bra * f_ket * tau13 * sig13 * pion_factor;
 	}
@@ -250,7 +250,7 @@ private:
 		double scalar = (1.0/3.0) * sig23 * tau23 * (c1_part + c3_part) * prop;
 
 		// Overall coefficient: g_A² / (4 f_π⁴)
-		double coeff = m_gA * m_gA / (4.0 * m_fpi4_inv);
+		double coeff = m_gA * m_gA / (4.0 * m_fpi4);
 
 		// Gaussian regulator
 		double inv_L2 = 1.0 / (m_Lambda * m_Lambda);
