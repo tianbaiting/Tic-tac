@@ -22,6 +22,20 @@
 #include "make_permutation_matrix.h"
 #include "utils/matrix_routines.h"
 
+class three_nucleon_force_model;
+
+// [EN] Bundles all data the column-computation hot path needs for the 3NF contribution so that
+// existing function signatures stay manageable. When tnf->enabled()==false (null object) the entire
+// 3NF branch is skipped via a single test. / [CN] 把列计算热路径所需的全部 3NF 数据打包到一个结构体中，
+// 避免已有函数签名膨胀。当 tnf->enabled()==false（null 对象）时，整个 3NF 分支通过一次判断跳过。
+struct tnf_kernel_context {
+	const three_nucleon_force_model* tnf;
+	const pw_3N_statespace*          pw_states;
+	const double*                    p_WP_array;   // WP boundaries, size Np_WP+1
+	const double*                    q_WP_array;   // WP boundaries, size Nq_WP+1
+	double**                         CT_RM_array;  // C^T row-major = C column-major, [Nalpha*Nalpha]
+};
+
 void solve_faddeev_equations(cdouble*  U_array,
 					   		 cdouble*  U_BU_array,
 							 cdouble*  G_array,
@@ -32,10 +46,12 @@ void solve_faddeev_equations(cdouble*  U_array,
 							 double*   V_WP_unco_array,
 							 double*   V_WP_coup_array,
 							 swp_statespace swp_states,
+							 fwp_statespace fwp_states,
 							 channel_os_indexing chn_os_indexing,
 							 pw_3N_statespace pw_states,
 							 std::string file_identification,
-					         run_params run_parameters);
+					         run_params run_parameters,
+							 const three_nucleon_force_model* tnf = nullptr);
 
 /* Create array of pointers to C^T matrices for product (C^T)PVC in row-major format */
 void create_CT_row_maj_3N_pointer_array(double** CT_RM_array,

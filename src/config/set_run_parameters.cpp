@@ -56,6 +56,10 @@ std::string create_input_printout_string(run_params run_parameters){
 	output_string << "Solve Faddeev with LAPACK:       " << type_to_string(run_parameters.solve_dense)   	  	  		<< "\n";
 	output_string << "Production run:                  " << type_to_string(run_parameters.production_run)  	  	  		<< "\n";
 	output_string << "Potential model:                 " << type_to_string(run_parameters.potential_model) 	  	  		<< "\n";
+	output_string << "Three-nucleon force:             " << type_to_string(run_parameters.three_nucleon_force)  	  	<< "\n";
+	output_string << "3NF LEC c_D:                     " << type_to_string(run_parameters.c_D)                    	  	<< "\n";
+	output_string << "3NF LEC c_E:                     " << type_to_string(run_parameters.c_E)                    	  	<< "\n";
+	output_string << "3NF cutoff Lambda_3NF [MeV]:     " << type_to_string(run_parameters.Lambda_3NF)             	  	<< "\n";
 	output_string << "p-momentum grid type:            " << type_to_string(run_parameters.p_grid_type) 		  	  		<< "\n";
 	output_string << "p-momentum grid input file:      " << type_to_string(run_parameters.p_grid_filename) 	  	  		<< "\n";
 	output_string << "q-momentum grid type:            " << type_to_string(run_parameters.q_grid_type) 		  	  		<< "\n";
@@ -209,6 +213,18 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 	}
 	else if (option == "potential_model"){
 		run_parameters.potential_model = input;
+	}
+	else if (option == "three_nucleon_force"){
+		run_parameters.three_nucleon_force = input;
+	}
+	else if (option == "c_D"){
+		run_parameters.c_D = std::stod(input);
+	}
+	else if (option == "c_E"){
+		run_parameters.c_E = std::stod(input);
+	}
+	else if (option == "Lambda_3NF"){
+		run_parameters.Lambda_3NF = std::stod(input);
 	}
 	else if (option == "subfolder"){
 		run_parameters.subfolder = input;
@@ -382,6 +398,27 @@ void show_usage(){
 			  << "                          written chiral leading-order potential.\n"
 			  << "Example:                  model=Idaho_N3LO -> Uses two-body chiral Idaho N3LO\n"
 	  		  << "                                              potential.\n"
+			  << seperationLine
+			  << std::endl;
+
+	std::cout << "three_nucleon_force:      Sets which three-nucleon force (3NF) model is used. Currently\n"
+			  << "                          supported: (none). Additional models (chiral_N2LO etc.) will\n"
+			  << "                          be added incrementally. When set to \"none\", the solver\n"
+			  << "                          reproduces the 2NF-only code path exactly.\n"
+			  << "Example:                  three_nucleon_force=none -> Disable 3NF (default).\n"
+			  << seperationLine
+			  << std::endl;
+
+	std::cout << "c_D, c_E:                 Chiral N2LO 3NF low-energy constants (LECs). c_D multiplies\n"
+			  << "                          the 1pi-exchange-contact term; c_E multiplies the pure 3N\n"
+			  << "                          contact term. Ignored when three_nucleon_force=none.\n"
+			  << "Example:                  c_D=-0.2 c_E=-0.205\n"
+			  << seperationLine
+			  << std::endl;
+
+	std::cout << "Lambda_3NF:               Gaussian cutoff for 3NF regularization [MeV]. Default 500.\n"
+			  << "                          Ignored when three_nucleon_force=none.\n"
+			  << "Example:                  Lambda_3NF=500\n"
 			  << seperationLine
 			  << std::endl;
 	
@@ -592,6 +629,10 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.channel_idx		        = -1;
 	run_parameters.parallel_run		        = false;
 	run_parameters.potential_model	        = "LO_internal";
+	run_parameters.three_nucleon_force      = "none";
+	run_parameters.c_D                      = 0.0;
+	run_parameters.c_E                      = 0.0;
+	run_parameters.Lambda_3NF               = 500.0;
 	run_parameters.subfolder	  	        = "Output";
 	run_parameters.p_grid_type 	  	        = "chebyshev";
 	run_parameters.p_grid_filename 	        = "";

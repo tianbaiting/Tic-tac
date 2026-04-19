@@ -13,7 +13,7 @@ Output
 *.fdb_latexmks
 
 output
-tests
+tests/__pycache__/
 build
 tags
 __pycache__/

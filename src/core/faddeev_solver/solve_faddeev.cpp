@@ -1,4 +1,5 @@
 #include "solve_faddeev.h"
+#include "interactions/three_nucleon_force_model.h"
 #include <gsl/gsl_cblas.h>
 #include <cstring>
 #include <vector>
@@ -196,7 +197,7 @@ void calculate_PVC_col(double*  col_array,
 // and the later chunked GEMM strategy. / [CN] CPVC = C^T P V C 是波包空间中的核，它既驱动第一项 Neumann 项，
 // 也驱动之后所有再散射步骤。这里按“每次一列”构造，是为了同时匹配稀疏 P123 的访问模式和后面分块 GEMM 的策略。
 void calculate_CPVC_col(double*  col_array,
-					    int* 	 row_to_nnz_array, 
+					    int* 	 row_to_nnz_array,
 					    int* 	 nnz_to_row_array,
 					    size_t&  num_nnz,
 					    size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
@@ -206,15 +207,16 @@ void calculate_CPVC_col(double*  col_array,
 					    double*  P123_val_array,
 					    int*     P123_row_array,
 					    size_t*  P123_col_array,
-					   size_t   P123_dim){
-	
+					    size_t   P123_dim,
+					    const tnf_kernel_context& tnf_ctx){
+
 	/* Generate PVC-column */
 	std::vector<double> PVC_col(Nalpha*Nq_WP*Np_WP);
 	/* Ensure PVC_col contains only zeroes */
 	for (size_t idx=0; idx<Nalpha*Nq_WP*Np_WP; idx++){
 		PVC_col[idx] = 0;
 	}
-	
+
 	//auto timestamp_start = std::chrono::system_clock::now();
 	calculate_PVC_col(PVC_col.data(),
 					  idx_alpha_c, idx_p_c, idx_q_c,
@@ -227,6 +229,140 @@ void calculate_CPVC_col(double*  col_array,
 	//auto timestamp_end = std::chrono::system_clock::now();
 	//std::chrono::duration<double>  time1 = timestamp_end - timestamp_start;
 	//printf("TIME PVC:  %.6f \n", time1.count()); fflush(stdout);
+
+	// [EN] 3NF contribution (Born level): add W^(1)·(1+P)·C to PVC_col buffer.
+	//   Identity part:    W^(1)·C  — direct W1×C sum over intermediate p
+	//   Permutation part: W^(1)·P·C — compute P·C column via sparse P123 loop, then apply W^(1)
+	// / [CN] 3NF 贡献（Born 级）：把 W^(1)·(1+P)·C 加到 PVC_col 缓冲区。
+	//   单位部分：W^(1)·C —— 对中间 p 直接做 W1×C 求和
+	//   置换部分：W^(1)·P·C —— 用稀疏 P123 循环计算 P·C 列，然后施加 W^(1)
+	if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled()){
+		const three_nucleon_force_model* tnf = tnf_ctx.tnf;
+		const pw_3N_statespace& pw_st = *tnf_ctx.pw_states;
+		const double* p_WP = tnf_ctx.p_WP_array;
+		const double* q_WP = tnf_ctx.q_WP_array;
+
+		// [EN] WP bin-averaging normalization for the 3NF matrix element W^(1)_WP.
+		// V_WP uses p_r × p_c × √dp_r × √dp_c (one momentum factor + √(bin width) per side).
+		// P123_WP uses 1/(√dp_r × √dq_r × √dp_c × √dq_c) from WP normalization.
+		// For W^(1), which acts in the full (p,q) space, the WP matrix element is:
+		//   W^(1)_WP(p_r,q_r; p_c,q_c) = p_r × q_r × p_c × q_c × √dp_r × √dq_r × √dp_c × √dq_c × W^(1)(mids)
+		// This follows the reduced-function convention g(p,q) = p×q×ψ(p,q) consistent with V_WP.
+		// / [CN] 3NF 矩阵元 W^(1)_WP 的 WP 基平均归一化。
+		// V_WP 使用 p_r × p_c × √dp_r × √dp_c（每侧一个动量因子 + √(bin 宽)）。
+		// P123_WP 使用 1/(√dp_r × √dq_r × √dp_c × √dq_c) 作为 WP 归一化。
+		// 对于作用在完整 (p,q) 空间的 W^(1)，其 WP 矩阵元为：
+		//   W^(1)_WP = p_r × q_r × p_c × q_c × √dp_r × √dq_r × √dp_c × √dq_c × W^(1)(mids)
+
+		// q_c bin midpoint and WP normalization factor
+		double q_c_mid = 0.5 * (q_WP[idx_q_c] + q_WP[idx_q_c + 1]);
+		double dq_c    = q_WP[idx_q_c + 1] - q_WP[idx_q_c];
+		double wq_c    = q_c_mid * std::sqrt(dq_c);  // q_c × √dq_c
+
+		double* C_block = CT_RM_array[idx_alpha_c * Nalpha + idx_alpha_c];
+
+		if (C_block != nullptr){
+			for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
+				if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_c]) continue;
+				if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_c]) continue;
+				if (pw_st.P_3N_array[idx_alpha_r]     != pw_st.P_3N_array[idx_alpha_c])     continue;
+
+				for (size_t idx_q_r = 0; idx_q_r < Nq_WP; idx_q_r++){
+					double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
+					double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
+					double wq_r    = q_r_mid * std::sqrt(dq_r);
+
+					for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
+						double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
+						double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
+						double wp_r    = p_r_mid * std::sqrt(dp_r);
+
+						// Sum over intermediate p_j (WP basis) with C weight
+						double w1c_element = 0.0;
+						for (size_t idx_p_j = 0; idx_p_j < Np_WP; idx_p_j++){
+							double C_val = C_block[idx_p_j * Np_WP + idx_p_c];
+							if (C_val == 0.0) continue;
+
+							double p_j_mid = 0.5 * (p_WP[idx_p_j] + p_WP[idx_p_j + 1]);
+							double dp_j    = p_WP[idx_p_j + 1] - p_WP[idx_p_j];
+							double wp_j    = p_j_mid * std::sqrt(dp_j);
+
+							double w1_val = tnf->W1_element(idx_alpha_r, idx_alpha_c,
+															p_r_mid, q_r_mid,
+															p_j_mid, q_c_mid,
+															pw_st);
+							// WP normalization: p_r √dp_r × q_r √dq_r × p_j √dp_j × q_c √dq_c
+							w1c_element += w1_val * (wp_r * wq_r * wp_j * wq_c) * C_val;
+						}
+
+						if (w1c_element != 0.0){
+							size_t idx_row = idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r;
+							PVC_col[idx_row] += w1c_element;
+						}
+					}
+				}
+			}
+		}
+
+		// [EN] W^(1)·P·C permutation contribution.
+		// / [CN] W^(1)·P·C 置换贡献。
+		std::vector<double> PC_col(Nalpha * Nq_WP * Np_WP, 0.0);
+		calculate_PVC_col(PC_col.data(),
+						  idx_alpha_c, idx_p_c, idx_q_c,
+						  Nalpha, Nq_WP, Np_WP,
+						  tnf_ctx.CT_RM_array,
+						  P123_val_array,
+						  P123_row_array,
+						  P123_col_array,
+						  P123_dim);
+
+		// Apply W^(1)_WP to PC_col. PC_col elements are already in WP basis (from P·C).
+		// W^(1)_WP is a matrix in WP basis, so this is a standard matrix-vector product:
+		//   (W1_WP × PC_col)[row] = Σ_k W1_WP[row,k] × PC_col[k]
+		// W1_WP[row,k] = p_r q_r p_k q_k √dp_r √dq_r √dp_k √dq_k × W1(mids)
+		for (size_t idx_alpha_k = 0; idx_alpha_k < Nalpha; idx_alpha_k++){
+			for (size_t idx_q_k = 0; idx_q_k < Nq_WP; idx_q_k++){
+				for (size_t idx_p_k = 0; idx_p_k < Np_WP; idx_p_k++){
+					size_t idx_k = idx_alpha_k * Nq_WP * Np_WP + idx_q_k * Np_WP + idx_p_k;
+					double pc_val = PC_col[idx_k];
+					if (pc_val == 0.0) continue;
+
+					double p_k_mid = 0.5 * (p_WP[idx_p_k] + p_WP[idx_p_k + 1]);
+					double q_k_mid = 0.5 * (q_WP[idx_q_k] + q_WP[idx_q_k + 1]);
+					double dp_k    = p_WP[idx_p_k + 1] - p_WP[idx_p_k];
+					double dq_k    = q_WP[idx_q_k + 1] - q_WP[idx_q_k];
+					double wp_k    = p_k_mid * std::sqrt(dp_k);
+					double wq_k    = q_k_mid * std::sqrt(dq_k);
+
+					for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
+						if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_k]) continue;
+						if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_k]) continue;
+						if (pw_st.P_3N_array[idx_alpha_r]     != pw_st.P_3N_array[idx_alpha_k])     continue;
+
+						for (size_t idx_q_r = 0; idx_q_r < Nq_WP; idx_q_r++){
+							double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
+							double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
+							double wq_r    = q_r_mid * std::sqrt(dq_r);
+							for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
+								double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
+								double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
+								double wp_r    = p_r_mid * std::sqrt(dp_r);
+
+								double w1 = tnf->W1_element(idx_alpha_r, idx_alpha_k,
+															p_r_mid, q_r_mid,
+															p_k_mid, q_k_mid, pw_st);
+								if (w1 != 0.0){
+									double w1_wp = w1 * (wp_r * wq_r * wp_k * wq_k);
+									size_t idx_row = idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r;
+									PVC_col[idx_row] += w1_wp * pc_val;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	/* THOUGHT:
 	 * MOVE ALPHA_I OUTWARDS AND GO BACK TO DIRECT APPEND TO COL_ARRAY.
@@ -285,7 +421,7 @@ void calculate_CPVC_col(double*  col_array,
 void calculate_all_CPVC_rows(double*  row_arrays,
 							 int*	  q_com_idx_array,	  size_t num_q_com,
 					   		 int*     deuteron_idx_array, size_t num_deuteron_states,
-							 size_t   Nalpha, 
+							 size_t   Nalpha,
 							 size_t   Nq_WP,
 							 size_t   Np_WP,
 							 double** CT_RM_array,
@@ -293,7 +429,8 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 							 double*  P123_val_array,
 							 int*     P123_row_array,
 							 size_t*  P123_col_array,
-							 size_t   P123_dim){
+							 size_t   P123_dim,
+							 const tnf_kernel_context& tnf_ctx){
 	
 	size_t dense_dim = Nalpha*Nq_WP*Np_WP;
 
@@ -324,6 +461,100 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 								  P123_row_array,
 								  P123_col_array,
 								  P123_dim);
+
+				// [EN] 3NF contributions: W^(1)·(1+P)·C = W^(1)·C + W^(1)·P·C
+				// with WP bin-averaging normalization (see first 3NF block above for derivation)
+				if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled()){
+					const three_nucleon_force_model* tnf = tnf_ctx.tnf;
+					const pw_3N_statespace& pw_st = *tnf_ctx.pw_states;
+					const double* p_WP = tnf_ctx.p_WP_array;
+					const double* q_WP = tnf_ctx.q_WP_array;
+
+					double q_c_mid = 0.5 * (q_WP[idx_q_c] + q_WP[idx_q_c + 1]);
+					double dq_c    = q_WP[idx_q_c + 1] - q_WP[idx_q_c];
+					double wq_c    = q_c_mid * std::sqrt(dq_c);
+
+					// Identity part: W^(1)·C
+					double* C_block = tnf_ctx.CT_RM_array[idx_alpha_c * Nalpha + idx_alpha_c];
+					if (C_block != nullptr){
+						for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
+							if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_c]) continue;
+							if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_c]) continue;
+							if (pw_st.P_3N_array[idx_alpha_r]     != pw_st.P_3N_array[idx_alpha_c])     continue;
+							for (size_t idx_q_r = 0; idx_q_r < Nq_WP; idx_q_r++){
+								double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
+								double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
+								double wq_r    = q_r_mid * std::sqrt(dq_r);
+								for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
+									double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
+									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
+									double wp_r    = p_r_mid * std::sqrt(dp_r);
+									double w1c = 0.0;
+									for (size_t idx_p_j = 0; idx_p_j < Np_WP; idx_p_j++){
+										double C_val = C_block[idx_p_j * Np_WP + idx_p_c];
+										if (C_val == 0.0) continue;
+										double p_j_mid = 0.5 * (p_WP[idx_p_j] + p_WP[idx_p_j + 1]);
+										double dp_j    = p_WP[idx_p_j + 1] - p_WP[idx_p_j];
+										double wp_j    = p_j_mid * std::sqrt(dp_j);
+										w1c += tnf->W1_element(idx_alpha_r, idx_alpha_c,
+															   p_r_mid, q_r_mid,
+															   p_j_mid, q_c_mid, pw_st)
+											   * (wp_r * wq_r * wp_j * wq_c) * C_val;
+									}
+									if (w1c != 0.0){
+										PVC_col[idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_r] += w1c;
+									}
+								}
+							}
+						}
+					}
+
+					// Permutation part: W^(1)·P·C
+					std::vector<double> PC_col_local(Nalpha * Nq_WP * Np_WP, 0.0);
+					calculate_PVC_col(PC_col_local.data(),
+									  idx_alpha_c, idx_p_c, idx_q_c,
+									  Nalpha, Nq_WP, Np_WP,
+									  tnf_ctx.CT_RM_array,
+									  P123_val_array,
+									  P123_row_array,
+									  P123_col_array,
+									  P123_dim);
+					for (size_t idx_k = 0; idx_k < Nalpha * Nq_WP * Np_WP; idx_k++){
+						double pc_val = PC_col_local[idx_k];
+						if (pc_val == 0.0) continue;
+						size_t idx_alpha_k = idx_k / (Nq_WP * Np_WP);
+						size_t idx_q_k = (idx_k % (Nq_WP * Np_WP)) / Np_WP;
+						size_t idx_p_k = idx_k % Np_WP;
+						double p_k_mid = 0.5 * (p_WP[idx_p_k] + p_WP[idx_p_k + 1]);
+						double q_k_mid = 0.5 * (q_WP[idx_q_k] + q_WP[idx_q_k + 1]);
+						double dp_k    = p_WP[idx_p_k + 1] - p_WP[idx_p_k];
+						double dq_k    = q_WP[idx_q_k + 1] - q_WP[idx_q_k];
+						double wp_k    = p_k_mid * std::sqrt(dp_k);
+						double wq_k    = q_k_mid * std::sqrt(dq_k);
+						for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
+							if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_k]) continue;
+							if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_k]) continue;
+							if (pw_st.P_3N_array[idx_alpha_r]     != pw_st.P_3N_array[idx_alpha_k])     continue;
+							for (size_t idx_q_r = 0; idx_q_r < Nq_WP; idx_q_r++){
+								double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
+								double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
+								double wq_r    = q_r_mid * std::sqrt(dq_r);
+								for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
+									double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
+									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
+									double wp_r    = p_r_mid * std::sqrt(dp_r);
+									double w1 = tnf->W1_element(idx_alpha_r, idx_alpha_k,
+																p_r_mid, q_r_mid,
+																p_k_mid, q_k_mid, pw_st);
+									if (w1 != 0.0){
+										double w1_wp = w1 * (wp_r * wq_r * wp_k * wq_k);
+										PVC_col[idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r] += w1_wp * pc_val;
+									}
+								}
+							}
+						}
+					}
+				}
 
 				/* Re-use PVC-column in all relevant calculations */
 				for (size_t i=0; i<num_deuteron_states; i++){
@@ -421,7 +652,8 @@ void faddeev_dense_solver(cdouble*  U_array,
 					      double*   P123_sparse_val_array,
 					      int*      P123_sparse_row_array,
 					      size_t*   P123_sparse_col_array,
-					      size_t    P123_sparse_dim){
+					      size_t    P123_sparse_dim,
+					      const tnf_kernel_context& tnf_ctx){
 	
 	/* Stores A and K arrays */
 	bool store_A_array = true;
@@ -473,7 +705,8 @@ void faddeev_dense_solver(cdouble*  U_array,
 									   P123_sparse_val_array,
 									   P123_sparse_row_array,
 									   P123_sparse_col_array,
-									   P123_sparse_dim);
+									   P123_sparse_dim,
+									   tnf_ctx);
 
     	    		for (size_t row_idx=0; row_idx<dense_dim; row_idx++){
 						L_array[row_idx*dense_dim + col_idx] = -CPVC_col_array[row_idx]*G_array[j*dense_dim + col_idx];
@@ -551,7 +784,8 @@ void pade_method_solve(cdouble*  U_array,
 					   size_t    P123_sparse_dim,
 					   channel_os_indexing chn_os_indexing,
 					   run_params run_parameters,
-					   std::string file_identification){
+					   std::string file_identification,
+					   const tnf_kernel_context& tnf_ctx){
 
 	// [EN] This routine implements the matrix version of the WPCD multiple-scattering expansion used in the Miller
 	// benchmarks: start from the driving term A=(C^T)PVC, generate Neumann terms A(GA)^n only on the physically
@@ -756,8 +990,9 @@ void pade_method_solve(cdouble*  U_array,
 								   P123_sparse_val_array,
 								   P123_sparse_row_array,
 								   P123_sparse_col_array,
-								   P123_sparse_dim);
-				
+								   P123_sparse_dim,
+								   tnf_ctx);
+
 				/* Lengthen array by 100*dense_dim if the array cannot fit another dense_dim nnz-elements
 				 * (i.e. max nnz elements from next loop-iteration) */
 				if ( omp_CPVC_nnz[thread_idx]+num_nnz+dense_dim >= omp_CPVC_dim[thread_idx] ){
@@ -907,7 +1142,8 @@ void pade_method_solve(cdouble*  U_array,
 							P123_sparse_val_array,
 							P123_sparse_row_array,
 							P123_sparse_col_array,
-							P123_sparse_dim);
+							P123_sparse_dim,
+							tnf_ctx);
 	timestamp_end = std::chrono::system_clock::now();
 	std::chrono::duration<double> time = timestamp_end - timestamp_start;
 	printf("         - Time generating CPVC-rows:     %.6f \n", time.count()); fflush(stdout);
@@ -1159,7 +1395,8 @@ void pade_method_solve(cdouble*  U_array,
 										   P123_sparse_val_array,
 										   P123_sparse_row_array,
 										   P123_sparse_col_array,
-										   P123_sparse_dim);
+										   P123_sparse_dim,
+										   tnf_ctx);
 						counter_array[thread_idx] += CPVC_num_nnz;
 					}
 					}
@@ -1555,10 +1792,12 @@ void solve_faddeev_equations(cdouble*  U_array,
 							 double*   V_WP_unco_array,
 							 double*   V_WP_coup_array,
 							 swp_statespace swp_states,
+							 fwp_statespace fwp_states,
 							 channel_os_indexing chn_os_indexing,
 							 pw_3N_statespace pw_states,
 							 std::string file_identification,
-					         run_params run_parameters){
+					         run_params run_parameters,
+							 const three_nucleon_force_model* tnf){
 	
 	/* Make local pointers & variables for on-shell channel-indexing */
 	int*   q_com_idx_array		= chn_os_indexing.q_com_idx_array;
@@ -1605,7 +1844,17 @@ void solve_faddeev_equations(cdouble*  U_array,
 									   run_parameters);
 	
 	size_t  dense_dim = Nalpha * Nq_WP * Np_WP;
-	
+
+	// [EN] Bundle 3NF context for the column hot-path. When tnf->enabled()==false (null object) the
+	// context still exists but the hot-path 3NF branch is skipped via a single test.
+	// [CN] 把 3NF 上下文打包给列计算热路径。当 tnf->enabled()==false 时上下文仍存在但热路径通过一次测试跳过。
+	tnf_kernel_context tnf_ctx;
+	tnf_ctx.tnf        = tnf;
+	tnf_ctx.pw_states  = &pw_states;
+	tnf_ctx.p_WP_array = fwp_states.p_WP_array;
+	tnf_ctx.q_WP_array = fwp_states.q_WP_array;
+	tnf_ctx.CT_RM_array = CT_RM_array;
+
 	/* Test optimized routine for PVC columns */
 	if (test_PVC_col_routine){
 		printf("   - Testing PVC-column routine ... \n");
@@ -1652,7 +1901,8 @@ void solve_faddeev_equations(cdouble*  U_array,
 						  P123_sparse_dim,
 						  chn_os_indexing,
 					      run_parameters,
-						  file_identification);
+						  file_identification,
+						  tnf_ctx);
 	}
 	else{
 		/* Solve the Faddeev eq. using a dense MKL-solver.
@@ -1670,7 +1920,8 @@ void solve_faddeev_equations(cdouble*  U_array,
 						     P123_sparse_val_array,
 						     P123_sparse_row_array,
 						     P123_sparse_col_array_csc,
-						     P123_sparse_dim);
+						     P123_sparse_dim,
+						     tnf_ctx);
 	}
 
 	auto timestamp_solve_end = std::chrono::system_clock::now();

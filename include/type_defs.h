@@ -129,6 +129,13 @@ typedef struct run_params{
 	int			PSI_start;
 	int			PSI_end;
 	std::string potential_model;
+	// [EN] Three-nucleon force selection and LECs. "none" disables 3NF entirely and leaves the kernel assembly
+	// path bit-for-bit identical to the pre-3NF 2NF-only solver. / [CN] 三体力选择与低能常数。"none" 时完全关闭
+	// 3NF，核组装路径与引入 3NF 之前的纯 2NF 求解器逐比特一致。
+	std::string three_nucleon_force;
+	double      c_D;
+	double      c_E;
+	double      Lambda_3NF;
 	std::string subfolder;
 	std::string p_grid_type;
 	std::string p_grid_filename;

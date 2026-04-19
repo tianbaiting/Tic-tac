@@ -19,6 +19,7 @@
 #include "utils/gauss_legendre.h"
 #include "utils/kinetic_conversion.h"
 #include "interactions/potential_model.h"
+#include "interactions/three_nucleon_force_model.h"
 #include "make_potential_matrix.h"
 #include "make_wp_states.h"
 #include "make_swp_states.h"
@@ -217,6 +218,11 @@ int main(int argc, char* argv[]){
 
 	/* Potential model class pointers */
 	potential_model* pot_ptr  = potential_model::fetch_potential_ptr(run_parameters);
+
+	/* Three-nucleon force model (null object when disabled — keeps the kernel path unchanged) */
+	three_nucleon_force_model* tnf_ptr = three_nucleon_force_model::fetch(run_parameters);
+	std::cout << "Three-nucleon force model: " << tnf_ptr->name()
+			  << " (enabled=" << (tnf_ptr->enabled() ? "true" : "false") << ")" << std::endl;
 
 	/* End of code segment for variables and arrays declaration */
 	/* ################################################################################################################### */
@@ -503,10 +509,12 @@ int main(int argc, char* argv[]){
 										V_WP_unco_array.data(),
 										V_WP_coup_ptr,
 										swp_states,
+										fwp_states,
 										chn_os_indexing,
 										pw_substates,
 										file_identification,
-										run_parameters);
+										run_parameters,
+										tnf_ptr);
 				printf("   - Done \n");
 
 				/* End of code segment for iterations of elastic Faddeev equations */
