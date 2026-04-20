@@ -63,19 +63,32 @@ int main(int argc, char** argv) {
             if (pw.P_3N_array[a] != p0) { all_same_parity = false; break; }
         }
         std::printf("All α share parity P_3N=%+d: %s\n", p0, all_same_parity ? "yes" : "no");
-        // c_E-only run: c_D = c_1 = c_3 = c_4 = 0
-        chiral_N2LO_3NF tnf_cE(/*c_D=*/0.0, /*c_E=*/-0.205,
-                               /*Lambda_3NF_MeV=*/500.0,
-                               /*c1=*/0.0, /*c3=*/0.0, /*c4=*/0.0);
-        // Unit analysis: W1_element returns fm^5 (= 1/[fm^-5]).
-        // The 6D quadrature measure wp*p^2*wq*q^2 has units fm^-6.
-        // The partial-wave wavefunction Psi_alpha(p,q) has units fm^3 (since ||Psi||^2=1).
-        // So the 6D sum = fm^-6 * fm^3 * fm^5 * fm^-6 * fm^3 = fm^-1.
-        // Conversion to MeV: dE [MeV] = dE [fm^-1] * hbarc [MeV*fm].
-        double dE_fm_inv = contract_W1_expectation(w, pw, tnf_cE);
-        double dE_MeV = dE_fm_inv * hbarc;
-        std::printf("⟨Ψ|W^(1)_cE|Ψ⟩ = %.6e fm^-1 = %.6e MeV (before (1+P+P²) symm)\n",
-                    dE_fm_inv, dE_MeV);
+        struct lec_run { const char* name; double c_D, c_E, c_1, c_3; };
+        // c_1, c_3 per EM500 (Entem–Machleidt) 2NF: c_1=-0.81, c_3=-3.20 GeV^-1
+        // (Witała PRC 77 (2008) 034004)
+        const lec_run runs[] = {
+            { "c_E_only",    0.0,   -0.205,  0.0,   0.0   },
+            { "c_D_only",   -0.20,   0.0,    0.0,   0.0   },
+            { "c_1_only",    0.0,    0.0,   -0.81,  0.0   },
+            { "c_3_only",    0.0,    0.0,    0.0,  -3.20  },
+            { "full_Witala",-0.20,  -0.205, -0.81, -3.20  },
+        };
+        std::printf("\n=== W^(1) first-order expectation (no (1+P+P²) yet) ===\n");
+        std::printf("%-16s  %18s  %18s\n", "channel", "⟨W⟩ [fm^-1]", "⟨W⟩ [MeV]");
+        double v_MeV_values[5];
+        for (size_t i = 0; i < sizeof(runs)/sizeof(runs[0]); ++i) {
+            const auto& r = runs[i];
+            chiral_N2LO_3NF tnf(r.c_D, r.c_E, /*Lambda_MeV=*/500.0, r.c_1, r.c_3, /*c4=*/0.0);
+            double v_fminv = contract_W1_expectation(w, pw, tnf);
+            double v_MeV = v_fminv * hbarc;
+            v_MeV_values[i] = v_MeV;
+            std::printf("%-16s  %+18.6e  %+18.6e\n", r.name, v_fminv, v_MeV);
+        }
+        // Additivity check: full_Witala == c_E + c_D + c_1 + c_3
+        double sum_individual = v_MeV_values[0] + v_MeV_values[1] + v_MeV_values[2] + v_MeV_values[3];
+        double additivity_residual = v_MeV_values[4] - sum_individual;
+        std::printf("Additivity check: sum(c_E+c_D+c_1+c_3) = %+e MeV; full = %+e MeV; residual = %+e MeV\n",
+                    sum_individual, v_MeV_values[4], additivity_residual);
         free_pw_3n_statespace_triton(pw);
         return 0;
     } catch (const std::exception& e) {
