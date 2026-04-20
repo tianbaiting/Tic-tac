@@ -73,8 +73,8 @@ int main(int argc, char** argv) {
             { "c_3_only",    0.0,    0.0,    0.0,  -3.20  },
             { "full_Witala",-0.20,  -0.205, -0.81, -3.20  },
         };
-        std::printf("\n=== W^(1) first-order expectation (no (1+P+P²) yet) ===\n");
-        std::printf("%-16s  %18s  %18s\n", "channel", "⟨W⟩ [fm^-1]", "⟨W⟩ [MeV]");
+        std::printf("\n=== ΔE_3NF = ⟨Ψ|(1+P+P²)W^(1)|Ψ⟩ = 3·⟨Ψ|W^(1)|Ψ⟩ (antisymmetric Ψ → P|Ψ⟩ = |Ψ⟩) ===\n");
+        std::printf("%-16s  %18s  %18s\n", "channel", "⟨W⟩ [MeV]", "3·⟨W⟩ [MeV]");
         double v_MeV_values[5];
         for (size_t i = 0; i < sizeof(runs)/sizeof(runs[0]); ++i) {
             const auto& r = runs[i];
@@ -82,13 +82,13 @@ int main(int argc, char** argv) {
             double v_fminv = contract_W1_expectation(w, pw, tnf);
             double v_MeV = v_fminv * hbarc;
             v_MeV_values[i] = v_MeV;
-            std::printf("%-16s  %+18.6e  %+18.6e\n", r.name, v_fminv, v_MeV);
+            std::printf("%-16s  %+18.6e  %+18.6e\n", r.name, v_MeV, 3.0*v_MeV);
         }
-        // Additivity check: full_Witala == c_E + c_D + c_1 + c_3
-        double sum_individual = v_MeV_values[0] + v_MeV_values[1] + v_MeV_values[2] + v_MeV_values[3];
-        double additivity_residual = v_MeV_values[4] - sum_individual;
-        std::printf("Additivity check: sum(c_E+c_D+c_1+c_3) = %+e MeV; full = %+e MeV; residual = %+e MeV\n",
-                    sum_individual, v_MeV_values[4], additivity_residual);
+        // Additivity check on the symmetrized ΔE_3NF
+        double sum_individual = 3.0 * (v_MeV_values[0] + v_MeV_values[1] + v_MeV_values[2] + v_MeV_values[3]);
+        double full_ΔE = 3.0 * v_MeV_values[4];
+        std::printf("Additivity check (3·⟨W⟩): sum(c_E+c_D+c_1+c_3) = %+e MeV; full = %+e MeV; residual = %+e MeV\n",
+                    sum_individual, full_ΔE, full_ΔE - sum_individual);
         free_pw_3n_statespace_triton(pw);
         return 0;
     } catch (const std::exception& e) {
