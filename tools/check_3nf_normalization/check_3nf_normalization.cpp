@@ -89,6 +89,43 @@ int main(int argc, char** argv) {
         double full_ΔE = 3.0 * v_MeV_values[4];
         std::printf("Additivity check (3·⟨W⟩): sum(c_E+c_D+c_1+c_3) = %+e MeV; full = %+e MeV; residual = %+e MeV\n",
                     sum_individual, full_ΔE, full_ΔE - sum_individual);
+
+        // ---- Comparison vs Epelbaum PRC 66 (2002) reference (see epelbaum_reference.md) ----
+        // Reference values are Epelbaum Table 2, ³H column, NNLO Λ=500 MeV, linearly
+        // rescaled from Epelbaum's LEC convention (c_D=+3.6, c_E=+0.37) to ours
+        // (c_D=-0.20, c_E=-0.205).  c_1/c_3 split is an ESTIMATE (Epelbaum reports
+        // only combined c-terms = -0.39 MeV).  Robust combined c_1+c_3 ref = -0.367 MeV.
+        struct ref_row { const char* name; double ref_MeV; };
+        const ref_row refs[] = {
+            { "c_E_only",    +0.410 },   // transcribed + rescaled (-0.74 × -0.205/0.37)
+            { "c_D_only",    -0.045 },   // transcribed + rescaled (+0.81 × -0.20/3.6)
+            { "c_1_only",    -0.073 },   // ESTIMATED — see epelbaum_reference.md (c_1/c_3 split ~20%)
+            { "c_3_only",    -0.294 },   // ESTIMATED — see epelbaum_reference.md (c_1/c_3 split ~80%)
+            { "full_Witala", -0.002 },   // sum of rescaled individual contributions at our LECs
+        };
+        std::printf("\n=== Comparison vs Epelbaum/Witała reference ===\n");
+        std::printf("%-16s  %18s  %18s  %10s\n",
+                    "channel", "3·<W>_code [MeV]", "<W>_ref [MeV]", "ratio X");
+        for (size_t i = 0; i < sizeof(runs)/sizeof(runs[0]); ++i) {
+            double code_MeV = 3.0 * v_MeV_values[i];
+            double ref_MeV = refs[i].ref_MeV;
+            double ratio = (ref_MeV != 0.0) ? (code_MeV / ref_MeV) : 0.0;
+            std::printf("%-16s  %+18.6e  %+18.6e  %+10.3f\n",
+                        refs[i].name, code_MeV, ref_MeV, ratio);
+        }
+        // Robust combined c_1+c_3 ratio (does not depend on the c_1/c_3 split estimate).
+        {
+            double code_combined = 3.0 * (v_MeV_values[2] + v_MeV_values[3]);
+            double ref_combined  = -0.367; // Epelbaum Table 2 × (our c_3 / Epelbaum c_3)
+            double ratio_comb    = code_combined / ref_combined;
+            std::printf("%-16s  %+18.6e  %+18.6e  %+10.3f   (robust: c-terms combined)\n",
+                        "c_1+c_3 comb",
+                        code_combined, ref_combined, ratio_comb);
+        }
+        std::printf("\nInterpretation: if |ratio X_i| is the same (within ±5%%) across all four single-LEC rows,\n"
+                    "a single multiplicative correction 1/X can be applied in chiral_N2LO_3NF.h.\n"
+                    "Different |X_i| values indicate per-term bugs.\n");
+
         free_pw_3n_statespace_triton(pw);
         return 0;
     } catch (const std::exception& e) {
