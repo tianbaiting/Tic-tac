@@ -17,6 +17,7 @@
 #include "three_nucleon_force_model.h"
 #include "chiral_N2LO_3NF.h"
 #include "constants.h"
+#include <cmath>
 #include <cstdio>
 #include <exception>
 
@@ -39,7 +40,9 @@ static double compute_norm_radial(const triton_wavefunction& w) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <psi_3H_file>\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <H3_psiasymm_*.dat>\n"
+                             "  Expects the antisymmetric triton wavefunction Ψ (not the Faddeev ψ).\n"
+                             "  Radial-convention norm ⟨Ψ|Ψ⟩ must equal 1.0.\n", argv[0]);
         return 1;
     }
     try {
@@ -54,7 +57,13 @@ int main(int argc, char** argv) {
                         w.L_1N[a], w.two_J_1N[a]);
         }
         double norm_radial = compute_norm_radial(w);
-        std::printf("⟨ψ|ψ⟩ (radial p²q² weights, Faddeev component): %.6f\n", norm_radial);
+        std::printf("⟨Ψ|Ψ⟩ (radial p²q² weights): %.6f\n", norm_radial);
+        if (std::fabs(norm_radial - 1.0) > 0.01) {
+            std::fprintf(stderr,
+                "WARNING: norm=%.6f is not 1.0 ± 0.01. Did you pass H3_psiasymm_*.dat?\n"
+                "  H3_psi_*.dat is the Faddeev component (norm≈0.154, NOT usable here).\n",
+                norm_radial);
+        }
         pw_3N_statespace pw = build_pw_3n_statespace_from_triton(w);
         std::printf("Built pw_3N_statespace: Nalpha=%d J_2N_max=%d\n", pw.Nalpha, pw.J_2N_max);
         int p0 = pw.P_3N_array[0];
