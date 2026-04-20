@@ -12,6 +12,7 @@
 // All subsequent tasks use: ⟨f|g⟩ = Σ_α Σ_{ij} wp_i·wq_j·p_i²·q_j² f_α(p_i,q_j) g_α(p_i,q_j)
 
 #include "read_triton_psi.h"
+#include "build_pw_3n_statespace.h"
 #include <cstdio>
 #include <exception>
 
@@ -50,6 +51,15 @@ int main(int argc, char** argv) {
         }
         double norm_radial = compute_norm_radial(w);
         std::printf("⟨ψ|ψ⟩ (radial p²q² weights, Faddeev component): %.6f\n", norm_radial);
+        pw_3N_statespace pw = build_pw_3n_statespace_from_triton(w);
+        std::printf("Built pw_3N_statespace: Nalpha=%d J_2N_max=%d\n", pw.Nalpha, pw.J_2N_max);
+        int p0 = pw.P_3N_array[0];
+        bool all_same_parity = true;
+        for (int a = 0; a < pw.Nalpha; ++a) {
+            if (pw.P_3N_array[a] != p0) { all_same_parity = false; break; }
+        }
+        std::printf("All α share parity P_3N=%+d: %s\n", p0, all_same_parity ? "yes" : "no");
+        free_pw_3n_statespace_triton(pw);
         return 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
