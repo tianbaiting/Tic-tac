@@ -13,6 +13,10 @@
 
 #include "read_triton_psi.h"
 #include "build_pw_3n_statespace.h"
+#include "contract_W1_expectation.h"
+#include "three_nucleon_force_model.h"
+#include "chiral_N2LO_3NF.h"
+#include "constants.h"
 #include <cstdio>
 #include <exception>
 
@@ -59,6 +63,19 @@ int main(int argc, char** argv) {
             if (pw.P_3N_array[a] != p0) { all_same_parity = false; break; }
         }
         std::printf("All α share parity P_3N=%+d: %s\n", p0, all_same_parity ? "yes" : "no");
+        // c_E-only run: c_D = c_1 = c_3 = c_4 = 0
+        chiral_N2LO_3NF tnf_cE(/*c_D=*/0.0, /*c_E=*/-0.205,
+                               /*Lambda_3NF_MeV=*/500.0,
+                               /*c1=*/0.0, /*c3=*/0.0, /*c4=*/0.0);
+        // Unit analysis: W1_element returns fm^5 (= 1/[fm^-5]).
+        // The 6D quadrature measure wp*p^2*wq*q^2 has units fm^-6.
+        // The partial-wave wavefunction Psi_alpha(p,q) has units fm^3 (since ||Psi||^2=1).
+        // So the 6D sum = fm^-6 * fm^3 * fm^5 * fm^-6 * fm^3 = fm^-1.
+        // Conversion to MeV: dE [MeV] = dE [fm^-1] * hbarc [MeV*fm].
+        double dE_fm_inv = contract_W1_expectation(w, pw, tnf_cE);
+        double dE_MeV = dE_fm_inv * hbarc;
+        std::printf("⟨Ψ|W^(1)_cE|Ψ⟩ = %.6e fm^-1 = %.6e MeV (before (1+P+P²) symm)\n",
+                    dE_fm_inv, dE_MeV);
         free_pw_3n_statespace_triton(pw);
         return 0;
     } catch (const std::exception& e) {
