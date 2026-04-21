@@ -17,6 +17,7 @@ CMAKE_OBJ_DIR := $(BUILD_DIR)/CMakeFiles/Tic-tac.dir/src
 SRC_OBJS := $(CMAKE_OBJ_DIR)/utils/spin_isospin_algebra.cpp.o \
             $(CMAKE_OBJ_DIR)/utils/error_management.cpp.o \
             $(CMAKE_OBJ_DIR)/utils/coupling_coefficients.cpp.o \
+            $(CMAKE_OBJ_DIR)/utils/chiral_3nf_recoupling.cpp.o \
             $(CMAKE_OBJ_DIR)/interactions/three_nucleon_force_model.cpp.o
 
 .PHONY: all clean

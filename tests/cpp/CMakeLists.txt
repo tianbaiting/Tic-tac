@@ -39,6 +39,7 @@ set(TEST_3NF_SOURCES
     ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
     ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/chiral_3nf_recoupling.cpp
 )
 add_executable(test_3nf_matrix_elements
     test_3nf_matrix_elements.cpp

@@ -82,6 +82,34 @@ int main(int argc, char** argv) {
             { "c_3_only",    0.0,    0.0,    0.0,  -3.20  },
             { "full_Witala",-0.20,  -0.205, -0.81, -3.20  },
         };
+        // --- Task-3 single-point verification against Python oracle ---------
+        // Diagonal 3S1 channel, p=q=p'=q'=0.5 fm^-1, c_E-only (c_D=c_1=c_3=0).
+        // Expected (hand_calc_cE.py, fpi=92.2 MeV): W1 = -1.8019e+00 fm^5.
+        {
+            int a_3S1 = -1;
+            for (int a = 0; a < pw.Nalpha; ++a) {
+                if (pw.L_2N_array[a] == 0 && pw.S_2N_array[a] == 1 &&
+                    pw.J_2N_array[a] == 1 && pw.T_2N_array[a] == 0 &&
+                    pw.L_1N_array[a] == 0 && pw.two_J_1N_array[a] == 1) {
+                    a_3S1 = a; break;
+                }
+            }
+            if (a_3S1 >= 0) {
+                chiral_N2LO_3NF tnf_cE(/*c_D=*/0.0, /*c_E=*/-0.205, /*Lambda_MeV=*/500.0,
+                                        /*c1=*/0.0, /*c3=*/0.0, /*c4=*/0.0);
+                double v_fm5 = tnf_cE.W1_element(a_3S1, a_3S1,
+                                                 0.5, 0.5, 0.5, 0.5, pw);
+                std::printf("\n[Task-3 single-point check]\n");
+                std::printf("  W1_cE(3S1, p=q=p'=q'=0.5 fm^-1) = %+.6e fm^5\n", v_fm5);
+                std::printf("  oracle (hand_calc_cE.py, fpi=92.2) = -1.801868e+00 fm^5\n");
+                double expected = -1.801868e+00;
+                double rel = (v_fm5 - expected) / expected * 100.0;
+                std::printf("  relative difference = %+.3f%%  (pass within 2%%)\n", rel);
+            } else {
+                std::printf("\n[Task-3 single-point check] WARNING: 3S1 channel not found.\n");
+            }
+        }
+
         std::printf("\n=== ΔE_3NF = ⟨Ψ|(1+P+P²)W^(1)|Ψ⟩ = 3·⟨Ψ|W^(1)|Ψ⟩ (antisymmetric Ψ → P|Ψ⟩ = |Ψ⟩) ===\n");
         std::printf("%-16s  %18s  %18s\n", "channel", "⟨W⟩ [MeV]", "3·⟨W⟩ [MeV]");
         double v_MeV_values[5];

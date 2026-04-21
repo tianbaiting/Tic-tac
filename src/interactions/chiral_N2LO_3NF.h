@@ -4,6 +4,8 @@
 #include "three_nucleon_force_model.h"
 #include "constants.h"
 #include "spin_isospin_algebra.h"
+#include "chiral_3nf_pw_kernels.h"
+#include "../utils/chiral_3nf_recoupling.h"
 #include <cmath>
 
 // [EN] Chiral N2LO three-nucleon force: the leading 3NF in chiral effective field theory.
@@ -94,54 +96,55 @@ private:
 	double m_c3;           // c₃ LEC in fm (converted from GeV⁻¹)
 	double m_c4;           // c₄ LEC in fm (converted from GeV⁻¹) — reserved for tensor part
 
-	// [EN] 3N contact term (c_E): diagonal in all quantum numbers α.
-	//   W^(1)_CT(α',p',q'; α,p,q) = c_E/(f_π⁴ Λ_χ) × [2T_2N(T_2N+1) - 3]
-	//                                × f_Λ(p',q') × f_Λ(p,q) × δ_{α',α}
+	// [EN] 3N contact term (c_E): partial-wave matrix element assembled from
+	// the factored pieces
+	//   W^(1)_CT(α',p',q'; α,p,q)
+	//     = A_rank0(α', α)                      [recoupling_3nf_scalar]
+	//     × [ -½ c_E / (f_π⁴ Λ_χ) ]              [kernel_contact]
+	//     × f_R(p',q') f_R(p,q)                 [regulator_gauss, squared Gaussian]
 	//
-	// where:
-	//   τ₂·τ₃ = 2T_2N(T_2N+1) - 3  (eigenvalue of pair isospin operator)
-	//   f_Λ(p,q) = exp(-(p² + ¾q²)/Λ²)  (Gaussian regulator)
+	// The rank-0 recoupling enforces diagonality in all pair & spectator quantum
+	// numbers and returns (σ_2·σ_3)(τ_2·τ_3) as the scalar eigenvalue product
+	// (Task 1 helper convention; see chiral_3nf_recoupling.h).  For 3S1
+	// (S_2N=1, T_2N=0) the triplet σ·σ = +1 is inert, so the c_E piece reduces
+	// to the (τ_2·τ_3) eigenvalue on top of the LEC factor and regulators.
 	//
-	// / [CN] 3N 接触项 (c_E)：在所有量子数 α 上对角。
+	// References:
+	//   Epelbaum et al. PRC 66 (2002) 064001, eqs. (2.10), (3.19), (A-4);
+	//   tools/check_3nf_normalization/formula_reference.md §1.
+	//
+	// / [CN] 3N 接触项 (c_E)：由三部分组合的分波矩阵元——重耦合系数
+	// (Task 1, 对角选择定则 + σ·σ × τ·τ)、LEC 核 (Task 2, -½ c_E / (fπ⁴ Λ_χ))、
+	// 以及 E2002 eq. 3.19 的平方高斯正规化子。
 	double W1_contact(int alpha_r, int alpha_c,
 					  double p_r, double q_r,
 					  double p_c, double q_c,
 					  const pw_3N_statespace& pw_states) const
 	{
-		// Contact term is diagonal in all quantum numbers
-		if (alpha_r != alpha_c) return 0.0;
-
-		// Skip if c_E is zero (pure 2NF mode with 3NF object still constructed)
+		// Short-circuit when the LEC is off (pure 2NF runs still build this object).
 		if (m_c_E == 0.0) return 0.0;
 
-		// Pair isospin for this partial-wave state
-		int T_2N = pw_states.T_2N_array[alpha_r];
+		// Rank-0 recoupling: pair scalar (sigma2.sigma3)(tau2.tau3) with full
+		// Kronecker selection on pair and spectator quantum numbers.
+		const double recoup = recoupling_3nf_scalar(
+			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
+			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
+			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
+			pw_states.two_J_3N_array[alpha_r],
+			pw_states.L_2N_array[alpha_c], pw_states.S_2N_array[alpha_c],
+			pw_states.J_2N_array[alpha_c], pw_states.T_2N_array[alpha_c],
+			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
+			pw_states.two_T_3N_array[alpha_r]);
+		if (recoup == 0.0) return 0.0;
 
-		// τ₂·τ₃ eigenvalue: 2T(T+1) - 3
-		//   T_2N=0 (singlet): -3
-		//   T_2N=1 (triplet): +1
-		double tau_dot_tau = 2.0 * T_2N * (T_2N + 1.0) - 3.0;
+		// Squared-Gaussian regulator per E2002 eq. (3.19), applied to bra and ket.
+		const double f_bra = chiral_3nf::regulator_gauss(p_r, q_r, m_Lambda);
+		const double f_ket = chiral_3nf::regulator_gauss(p_c, q_c, m_Lambda);
 
-		// Gaussian regulator per E2002 eq. (3.19):
-		//   f_R(p,q) = exp(-((4p² + 3q²)/(4Λ²))²)
-		// The argument (4p² + 3q²)/(4Λ²) = (p² + ¾q²)/Λ², but the outer square
-		// on the exponent is essential — without it the regulator is far too soft
-		// and the high-momentum tails dominate ⟨W⟩.
-		double inv_L2 = 1.0 / (m_Lambda * m_Lambda);
-		double a_bra  = (p_r*p_r + 0.75*q_r*q_r) * inv_L2;
-		double a_ket  = (p_c*p_c + 0.75*q_c*q_c) * inv_L2;
-		double f_bra = std::exp(-a_bra * a_bra);
-		double f_ket = std::exp(-a_ket * a_ket);
+		// LEC kernel: -½ c_E / (fπ⁴ Λ_χ) (E2002 eq. 2.10, spectator-1 component).
+		const double lec = chiral_3nf::kernel_contact(m_c_E, m_fpi4, m_Lambda_chi);
 
-		// Overall coefficient per E2002 eq. (2.10):
-		//   V^(1)_cont = -½ c_E / (f_π⁴ Λ_χ) × (τ_2·τ_3)
-		// Previous code had +c_E/(f_π⁴ Λ_χ) with no -½ prefactor — opposite
-		// sign and missing the ½. Note: τ_j·τ_k appears once per spectator
-		// component with j,k ∈ pair(2,3); the -½ is the E2002 convention
-		// for V^(1) (spectator-1 component).
-		double coeff = -0.5 * m_c_E / (m_fpi4 * m_Lambda_chi);
-
-		return coeff * tau_dot_tau * f_bra * f_ket;
+		return recoup * lec * f_bra * f_ket;
 	}
 
 	// [EN] 1PE-CT term (c_D): one-pion exchange between spectator (particle 1) and a pair
