@@ -54,3 +54,12 @@ add_executable(test_3nf_symmetries
 )
 target_link_libraries(test_3nf_symmetries ${GSL_LIBRARIES} ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 add_test(NAME 3nf_symmetries COMMAND test_3nf_symmetries)
+
+# L2: Chiral 3NF spin-isospin recoupling helpers (scalar + rank-2)
+add_executable(test_chiral_3nf_recoupling
+    test_chiral_3nf_recoupling.cpp
+    ${TEST_UTIL_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/utils/chiral_3nf_recoupling.cpp
+)
+target_link_libraries(test_chiral_3nf_recoupling ${GSL_LIBRARIES})
+add_test(NAME chiral_3nf_recoupling COMMAND test_chiral_3nf_recoupling)
