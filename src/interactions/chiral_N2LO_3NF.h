@@ -122,10 +122,16 @@ private:
 		//   T_2N=1 (triplet): +1
 		double tau_dot_tau = 2.0 * T_2N * (T_2N + 1.0) - 3.0;
 
-		// Gaussian regulator: f_Λ(p, q) = exp(-(p² + ¾q²) / Λ²)
+		// Gaussian regulator per E2002 eq. (3.19):
+		//   f_R(p,q) = exp(-((4p² + 3q²)/(4Λ²))²)
+		// The argument (4p² + 3q²)/(4Λ²) = (p² + ¾q²)/Λ², but the outer square
+		// on the exponent is essential — without it the regulator is far too soft
+		// and the high-momentum tails dominate ⟨W⟩.
 		double inv_L2 = 1.0 / (m_Lambda * m_Lambda);
-		double f_bra = std::exp(-(p_r*p_r + 0.75*q_r*q_r) * inv_L2);
-		double f_ket = std::exp(-(p_c*p_c + 0.75*q_c*q_c) * inv_L2);
+		double a_bra  = (p_r*p_r + 0.75*q_r*q_r) * inv_L2;
+		double a_ket  = (p_c*p_c + 0.75*q_c*q_c) * inv_L2;
+		double f_bra = std::exp(-a_bra * a_bra);
+		double f_ket = std::exp(-a_ket * a_ket);
 
 		// Overall coefficient: c_E / (f_π⁴ × Λ_χ) in fm⁵ (all in fm⁻¹ units)
 		double coeff = m_c_E / (m_fpi4 * m_Lambda_chi);
@@ -179,10 +185,13 @@ private:
 		double tau13 = tau1_dot_tau3(T_r, T_c, tT3);
 		if (std::abs(tau13) < 1e-15) return 0.0;
 
-		// Gaussian regulator: f_Λ(p,q) = exp(-(p² + ¾q²)/Λ²)
+		// Gaussian regulator per E2002 eq. (3.19):
+		//   f_R(p,q) = exp(-((4p² + 3q²)/(4Λ²))²) = exp(-((p² + ¾q²)/Λ²)²)
 		double inv_L2 = 1.0 / (m_Lambda * m_Lambda);
-		double f_bra = std::exp(-(p_r*p_r + 0.75*q_r*q_r) * inv_L2);
-		double f_ket = std::exp(-(p_c*p_c + 0.75*q_c*q_c) * inv_L2);
+		double a_bra  = (p_r*p_r + 0.75*q_r*q_r) * inv_L2;
+		double a_ket  = (p_c*p_c + 0.75*q_c*q_c) * inv_L2;
+		double f_bra = std::exp(-a_bra * a_bra);
+		double f_ket = std::exp(-a_ket * a_ket);
 
 		// Angle-averaged pion propagator (scalar part):
 		// q₃ = (p⃗ - p⃗') + (q⃗' - q⃗)/2, so q₃² = |Δp|² + |Δq|²/4 + (Δp)·(Δq)
@@ -252,10 +261,13 @@ private:
 		// Overall coefficient: g_A² / (4 f_π⁴)
 		double coeff = m_gA * m_gA / (4.0 * m_fpi4);
 
-		// Gaussian regulator
+		// Gaussian regulator per E2002 eq. (3.19):
+		//   f_R(p,q) = exp(-((4p² + 3q²)/(4Λ²))²) = exp(-((p² + ¾q²)/Λ²)²)
 		double inv_L2 = 1.0 / (m_Lambda * m_Lambda);
-		double f_bra = std::exp(-(p_r*p_r + 0.75*q_r*q_r) * inv_L2);
-		double f_ket = std::exp(-(p_c*p_c + 0.75*q_c*q_c) * inv_L2);
+		double a_bra  = (p_r*p_r + 0.75*q_r*q_r) * inv_L2;
+		double a_ket  = (p_c*p_c + 0.75*q_c*q_c) * inv_L2;
+		double f_bra = std::exp(-a_bra * a_bra);
+		double f_ket = std::exp(-a_ket * a_ket);
 
 		return coeff * scalar * f_bra * f_ket;
 	}
