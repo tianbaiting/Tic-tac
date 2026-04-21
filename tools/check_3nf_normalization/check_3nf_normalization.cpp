@@ -155,6 +155,54 @@ int main(int argc, char** argv) {
             }
         }
 
+        // --- Task-5 single-point verification: W1_2pe (c_1 and c_3) -----------
+        // Diagonal 3S1 channel, p=q=p'=q'=0.5 fm^-1.
+        // c_1 only (c_3=0): from formula_reference §3.5, rank-0 estimate ~-0.8 fm^5.
+        // c_1+c_3 combined rank-0 diagonal: sum of rank-0 pieces.
+        // Off-diagonal 3S1(L=0)->3D1(L=2): rank-2 only (rank-0 is zero by ΔL selection rule).
+        {
+            int a_3S1 = -1, a_3D1 = -1;
+            for (int a = 0; a < pw.Nalpha; ++a) {
+                if (pw.L_2N_array[a] == 0 && pw.S_2N_array[a] == 1 &&
+                    pw.J_2N_array[a] == 1 && pw.T_2N_array[a] == 0 &&
+                    pw.L_1N_array[a] == 0 && pw.two_J_1N_array[a] == 1 &&
+                    pw.two_J_3N_array[a] == 1 && pw.two_T_3N_array[a] == 1)
+                    a_3S1 = a;
+                if (pw.L_2N_array[a] == 2 && pw.S_2N_array[a] == 1 &&
+                    pw.J_2N_array[a] == 1 && pw.T_2N_array[a] == 0 &&
+                    pw.L_1N_array[a] == 0 && pw.two_J_1N_array[a] == 1 &&
+                    pw.two_J_3N_array[a] == 1 && pw.two_T_3N_array[a] == 1)
+                    a_3D1 = a;
+            }
+            std::printf("\n[Task-5 single-point check: W1_2pe]\n");
+            if (a_3S1 >= 0) {
+                // c_1-only diagonal 3S1
+                chiral_N2LO_3NF tnf_c1(0.0, 0.0, 500.0, -0.81, 0.0, 0.0);
+                double v_c1 = tnf_c1.W1_element(a_3S1, a_3S1, 0.5, 0.5, 0.5, 0.5, pw);
+                std::printf("  W1_c1(3S1 diag, p=q=0.5)   = %+.6e fm^5  (rank-0 oracle ~-0.8 fm^5)\n", v_c1);
+                // c_3-only diagonal 3S1
+                chiral_N2LO_3NF tnf_c3(0.0, 0.0, 500.0, 0.0, -3.20, 0.0);
+                double v_c3 = tnf_c3.W1_element(a_3S1, a_3S1, 0.5, 0.5, 0.5, 0.5, pw);
+                std::printf("  W1_c3(3S1 diag, p=q=0.5)   = %+.6e fm^5  (rank-0 oracle ~+1.2 fm^5)\n", v_c3);
+                // c_1+c_3 combined diagonal 3S1
+                chiral_N2LO_3NF tnf_c1c3(0.0, 0.0, 500.0, -0.81, -3.20, 0.0);
+                double v_c1c3 = tnf_c1c3.W1_element(a_3S1, a_3S1, 0.5, 0.5, 0.5, 0.5, pw);
+                std::printf("  W1_c1c3(3S1 diag, p=q=0.5) = %+.6e fm^5  (rank-0 combined)\n", v_c1c3);
+            } else {
+                std::printf("  WARNING: 3S1 channel not found.\n");
+            }
+            if (a_3S1 >= 0 && a_3D1 >= 0) {
+                // Off-diagonal 3S1->3D1 (rank-2 only; rank-0 is zero by ΔL selection rule)
+                chiral_N2LO_3NF tnf_c1c3(0.0, 0.0, 500.0, -0.81, -3.20, 0.0);
+                double v_sd = tnf_c1c3.W1_element(a_3S1, a_3D1, 0.5, 0.5, 0.5, 0.5, pw);
+                double v_ds = tnf_c1c3.W1_element(a_3D1, a_3S1, 0.5, 0.5, 0.5, 0.5, pw);
+                std::printf("  W1_c1c3(3S1->3D1, off-diag) = %+.6e fm^5  (rank-2 tensor; should be nonzero)\n", v_sd);
+                std::printf("  W1_c1c3(3D1->3S1, off-diag) = %+.6e fm^5  (transpose; nonzero for rank-2)\n", v_ds);
+            } else {
+                std::printf("  WARNING: 3D1 channel (a_3D1=%d) not found.\n", a_3D1);
+            }
+        }
+
         std::printf("\n=== ΔE_3NF = ⟨Ψ|(1+P+P²)W^(1)|Ψ⟩ = 3·⟨Ψ|W^(1)|Ψ⟩ (antisymmetric Ψ → P|Ψ⟩ = |Ψ⟩) ===\n");
         std::printf("%-16s  %18s  %18s\n", "channel", "⟨W⟩ [MeV]", "3·⟨W⟩ [MeV]");
         double v_MeV_values[5];
