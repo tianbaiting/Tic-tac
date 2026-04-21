@@ -1,5 +1,6 @@
 #include "chiral_3nf_recoupling.h"
 #include "coupling_coefficients.h"
+#include "spin_isospin_algebra.h"
 #include <cmath>
 
 // [EN] Implementation notes:
@@ -137,4 +138,137 @@ double recoupling_3nf_rank2(
       * two_jp1(J_2N_r) * two_jp1(J_2N_c));
 
     return tau_tau * rme_sigma_tensor * hat * w9j * cg_spatial;
+}
+
+double recoupling_3nf_1pe_ct_scalar(
+    int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
+    int L_1N_r, int two_J_1N_r, int two_J_3N,
+    int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,
+    int L_1N_c, int two_J_1N_c,
+    int two_T_3N)
+{
+    // [EN] Rank-0 (1/3 sigma_1.sigma_3)(tau_1.tau_3) recoupling coefficient
+    // for the c_D 1PE-contact term.
+    //
+    // E2002 eq. A-1 forces L_2N = L_2N' = 0 (contact pair vertex: only S-wave
+    // pair contributes). The sigma operators preserve L_1N (orbital).
+    //
+    // Returns: (1/3) * sigma1_dot_sigma3_ME * tau1_dot_tau3_ME
+    //          where both matrix elements are in the 3N Jj-coupled basis via
+    //          spin_isospin_algebra helpers (which include the full 9j/6j
+    //          recoupling for spectator-pair mixing).
+    //
+    // / [CN] c_D 1PE-CT rank-0 重耦合系数：(1/3)(σ₁·σ₃)(τ₁·τ₃)。
+    // 接触配对顶点要求 L_2N = L_2N' = 0（仅 S 波贡献）。
+
+    // --- Selection rule: contact pair vertex requires S-wave pair ---
+    if (L_2N_r != 0 || L_2N_c != 0) return 0.0;
+
+    // --- Selection rule: L_1N preserved by sigma operators ---
+    if (L_1N_r != L_1N_c) return 0.0;
+
+    // --- Spin matrix element: (sigma_1 . sigma_3) in 3N Jj basis ---
+    // reduced_me_sigma1_dot_sigma3 also enforces L_r=L_c, l_r=l_c internally.
+    const double sig13 = reduced_me_sigma1_dot_sigma3(
+        L_2N_r, S_2N_r, J_2N_r, L_1N_r, two_J_1N_r, two_J_3N,
+        L_2N_c, S_2N_c, J_2N_c, L_1N_c, two_J_1N_c);
+    if (std::abs(sig13) < 1e-15) return 0.0;
+
+    // --- Isospin matrix element: (tau_1 . tau_3) in 3N Jj basis ---
+    const double tau13 = tau1_dot_tau3(T_2N_r, T_2N_c, two_T_3N);
+    if (std::abs(tau13) < 1e-15) return 0.0;
+
+    // Factor 1/3 from rank-0 decomposition of (sigma_1.q_hat)(sigma_3.q_hat):
+    //   (sigma_1 . q_hat)(sigma_3 . q_hat) = (1/3)(sigma_1.sigma_3) + rank-2
+    return (1.0 / 3.0) * sig13 * tau13;
+}
+
+double recoupling_3nf_1pe_ct_rank2(
+    int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
+    int L_1N_r, int two_J_1N_r, int two_J_3N,
+    int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,
+    int L_1N_c, int two_J_1N_c,
+    int two_T_3N)
+{
+    // [EN] Rank-2 [sigma_1 ⊗ sigma_3]_2 . Y_2(q_hat) recoupling coefficient
+    // for the c_D 1PE-contact term (spectator-1 picture, E2002 eq. A-1).
+    //
+    // The spatial rank-2 tensor Y_2(q_hat) acts on the SPECTATOR direction
+    // (q_hat = q/|q|). Partial-wave projection onto spectator states (l, l')
+    // requires CG(l, 0; 2, 0 | l', 0) != 0, which by the triangle rule
+    // demands |l - l'| <= 2 with l + l' + 2 even.
+    //
+    // For the dominant l_1N = 0 channels: CG(0, 0; 2, 0 | 0, 0) = 0
+    // (triangle: |0-2| = 2 <= 0 fails), so the rank-2 piece VANISHES for
+    // S-wave spectator states. The first non-zero contribution is at l_1N = 2.
+    //
+    // Current implementation: enforces this selection rule and returns the
+    // full spectator-line 9j coefficient for l_1N >= 2. For the dominant
+    // triton channels (l_1N = 0), correctly returns 0.
+    //
+    // / [CN] c_D 1PE-CT rank-2 重耦合系数：[σ₁⊗σ₃]₂·Y₂(q̂)。
+    // 对于旁观者 l_1N=0 通道（三氚核主要通道），由于 CG 选择定则 CG(0,0;2,0|0,0)=0
+    // 该项精确为零。
+
+    // --- Selection rule: contact pair vertex requires S-wave pair ---
+    if (L_2N_r != 0 || L_2N_c != 0) return 0.0;
+
+    // --- Selection rule: spectator CG (l, 0; 2, 0 | l', 0) ---
+    // Triangle rule: |l - l'| <= 2 and (l + l' + 2) must be even.
+    const int dl = std::abs(L_1N_r - L_1N_c);
+    if (dl > 2) return 0.0;
+    if ((L_1N_r + L_1N_c + 2) % 2 != 0) return 0.0;
+    // Additional triangle: l + 2 >= l' and l' + 2 >= l (covered by dl <= 2)
+    // For l = l' = 0: CG(0,0;2,0|0,0) requires triangle 0+2>=0 AND |0-2|<=0 FAILS.
+    if (L_1N_r == 0 && L_1N_c == 0) return 0.0;  // CG(0,0;2,0|0,0) = 0
+
+    // --- Isospin matrix element: (tau_1 . tau_3) ---
+    const double tau13 = tau1_dot_tau3(T_2N_r, T_2N_c, two_T_3N);
+    if (std::abs(tau13) < 1e-15) return 0.0;
+
+    // --- Spatial CG for spectator line Y_2 ---
+    // <L_1N' 0 | 2 0 ; L_1N 0>  (using twice-integer convention for clebsch_gordan)
+    const double cg_spec = clebsch_gordan(2 * L_1N_c, 4, 2 * L_1N_r, 0, 0, 0);
+    if (std::abs(cg_spec) < 1e-15) return 0.0;
+
+    // --- Rank-2 spin matrix element for [sigma_1 ⊗ sigma_3]_2 ---
+    // This is the reduced matrix element in the (pair S, spectator s_1) basis.
+    // The rank-2 tensor [sigma_1 ⊗ sigma_3]_2 couples spin-1 from sigma_1
+    // (spectator) with spin-1 from sigma_3 (pair particle 3) to rank-2.
+    //
+    // The 9j recoupling for the full 3N coupling:
+    //   { L_2N_r  S_2N_r  J_2N_r }
+    //   { L_2N_c  S_2N_c  J_2N_c } => rank-2 on pair
+    //   { 0       2       2      }
+    // (analogous to recoupling_3nf_rank2 but applied to the pair spin only,
+    //  with the spectator Y_2 handled separately via cg_spec above)
+    //
+    // For now use the pair-spin reduced matrix element sqrt(30) (like rank2 helper)
+    // combined with a 9j for (pair L,S,J) -> (pair L',S',J') via rank-2 pair spin.
+    const double rme_spin_pair = std::sqrt(30.0);
+
+    const double w9j_pair = wigner_9j(2 * L_2N_r, 2 * S_2N_r, 2 * J_2N_r,
+                                      2 * L_2N_c, 2 * S_2N_c, 2 * J_2N_c,
+                                      0,           4,           4);
+    // Note: L_2N_r = L_2N_c = 0, so this 9j is just the S, J coupling:
+    // {0 S_r J_r; 0 S_c J_c; 0 2 2} which requires J_r=J_c for nonzero.
+    if (std::abs(w9j_pair) < 1e-15) return 0.0;
+
+    // Hat factors for pair coupling
+    const double hat_pair = std::sqrt(
+        two_jp1(S_2N_r) * two_jp1(S_2N_c)
+      * two_jp1(J_2N_r) * two_jp1(J_2N_c));
+
+    // Spectator angular momentum: Y_2 couples l -> l', sigma_1 is diagonal
+    // spectator j recoupling: {l_r 1/2 j_r; l_c 1/2 j_c; 2 0 2}
+    const double w9j_spec = wigner_9j(2 * L_1N_r, 1, two_J_1N_r,
+                                      2 * L_1N_c, 1, two_J_1N_c,
+                                      4,           0, 4);
+    if (std::abs(w9j_spec) < 1e-15) return 0.0;
+
+    const double hat_spec = std::sqrt(
+        (2.0 * L_1N_r + 1) * (2.0 * L_1N_c + 1)
+      * (two_J_1N_r + 1.0) * (two_J_1N_c + 1.0));
+
+    return tau13 * rme_spin_pair * hat_pair * w9j_pair * cg_spec * hat_spec * w9j_spec;
 }

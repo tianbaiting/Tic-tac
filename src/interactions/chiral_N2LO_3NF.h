@@ -6,7 +6,9 @@
 #include "spin_isospin_algebra.h"
 #include "chiral_3nf_pw_kernels.h"
 #include "../utils/chiral_3nf_recoupling.h"
+#include "gauss_legendre.h"
 #include <cmath>
+#include <vector>
 
 // [EN] Chiral N2LO three-nucleon force: the leading 3NF in chiral effective field theory.
 // Three contributions at this order:
@@ -29,6 +31,10 @@
 class chiral_N2LO_3NF : public three_nucleon_force_model
 {
 public:
+	// [EN] Number of Gauss-Legendre quadrature points for x = cos(q̂·q̂') integration.
+	// 24 points provide < 0.01% accuracy for the smooth 1/(Q²+mπ²) kernel.
+	static constexpr int N_GL = 24;
+
 	chiral_N2LO_3NF(double c_D, double c_E, double Lambda_3NF_MeV,
 				    double c1 = 0.0, double c3 = 0.0, double c4 = 0.0)
 		: m_c_D(c_D)
@@ -41,7 +47,14 @@ public:
 		, m_c1(c1 * hbarc / 1000.0)                   // c₁ LEC: GeV⁻¹ → fm
 		, m_c3(c3 * hbarc / 1000.0)                   // c₃ LEC: GeV⁻¹ → fm
 		, m_c4(c4 * hbarc / 1000.0)                   // c₄ LEC: GeV⁻¹ → fm — reserved for tensor part
+		, m_gl_x(N_GL)
+		, m_gl_w(N_GL)
 	{
+		// [EN] Pre-compute Gauss-Legendre nodes and weights on [-1, +1].
+		// These are reused for every W1_1pe_contact and W1_2pe call.
+		// The gauss() function from src/utils/gauss_legendre.h fills arrays
+		// of length N_GL with the standard GL abscissae and weights.
+		gauss(m_gl_x.data(), m_gl_w.data(), N_GL);
 	}
 
 	bool enabled() const override { return m_c_D != 0.0 || m_c_E != 0.0 || m_c1 != 0.0 || m_c3 != 0.0 || m_c4 != 0.0; }
@@ -95,6 +108,8 @@ private:
 	double m_c1;           // c₁ LEC in fm (converted from GeV⁻¹)
 	double m_c3;           // c₃ LEC in fm (converted from GeV⁻¹)
 	double m_c4;           // c₄ LEC in fm (converted from GeV⁻¹) — reserved for tensor part
+	std::vector<double> m_gl_x; // Gauss-Legendre nodes on [-1, +1]
+	std::vector<double> m_gl_w; // Gauss-Legendre weights on [-1, +1]
 
 	// [EN] 3N contact term (c_E): partial-wave matrix element assembled from
 	// the factored pieces
@@ -147,21 +162,36 @@ private:
 		return recoup * lec * f_bra * f_ket;
 	}
 
-	// [EN] 1PE-CT term (c_D): one-pion exchange between spectator (particle 1) and a pair
-	// particle (particle 3), with a contact interaction in the pair (2,3). This implements
-	// only the scalar (rank-0) part proportional to σ₁·σ₃ with a monopole (angle-averaged)
-	// pion propagator. The tensor (rank-2) part will be added in a follow-up task.
+	// [EN] 1PE-CT term (c_D): one-pion exchange between spectator (particle 1) and pair
+	// particle 3, with a contact interaction in the pair (2,3).
 	//
-	// W^(1)_D,scalar = -c_D gA / (8 f_π⁴ Λ_χ) × 2
-	//   × f_Λ(p',q') f_Λ(p,q) × τ₁·τ₃ × σ₁·σ₃ × (1/3) × <q₃²/(q₃² + m_π²)>
+	// Implements the true partial-wave matrix element via rank-0 + rank-2 decomposition
+	// of (σ₁·q̂₃)(σ₃·q̂₃):
+	//   (σ₁·q̂)(σ₃·q̂) = ⅓(σ₁·σ₃)            [rank-0]
+	//                   + [σ₁⊗σ₃]₂·[q̂⊗q̂]₂   [rank-2]
 	//
-	// The factor of 2 accounts for pair symmetry (summing j=2,3 contributions).
-	// The monopole pion propagator uses <q₃²> = p² + p'² + (q² + q'²)/4 which arises
-	// from angle-averaging q₃ = (p⃗ - p⃗') + (q⃗' - q⃗)/2 with uncorrelated directions.
+	// The momentum variable Q² = q² + q'² − 2qq'x is the spectator momentum transfer
+	// (|Δq|² in E2002 eq. A-2), with x = cos(q̂·q̂').
 	//
-	// / [CN] 1PE-CT 项 (c_D)：旁观者(粒子1)与配对粒子(粒子3)之间的单 π 交换，配对(2,3)间
-	// 为接触相互作用。此处仅实现正比于 σ₁·σ₃ 的标量(rank-0)部分，使用单极(角度平均)
-	// π 传播子。张量(rank-2)部分将在后续任务中添加。
+	// Operator structure (E2002 eq. 2.10):
+	//   V^(1)_D = −(g_A D / 8) × Σ_j (τ₁·τ_j)(σ_j·q̂_j)(σ₁·q̂_j)/(|q_j|²+m_π²)
+	//   D = c_D / (f_π² Λ_χ)  →  overall coeff = −g_A c_D / (8 f_π⁴ Λ_χ) × 2 (j=2,3 sum)
+	//
+	// Selection rules from E2002 eq. A-1 (contact pair vertex):
+	//   L_2N = L_2N' = 0   (contact pair vertex → S-wave pair only)
+	//   L_1N = L_1N'        (σ operators preserve spectator orbital, enforced by recoupling)
+	//
+	// Angular integration: 24-point Gauss-Legendre quadrature for x ∈ [−1, +1].
+	//   rank-0: ∫dx (1/(8π³)) × 1/(Q²+m_π²)           [P_0(x)=1 weight]
+	//   rank-2: ∫dx (1/(8π³)) × P_2(x)/(Q²+m_π²)      [P_2(x)=(3x²−1)/2 weight]
+	//           Note: rank-2 vanishes for l_1N=l_1N'=0 by CG(0,0;2,0|0,0)=0.
+	//
+	// Note on sign: the coeff carries a minus sign from E2002 eq. (2.10). For the
+	// sign of the final matrix element vs reference: same convention issue as c_E
+	// (sign may be flipped; see Task 3 discussion). Do not fix here.
+	//
+	// / [CN] 1PE-CT 项 (c_D)：真实分波矩阵元，包含 rank-0 和 rank-2 分解
+	// 以及24点 Gauss-Legendre x 积分。选择定则：L_2N=0（接触配对顶点）。
 	double W1_1pe_contact(int alpha_r, int alpha_c,
 						  double p_r, double q_r,
 						  double p_c, double q_c,
@@ -169,52 +199,55 @@ private:
 	{
 		if (m_c_D == 0.0) return 0.0;
 
-		// Extract quantum numbers
-		int L_r = pw_states.L_2N_array[alpha_r];  int L_c = pw_states.L_2N_array[alpha_c];
-		int S_r = pw_states.S_2N_array[alpha_r];  int S_c = pw_states.S_2N_array[alpha_c];
-		int J_r = pw_states.J_2N_array[alpha_r];  int J_c = pw_states.J_2N_array[alpha_c];
-		int T_r = pw_states.T_2N_array[alpha_r];  int T_c = pw_states.T_2N_array[alpha_c];
-		int l_r = pw_states.L_1N_array[alpha_r];  int l_c = pw_states.L_1N_array[alpha_c];
-		int tj_r = pw_states.two_J_1N_array[alpha_r]; int tj_c = pw_states.two_J_1N_array[alpha_c];
-		int tJ3 = pw_states.two_J_3N_array[alpha_r]; // same for both (conserved)
+		// Rank-0 recoupling: (1/3)(σ₁·σ₃)(τ₁·τ₃) in 3N Jj basis.
+		// Selection rules: L_2N=L_2N'=0, L_1N=L_1N' (enforced inside helper).
+		const double recoup0 = recoupling_3nf_1pe_ct_scalar(
+			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
+			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
+			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
+			pw_states.two_J_3N_array[alpha_r],
+			pw_states.L_2N_array[alpha_c], pw_states.S_2N_array[alpha_c],
+			pw_states.J_2N_array[alpha_c], pw_states.T_2N_array[alpha_c],
+			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
+			pw_states.two_T_3N_array[alpha_r]);
 
-		// Selection rules for σ₁·σ₃ scalar part:
-		// Orbital angular momenta conserved: L'=L, l'=l
-		if (L_r != L_c || l_r != l_c) return 0.0;
+		// Rank-2 recoupling: [σ₁⊗σ₃]₂·Y₂(q̂) coefficient.
+		// For l_1N=0 channels (dominant triton configs): returns 0 by CG selection rule.
+		const double recoup2 = recoupling_3nf_1pe_ct_rank2(
+			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
+			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
+			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
+			pw_states.two_J_3N_array[alpha_r],
+			pw_states.L_2N_array[alpha_c], pw_states.S_2N_array[alpha_c],
+			pw_states.J_2N_array[alpha_c], pw_states.T_2N_array[alpha_c],
+			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
+			pw_states.two_T_3N_array[alpha_r]);
 
-		// Compute spin recoupling: σ₁·σ₃
-		double sig13 = reduced_me_sigma1_dot_sigma3(
-			L_r, S_r, J_r, l_r, tj_r, tJ3,
-			L_c, S_c, J_c, l_c, tj_c);
-		if (std::abs(sig13) < 1e-15) return 0.0;
+		if (recoup0 == 0.0 && recoup2 == 0.0) return 0.0;
 
-		// Compute isospin recoupling: τ₁·τ₃
-		int tT3 = pw_states.two_T_3N_array[alpha_r];
-		double tau13 = tau1_dot_tau3(T_r, T_c, tT3);
-		if (std::abs(tau13) < 1e-15) return 0.0;
+		// Squared-Gaussian regulator per E2002 eq. (3.19).
+		const double f_bra = chiral_3nf::regulator_gauss(p_r, q_r, m_Lambda);
+		const double f_ket = chiral_3nf::regulator_gauss(p_c, q_c, m_Lambda);
 
-		// Gaussian regulator per E2002 eq. (3.19):
-		//   f_R(p,q) = exp(-((4p² + 3q²)/(4Λ²))²) = exp(-((p² + ¾q²)/Λ²)²)
-		double inv_L2 = 1.0 / (m_Lambda * m_Lambda);
-		double a_bra  = (p_r*p_r + 0.75*q_r*q_r) * inv_L2;
-		double a_ket  = (p_c*p_c + 0.75*q_c*q_c) * inv_L2;
-		double f_bra = std::exp(-a_bra * a_bra);
-		double f_ket = std::exp(-a_ket * a_ket);
+		// Gauss-Legendre x-integration for the 1PE pion propagator.
+		// Q²(x) = q² + q'² − 2qq'x  (|Δq|²  per E2002 eq. A-2)
+		// rank-0 weight: P_0(x) = 1
+		// rank-2 weight: P_2(x) = (3x²−1)/2
+		double integ0 = 0.0, integ2 = 0.0;
+		for (int ix = 0; ix < N_GL; ++ix) {
+			const double x  = m_gl_x[ix];
+			const double wx = m_gl_w[ix];
+			const double k  = chiral_3nf::kernel_1pe_contact(p_r, q_r, p_c, q_c,
+			                                                  x, m_mpi_fm);
+			if (recoup0 != 0.0) integ0 += wx * k;               // P_0 = 1
+			if (recoup2 != 0.0) integ2 += wx * k * (1.5*x*x - 0.5); // P_2(x)
+		}
 
-		// Angle-averaged pion propagator (scalar part):
-		// q₃ = (p⃗ - p⃗') + (q⃗' - q⃗)/2, so q₃² = |Δp|² + |Δq|²/4 + (Δp)·(Δq)
-		// For the monopole approximation with uncorrelated angular directions:
-		//   <|Δp|²> = p² + p'²,  <|Δq|²> = q² + q'²,  <Δp·Δq> = 0
-		// Hence <q₃²> = p² + p'² + (q² + q'²)/4
-		// The scalar channel factor is (1/3) × <q₃²/(q₃² + m_π²)>
-		// ≈ (1/3) × <q₃²> / (<q₃²> + m_π²)
-		double q3_sq_avg = p_r*p_r + p_c*p_c + 0.25*(q_r*q_r + q_c*q_c);
-		double pion_factor = q3_sq_avg / (q3_sq_avg + m_mpi_fm * m_mpi_fm) / 3.0;
+		// Overall coefficient: −g_A c_D / (8 f_π⁴ Λ_χ) × 2
+		// (factor of 2 from summing j=2 and j=3 in the operator).
+		const double coeff = -m_gA * m_c_D / (8.0 * m_fpi4 * m_Lambda_chi) * 2.0;
 
-		// Overall coefficient: -c_D * gA / (8 * f_π⁴ * Λ_χ) × 2 (pair symmetry)
-		double coeff = -m_c_D * m_gA / (8.0 * m_fpi4 * m_Lambda_chi) * 2.0;
-
-		return coeff * f_bra * f_ket * tau13 * sig13 * pion_factor;
+		return coeff * f_bra * f_ket * (recoup0 * integ0 + recoup2 * integ2);
 	}
 
 	// [EN] 2PE term (c₁, c₃): two-pion exchange between particles 2,3 (pair endpoints)

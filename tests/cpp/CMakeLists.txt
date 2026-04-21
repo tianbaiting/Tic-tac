@@ -40,6 +40,7 @@ set(TEST_3NF_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/chiral_3nf_recoupling.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
 )
 add_executable(test_3nf_matrix_elements
     test_3nf_matrix_elements.cpp
@@ -61,6 +62,7 @@ add_executable(test_chiral_3nf_recoupling
     test_chiral_3nf_recoupling.cpp
     ${TEST_UTIL_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/utils/chiral_3nf_recoupling.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
 )
 target_link_libraries(test_chiral_3nf_recoupling ${GSL_LIBRARIES})
 add_test(NAME chiral_3nf_recoupling COMMAND test_chiral_3nf_recoupling)

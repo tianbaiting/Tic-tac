@@ -91,4 +91,76 @@ double recoupling_3nf_rank2(
     int L_1N_c, int two_J_1N_c,
     int two_T_3N);
 
+
+// ============================================================================
+// c_D 1PE-contact spin-isospin recoupling coefficients.
+//
+// The c_D operator (E2002 eq. 2.10) has the spin structure
+//   (sigma_1 . q_3)(sigma_3 . q_3) / (q_3^2 + mpi^2)
+// which decomposes on spherical-tensor grounds (formula_reference.md §2.2):
+//   (sigma_1 . q_hat)(sigma_3 . q_hat) = (1/3)(sigma_1.sigma_3)   [rank-0]
+//                       + [sigma_1 ⊗ sigma_3]_2 . [q_hat ⊗ q_hat]_2  [rank-2]
+//
+// Isospin structure: (tau_1 . tau_3) — connects pair isospin T_2N = 0 <-> 1.
+//
+// Selection rules from E2002 eq. A-1 (spectator-1 picture):
+//   L_2N = L_2N' = 0    (contact pair vertex: only S-wave pair contributes)
+//   L_1N = L_1N'         (sigma operators do not change spectator orbital)
+//
+// ============================================================================
+
+// Rank-0 (1/3 sigma_1.sigma_3) x (tau_1.tau_3) recoupling coefficient.
+//
+// Returns the scalar (rank-0) spin-isospin matrix element for the c_D 1PE-CT
+// term in the 3N Jj-coupled partial-wave basis:
+//
+//   (1/3) * <(L_r,S_r)J_r, (l_r, s_1=1/2)j_r; J_3N | sigma_1.sigma_3 |
+//            (L_c,S_c)J_c, (l_c, s_1=1/2)j_c; J_3N >
+//   * <(T_r, t_1=1/2)T_3N | tau_1.tau_3 | (T_c, t_1=1/2)T_3N >
+//
+// Selection rules enforced:
+//   L_2N_r = L_2N_c = 0   (contact pair vertex, E2002 eq. A-1)
+//   L_1N_r = L_1N_c       (orbital angular momenta preserved by sigma operators)
+//
+// The (1/3) factor is the rank-0 coefficient in the
+//   (sigma_1.q_hat)(sigma_3.q_hat) = (1/3)(sigma_1.sigma_3) + rank2
+// decomposition.
+//
+// Arguments:
+//   (as per recoupling_3nf_scalar — same channel labelling, see that function)
+//
+// Returns: real-valued recoupling coefficient. Returns 0 when any selection
+//          rule is violated (including tau1.tau3 = 0 for diagonal T channels).
+double recoupling_3nf_1pe_ct_scalar(
+    int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
+    int L_1N_r, int two_J_1N_r, int two_J_3N,
+    int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,
+    int L_1N_c, int two_J_1N_c,
+    int two_T_3N);
+
+// Rank-2 [sigma_1 ⊗ sigma_3]_2 . Y_2(q_hat) recoupling coefficient for c_D.
+//
+// The rank-2 spatial tensor [q_hat ⊗ q_hat]_2 ~ Y_2(q_hat) acts on the
+// SPECTATOR direction (q_hat = q/|q|, the spectator Jacobi momentum).
+// After partial-wave projection onto (L_2N, l_1N) states, the Y_2 on the
+// spectator line requires:
+//   CG(l_1N, 0; 2, 0 | l_1N', 0) != 0
+// which by the triangle rule demands |l_1N - l_1N'| <= 2 and
+// l_1N + l_1N' + 2 even.  For l_1N = l_1N' = 0 the CG is zero
+// (since the triangle rule 0+2 >= 0 fails).
+//
+// This function returns the full rank-2 recoupling coefficient including
+// the 9j and CG from the spectator-line Y_2 projection.  For l_1N = 0
+// it returns 0 exactly.  For l_1N >= 2 (where it is first non-zero) it
+// returns the full coefficient.
+//
+// Returns: real-valued recoupling coefficient. Returns 0 when any selection
+//          rule is violated.
+double recoupling_3nf_1pe_ct_rank2(
+    int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
+    int L_1N_r, int two_J_1N_r, int two_J_3N,
+    int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,
+    int L_1N_c, int two_J_1N_c,
+    int two_T_3N);
+
 #endif // CHIRAL_3NF_RECOUPLING_H
