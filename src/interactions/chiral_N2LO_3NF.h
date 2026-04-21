@@ -133,8 +133,13 @@ private:
 		double f_bra = std::exp(-a_bra * a_bra);
 		double f_ket = std::exp(-a_ket * a_ket);
 
-		// Overall coefficient: c_E / (f_π⁴ × Λ_χ) in fm⁵ (all in fm⁻¹ units)
-		double coeff = m_c_E / (m_fpi4 * m_Lambda_chi);
+		// Overall coefficient per E2002 eq. (2.10):
+		//   V^(1)_cont = -½ c_E / (f_π⁴ Λ_χ) × (τ_2·τ_3)
+		// Previous code had +c_E/(f_π⁴ Λ_χ) with no -½ prefactor — opposite
+		// sign and missing the ½. Note: τ_j·τ_k appears once per spectator
+		// component with j,k ∈ pair(2,3); the -½ is the E2002 convention
+		// for V^(1) (spectator-1 component).
+		double coeff = -0.5 * m_c_E / (m_fpi4 * m_Lambda_chi);
 
 		return coeff * tau_dot_tau * f_bra * f_ket;
 	}
