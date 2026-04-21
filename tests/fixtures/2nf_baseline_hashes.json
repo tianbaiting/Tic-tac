@@ -1,0 +1,18 @@
+{
+  "benchmark_refs": [
+    "Miller, Ekstrom, Hebeler, Phys. Rev. C 106, 024001 (2022)",
+    "Glockle, Witala, Huber, Kamada, Golak, Phys. Rep. 274, 107 (1996)",
+    "Nogga, Kamada, Glockle, Barrett, Phys. Rev. C 65, 054003 (2002)"
+  ],
+  "frozen_at_utc": "2026-04-21T01:19:13+00:00",
+  "schema_version": 1,
+  "sha256": {
+    "U_PW_elements_Np_20_Nq_20_JP_1_-1_Jmax_2_PSI_0.txt": "c4fd781da8b50fa193d54a8c7c47bfe4f6a0af5b13311f4c34b3798e8a9718f9",
+    "U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt": "7e69802b6886a7b12425005ee59fd41fff8af67e706d1b3022b17cce617e5922"
+  },
+  "solver_out_relpath": "output/2nf_miller_baseline/solver_out",
+  "seed_source": "output/deuteron_proton_Ay/solver_out",
+  "seed_note": "seeded from an existing 3NF=none run of examples/deuteron_proton_Ay.py (Np=20, Nq=20, J_2N_max=2, two_J_3N_max=1, LO_internal) before the chiral N2LO 3NF rewrite; re-run tests/fixtures/freeze_2nf_baseline.py to regenerate under the canonical work-dir.",
+  "target_tlab_mev": 190.0,
+  "three_nucleon_force": "none"
+}
