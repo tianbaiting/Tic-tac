@@ -15,7 +15,7 @@ with
                                      * (Kronecker selection on all quantum numbers
                                         of pair and spectator)
 
-    kernel_contact = -0.5 * c_E / (fpi^4 * Lambda_chi)              (fm^5)
+    kernel_contact = +0.5 * c_E / (fpi^4 * Lambda_chi)              (fm^5)
                      [E2002 eq. 2.10: V^(1)_cont = -1/2 E sum_{j!=k} (tau_j . tau_k)]
 
     f_R(p, q; Lambda) = exp( -((4 p^2 + 3 q^2) / (4 Lambda^2))^2 ) (dimensionless)
@@ -90,13 +90,14 @@ def main():
     print()
 
     # ----------------------- kernel_contact (Task 2) --------------------------
-    # -0.5 * c_E / (fpi^4 * Lambda_chi), with 1/(2π)³ Fourier normalization
-    # mirroring chiral_LO_internal.cpp:59.
+    # +0.5 * c_E / (fpi^4 * Lambda_chi), with 1/(2π)³ Fourier normalization
+    # mirroring chiral_LO_internal.cpp:59. Sign is Navrátil/Witała convention
+    # (see kernel_contact docstring for triangulation commit notes).
     fourier_norm_3nf = 1.0 / (8.0 * math.pi * math.pi * math.pi)
-    kernel = fourier_norm_3nf * (-0.5 * c_E / (fpi4_fm * Lambda_chi_fm))
+    kernel = fourier_norm_3nf * (+0.5 * c_E / (fpi4_fm * Lambda_chi_fm))
     print("[kernel_contact (Task 2)]")
-    print(f"  (1/(8π³)) * -0.5 * c_E / (fpi^4 * Lambda_chi)")
-    print(f"  = {fourier_norm_3nf:.6e} * -0.5 * ({c_E}) / ({fpi4_fm:.6e} * {Lambda_chi_fm:.6f})")
+    print(f"  (1/(8π³)) * +0.5 * c_E / (fpi^4 * Lambda_chi)")
+    print(f"  = {fourier_norm_3nf:.6e} * +0.5 * ({c_E}) / ({fpi4_fm:.6e} * {Lambda_chi_fm:.6f})")
     print(f"  = {kernel:+.6e}  [fm^5]")
     print()
 
@@ -123,13 +124,10 @@ def main():
 
     # ------------------------- sanity: arithmetic trace -----------------------
     # recoup = +1 * (-3) = -3
-    # kernel = -0.5 * (-0.205) / (fpi^4 * Lambda_chi)
-    #        = +0.1025 / (fpi^4 * Lambda_chi)
-    #        = +0.1025 / (5.438e-3 * 3.5475)
-    #        = +0.1025 / 1.929e-2
-    #        ~ +5.31 fm^5
-    # fR^2   ~ 0.9915 (near 1; regulator barely damps at p=q=0.5 fm^-1)
-    # W1 ~ (-3) * 5.31 * 0.9915 ~ -15.8 fm^5
+    # kernel = +0.5 * (-0.205) / (fpi^4 * Lambda_chi)
+    #        = -0.1025 / (fpi^4 * Lambda_chi)
+    # fR^2   ~ 0.99 (near 1; regulator barely damps at p=q=0.5 fm^-1)
+    # Final sign: recoup(-3) * kernel(negative) * fR^2(positive) = positive.
 
     # ----------------------- summary line the reviewer wants ------------------
     print("=" * 72)
@@ -140,7 +138,7 @@ def main():
     fpi_task_MeV = 92.4
     fpi_task_fm = fpi_task_MeV / hbarc
     fpi4_task_fm = fpi_task_fm**4
-    kernel_task = fourier_norm_3nf * (-0.5 * c_E / (fpi4_task_fm * Lambda_chi_fm))
+    kernel_task = fourier_norm_3nf * (+0.5 * c_E / (fpi4_task_fm * Lambda_chi_fm))
     W1_task = recoup * kernel_task * fR * fR
     print(f"[ref: with fpi=92.4 MeV (task-spec) -> W1 = {W1_task:+.6e} fm^5]")
 

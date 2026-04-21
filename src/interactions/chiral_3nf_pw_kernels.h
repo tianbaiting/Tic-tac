@@ -91,25 +91,32 @@ inline double regulator_gauss(double p, double q, double Lambda) noexcept
 }
 
 // -----------------------------------------------------------------------------
-// 3N contact scalar LEC factor (per [E2002] eq. 2.10):
+// 3N contact scalar LEC factor (Navrátil/Witała convention):
 //
-//     V^(1)_cont prefactor = -½ c_E / (f_π⁴ Λ_χ)
+//     V^(1)_cont prefactor = +½ c_E / (f_π⁴ Λ_χ)
+//
+// Sign convention note: [E2002] eq. 2.10 writes V^(1)_cont = -½ E Σ(τ_j·τ_k),
+// but the code LEC values are in the Navrátil/Witała convention (matching the
+// chiral_N2LO 2NF LECs that ship with Tic-tac and the Witała triton
+// benchmarks). This convention absorbs the overall sign into the LEC
+// definition — see epelbaum_reference.md lines 26-30. Diagnostic confirms:
+// with -½ the magnitude matches Epelbaum Table 2 but the sign is flipped;
+// with +½ the sign matches. See formula_reference.md §1.5 for the sign
+// analysis and the commit fixing this (post-Task-5 triangulation).
 //
 // Input:
-//   c_E         — dimensionless LEC
+//   c_E         — dimensionless LEC (Navrátil/Witała convention)
 //   fpi4_fm     — f_π⁴ in fm⁻⁴ (i.e. (fπ/ħc)⁴ with fπ in MeV)
 //   Lambda_chi  — chiral breaking scale Λ_χ in fm⁻¹
 //
-// Returns: scalar in fm⁵ (the momentum-independent LEC factor multiplying
-//          (τ₂·τ₃) × f_R(p',q') f_R(p,q) in the full matrix element).
-//
-// The pair of -½ and τ_j·τ_k summation convention follows [E2002]. There is
-// no x-dependence at this level.
+// Returns: scalar in fm⁵ (momentum-independent LEC factor multiplying
+//          (τ₂·τ₃) × f_R(p',q') f_R(p,q) × fourier_norm_3nf in the full
+//          matrix element).
 // -----------------------------------------------------------------------------
 inline double kernel_contact(double c_E, double fpi4_fm, double Lambda_chi) noexcept
 {
     // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
-    return fourier_norm_3nf * (-0.5 * c_E / (fpi4_fm * Lambda_chi));
+    return fourier_norm_3nf * (+0.5 * c_E / (fpi4_fm * Lambda_chi));
 }
 
 // -----------------------------------------------------------------------------

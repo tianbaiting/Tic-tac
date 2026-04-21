@@ -102,8 +102,8 @@ int main(int argc, char** argv) {
                                                  0.5, 0.5, 0.5, 0.5, pw);
                 std::printf("\n[Task-3 single-point check]\n");
                 std::printf("  W1_cE(3S1, p=q=p'=q'=0.5 fm^-1) = %+.6e fm^5\n", v_fm5);
-                std::printf("  oracle (hand_calc_cE.py, fpi=92.2) = -7.264125e-03 fm^5\n");
-                double expected = -7.264125e-03;
+                std::printf("  oracle (hand_calc_cE.py, fpi=92.2) = +7.264125e-03 fm^5\n");
+                double expected = +7.264125e-03;
                 double rel = (v_fm5 - expected) / expected * 100.0;
                 std::printf("  relative difference = %+.3f%%  (pass within 2%%)\n", rel);
             } else {
