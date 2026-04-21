@@ -90,11 +90,13 @@ def main():
     print()
 
     # ----------------------- kernel_contact (Task 2) --------------------------
-    # -0.5 * c_E / (fpi^4 * Lambda_chi).
-    kernel = -0.5 * c_E / (fpi4_fm * Lambda_chi_fm)
+    # -0.5 * c_E / (fpi^4 * Lambda_chi), with 1/(2π)³ Fourier normalization
+    # mirroring chiral_LO_internal.cpp:59.
+    fourier_norm_3nf = 1.0 / (8.0 * math.pi * math.pi * math.pi)
+    kernel = fourier_norm_3nf * (-0.5 * c_E / (fpi4_fm * Lambda_chi_fm))
     print("[kernel_contact (Task 2)]")
-    print(f"  -0.5 * c_E / (fpi^4 * Lambda_chi)")
-    print(f"  = -0.5 * ({c_E}) / ({fpi4_fm:.6e} * {Lambda_chi_fm:.6f})")
+    print(f"  (1/(8π³)) * -0.5 * c_E / (fpi^4 * Lambda_chi)")
+    print(f"  = {fourier_norm_3nf:.6e} * -0.5 * ({c_E}) / ({fpi4_fm:.6e} * {Lambda_chi_fm:.6f})")
     print(f"  = {kernel:+.6e}  [fm^5]")
     print()
 
@@ -138,7 +140,7 @@ def main():
     fpi_task_MeV = 92.4
     fpi_task_fm = fpi_task_MeV / hbarc
     fpi4_task_fm = fpi_task_fm**4
-    kernel_task = -0.5 * c_E / (fpi4_task_fm * Lambda_chi_fm)
+    kernel_task = fourier_norm_3nf * (-0.5 * c_E / (fpi4_task_fm * Lambda_chi_fm))
     W1_task = recoup * kernel_task * fR * fR
     print(f"[ref: with fpi=92.4 MeV (task-spec) -> W1 = {W1_task:+.6e} fm^5]")
 

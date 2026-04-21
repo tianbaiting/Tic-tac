@@ -54,6 +54,19 @@
 namespace chiral_3nf {
 
 // -----------------------------------------------------------------------------
+// Partial-wave Fourier normalization constant, 1 / (2π)³ = 1 / (8π³).
+//
+// This mirrors the 2NF convention in src/interactions/chiral_LO_internal.cpp:59
+// where every two-body matrix element is multiplied by 1/(8π³) as part of the
+// Tic-tac partial-wave basis Fourier convention. Diagnosed via the Epelbaum
+// target comparison: the code/ref magnitude ratio was ~246× without this
+// factor, essentially equal to (2π)³ = 248.05. Applied to every non-trivial
+// momentum-space kernel below (kernel_contact, kernel_1pe_contact,
+// kernel_2pe_c1c3). *Not* applied to the dimensionless regulator.
+// -----------------------------------------------------------------------------
+constexpr double fourier_norm_3nf = 1.0 / (8.0 * M_PI * M_PI * M_PI);
+
+// -----------------------------------------------------------------------------
 // Squared-Gaussian regulator (per [E2002] eq. 3.19):
 //
 //     f_R(p, q; Λ) = exp( - ((4 p² + 3 q²) / (4 Λ²))² )
@@ -95,7 +108,8 @@ inline double regulator_gauss(double p, double q, double Lambda) noexcept
 // -----------------------------------------------------------------------------
 inline double kernel_contact(double c_E, double fpi4_fm, double Lambda_chi) noexcept
 {
-    return -0.5 * c_E / (fpi4_fm * Lambda_chi);
+    // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
+    return fourier_norm_3nf * (-0.5 * c_E / (fpi4_fm * Lambda_chi));
 }
 
 // -----------------------------------------------------------------------------
@@ -127,7 +141,8 @@ inline double kernel_1pe_contact(double /*p*/, double q,
 {
     const double Q2  = q * q + qp * qp - 2.0 * q * qp * x;  // |Δq|²
     const double mp2 = m_pi_fm * m_pi_fm;
-    return 1.0 / (Q2 + mp2);
+    // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
+    return fourier_norm_3nf * (1.0 / (Q2 + mp2));
 }
 
 // -----------------------------------------------------------------------------
@@ -202,7 +217,8 @@ inline double kernel_2pe_c1c3(double p, double q,
 
     // Scalar (rank-0) spin-reduction carries a (q₂·q₃) factor from the
     // ⅓(σ₂·σ₃)(q₂·q₃) identity — see §3.2.
-    return lec_bracket * q2q3 * prop;
+    // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
+    return fourier_norm_3nf * (lec_bracket * q2q3 * prop);
 }
 
 }  // namespace chiral_3nf
