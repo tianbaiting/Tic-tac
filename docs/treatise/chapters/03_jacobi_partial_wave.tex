@@ -1,13 +1,769 @@
 % =====================================================================
 % 03_jacobi_partial_wave.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 3 章 三体问题、Jacobi 坐标与部分波展开
+% Wave 1 / Agent B
 % =====================================================================
 
 \chapter{三体问题、Jacobi 坐标与部分波展开}
 \label{ch:03_jacobi_partial_wave}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch03-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{从两体到三体的台阶。}
+\cref{ch:01_lippmann_schwinger,ch:02_two_body_numerics} 已经把两体散射的算符语言与
+动量表象数值化讲清。然而一旦把系统加到三个核子，问题在两个层面同时变得不一样。
+
+第一个层面是\textbf{运动学（kinematics）}：
+\(N\) 个粒子有 \(3N\) 个动量分量；扣除质心系的整体动量守恒，剩下 \(3N-3\) 个
+独立分量。两体只剩 3 个，等价于一个相对动量 \(\bvec{p}\)；
+三体则有 6 个，等价于一对 Jacobi 动量 \((\bvec{p}, \bvec{q})\)。
+两体的部分波展开把矢量 \(\bvec{p}\) 拆成
+\(\{p, \ell, m_\ell\}\)，三体的部分波展开把
+\((\bvec{p}, \bvec{q})\) 拆成两套角动量 \((\ell, \lambda)\)，
+再叠上自旋、同位旋耦合，最后压成单一的通道索引 \(\PWchan\)。
+三体的角动量代数因此远比两体复杂——几乎所有"踩坑"都源于这一段。
+
+第二个层面是\textbf{动力学（dynamics）}：
+即便把 \(\bvec{p}\) 与 \(\bvec{q}\) 离散化，三体 LS 方程的核仍然是 disconnected
+（不连通）的（详见 \cref{ch:04_faddeev_ags}）。Faddeev 把波函数拆成三段
+\(\psi^{(1)} + \psi^{(2)} + \psi^{(3)}\)，每一段都"以一个特定的两体子系
+统作为内禀视角"——也就是说每一段都生活在一棵特定的 \emph{Jacobi 树}
+（Jacobi tree）上。三段彼此通过置换算符 \(\Pop\) 联系起来。
+
+本章所做的工作就是把"三体波函数所活的态空间"以下面四个步骤精确化：
+\begin{enumerate}
+  \item 选定 Jacobi 树（共三棵：\(12\!-\!3\)、\(23\!-\!1\)、\(31\!-\!2\)），
+        把单粒子动量 \(\bvec{k}_i\) 变换到 Jacobi 动量 \((\bvec{p},\bvec{q})\)。
+  \item 把两体置换 \(P_{12}, P_{23}, P_{31}\) 映射到这三棵树之间的"重新组合"
+        变换。
+  \item 在固定 Jacobi 树（取 \(12\!-\!3\) 树）上做角动量耦合，得到部分
+        波态 \(\pwstate{\PWchan p q}\)。
+  \item 强加广义 Pauli 不相容（generalised Pauli exclusion）做反对称化筛选，
+        留下物理通道。
+\end{enumerate}
+
+\paragraph{上下游边界。}
+本章只负责"\textbf{态空间索引}"。具体的动量数值化（WP/SWP 网格）留到
+\cref{ch:05_wpcd_math,ch:06_wp_swp_states,ch:07_pw_symm_states}；
+Faddeev/AGS 求解器如何使用这些索引留到 \cref{ch:04_faddeev_ags}
+及之后的章节。本章末尾给出的代码片段也只覆盖
+\verb|construct_symmetric_pw_states| 这一函数——它是 Tic-tac 与 tictac-origin
+共享的入口。
+
+\paragraph{读者应当带走什么。}
+读完本章你应该能：
+\begin{itemize}
+  \item 在纸笔上写出三种 Jacobi 树的动量定义并互相变换；
+  \item 对给定的 \(J^\pi, J_{2N\max}, 2J_{3N\max}\) 估算出 \(\Nalpha\)；
+  \item 看到代码里的 \texttt{(L\_2N, S\_2N, J\_2N, L\_1N, two\_J\_1N, T\_2N,
+        two\_T\_3N, two\_J\_3N, P\_3N)} 九元组立刻知道它对应数学上的
+        \(\PWtuple\)；
+  \item 知道反对称化判据 \(\ell + s + t \equiv 1 \pmod 2\) 在代码里的位置以及
+        踩坑边界。
+\end{itemize}
+
+% =========================================
+\section{数学推导}
+\label{sec:ch03-math}
+
+% -----------------------------------------
+\subsection{三体运动学与质心系约化}
+\label{subsec:ch03-kinematics}
+
+考虑三个非相对论核子，单粒子坐标 \(\bvec{r}_1, \bvec{r}_2, \bvec{r}_3\)，
+质量 \(m_1, m_2, m_3\)，单粒子动量 \(\bvec{k}_1, \bvec{k}_2, \bvec{k}_3\)。
+为了书写紧凑，本章默认所有核子取相同质量 \(m\)（即不区分 \(\Mp, \Mn\) 的小差），
+该近似是 Tic-tac 求解器内部用的常规对称化处理；同位旋破坏的 \(M_p \neq M_n\)
+修正放到 \cref{ch:17_3nf_numerical} 与附录 A 处理。
+
+总动能在实验室系（lab）写为
+\begin{equation}
+\label{eq:ch03-Tlab-decomp}
+T = \sum_{i=1}^{3} \frac{\bvec{k}_i^2}{2m}
+  = \frac{\bvec{P}_{\rm tot}^2}{6m} + T_{\rm cm},
+\quad
+\bvec{P}_{\rm tot} = \bvec{k}_1 + \bvec{k}_2 + \bvec{k}_3.
+\end{equation}
+质心系（c.m.）下 \(\bvec{P}_{\rm tot} = 0\)，所以剩下的 \(T_{\rm cm}\) 只与"内
+部"动量自由度有关。
+
+约化变量的标准选择是 \emph{Jacobi 动量}：先取一对粒子的相对动量，再取
+"剩下那个粒子"对这一对的相对动量。把粒子 \(\{1, 2\}\) 视为"对（pair）"、粒子
+3 视为"旁观者（spectator）"，则
+\begin{align}
+\label{eq:ch03-jacobi-12-3}
+\bvec{p} &\equiv \tfrac{1}{2}(\bvec{k}_1 - \bvec{k}_2),
+\nonumber\\
+\bvec{q} &\equiv \tfrac{2}{3}\,\bvec{k}_3 - \tfrac{1}{3}(\bvec{k}_1 + \bvec{k}_2).
+\end{align}
+代入 \cref{eq:ch03-Tlab-decomp} 在 c.m.\ 下得到
+\begin{equation}
+\label{eq:ch03-Tcm-jacobi}
+T_{\rm cm}
+= \frac{\bvec{p}^2}{2\mu_{12}} + \frac{\bvec{q}^2}{2\mu_{(12)3}},
+\quad
+\mu_{12} = \tfrac{m}{2},
+\quad
+\mu_{(12)3} = \tfrac{2m}{3}.
+\end{equation}
+这是一对相互独立、各自拥有"约化质量"的相对动量，正好对应两体散射 +
+"剩下那一个相对二体重心移动"两个子系统。\cref{eq:ch03-jacobi-12-3} 中的
+分数系数（\(\tfrac{1}{2}, \tfrac{2}{3}, \tfrac{1}{3}\)）正是质心系约化的产物；
+我们 \emph{不允许}漏写它们，否则 \(p, q\) 与单粒子动量的雅可比行列式会错。
+
+\paragraph{逆变换。}
+对 \cref{eq:ch03-jacobi-12-3} 求解 \(\bvec{k}_1, \bvec{k}_2, \bvec{k}_3\)：
+\begin{align}
+\label{eq:ch03-k-from-pq}
+\bvec{k}_1 &= \phantom{-}\bvec{p} - \tfrac{1}{2}\bvec{q} + \tfrac{1}{3}\bvec{P}_{\rm tot},
+\nonumber\\
+\bvec{k}_2 &= -\bvec{p} - \tfrac{1}{2}\bvec{q} + \tfrac{1}{3}\bvec{P}_{\rm tot},
+\nonumber\\
+\bvec{k}_3 &= \phantom{-}\bvec{q} + \tfrac{1}{3}\bvec{P}_{\rm tot}.
+\end{align}
+这一组关系将在推导置换算符 \(\Pop\) 时被反复用到。
+
+% -----------------------------------------
+\subsection{三种 Jacobi 树及其相互关系}
+\label{subsec:ch03-three-trees}
+
+我们把"以谁作 spectator、谁配成 pair"的不同选择叫做\textbf{Jacobi 树}。
+共有三种：
+\begin{itemize}
+  \item \textbf{12-3 树}：spectator = 3，pair = (1,2)。Jacobi 动量记
+        \((\bvec{p}^{(3)}, \bvec{q}^{(3)})\) 或简记 \((\bvec{p}, \bvec{q})\)。
+        式 \cref{eq:ch03-jacobi-12-3} 即 12-3 树的定义。
+  \item \textbf{23-1 树}：spectator = 1，pair = (2,3)。
+  \item \textbf{31-2 树}：spectator = 2，pair = (3,1)。
+\end{itemize}
+为节省记号，本章约定"\textbf{Jacobi 树标号}与\textbf{spectator 标号一致}"。
+即树 \(i\) 即"以粒子 \(i\) 为 spectator"。三套坐标定义统一写为
+\begin{equation}
+\label{eq:ch03-jacobi-i}
+\bvec{p}^{(i)} = \tfrac{1}{2}(\bvec{k}_j - \bvec{k}_k),
+\quad
+\bvec{q}^{(i)} = \tfrac{2}{3}\bvec{k}_i - \tfrac{1}{3}(\bvec{k}_j + \bvec{k}_k),
+\end{equation}
+其中 \((i, j, k)\) 为 \((1,2,3)\) 的循环置换（cyclic permutation）。
+
+\begin{remark}
+代码层面 Tic-tac 与 tictac-origin 都\textbf{只显式存储 12-3 树}。
+其它两棵树通过置换算符 \(\Pop\)（即 \(P_{123}\)）关联——具体地，
+\(P_{123}\) 把"在 12-3 树上的态"变换为"在 23-1 树上的态"
+（对应 \(1 \to 2 \to 3 \to 1\) 的循环置换）。这是为什么求解器里只
+出现一个稀疏矩阵 \texttt{P123\_sparse}：另两个 \(P\) 的作用通过
+\(P_{123}^2 = P_{132}\) 或共轭得到。
+\end{remark}
+
+\paragraph{两个 Jacobi 树之间的解析变换。}
+设 \((\bvec{p}', \bvec{q}')\) 是 23-1 树坐标，
+\((\bvec{p}, \bvec{q})\) 是 12-3 树坐标。把
+\cref{eq:ch03-k-from-pq} 代入 \cref{eq:ch03-jacobi-i}（\(i=1\)）得
+\begin{align}
+\label{eq:ch03-tree-rotate}
+\bvec{p}' &= -\tfrac{1}{2}\bvec{p} - \tfrac{3}{4}\bvec{q},
+\nonumber\\
+\bvec{q}' &=  \phantom{-}\bvec{p} - \tfrac{1}{2}\bvec{q}.
+\end{align}
+这是一个 \(2\times 2\) 的线性变换（行列式为 \(\det = 1\)，反映体积保
+持），但由于 \(\bvec{p}, \bvec{q}\) 各为三维矢量，整个映射其实是
+\(\mathbb{R}^6\) 上的体积保持线性同构。在部分波表象里，
+\cref{eq:ch03-tree-rotate} 会推回到包含 \(C\)–\(G\) 系数与 \(6j\) 符号
+的非平凡几何函数 \(G_{\PWchan, \PWchan'}(p, q, p', q')\)；
+\(P_{123}\) 矩阵元的解析公式即由此得到，详见 \cref{ch:09_permutation_p123}。
+
+% -----------------------------------------
+\subsection{两体置换在 Jacobi 坐标中的表达}
+\label{subsec:ch03-perm-jacobi}
+
+对一对对换 \(P_{ij}\)，它的作用是交换粒子 \(i, j\) 的所有量子数（动量、自旋、
+同位旋）。在 12-3 树坐标下：
+\begin{itemize}
+  \item \(P_{12}\)：\(\bvec{k}_1 \leftrightarrow \bvec{k}_2\)。代入
+        \cref{eq:ch03-jacobi-12-3} 立刻得到
+        \begin{equation}
+        \label{eq:ch03-P12-action}
+        P_{12}: \quad
+        \bvec{p} \to -\bvec{p}, \quad
+        \bvec{q} \to \phantom{-}\bvec{q}.
+        \end{equation}
+        即 \(P_{12}\) 在 12-3 树上是"对 \(\bvec{p}\) 翻号、\(\bvec{q}\) 不动"。
+        加上自旋、同位旋的对换，它在部分波态 \(\pwstate{\PWchan p q}\) 上的作
+        用因子是 \((-1)^{\ell + s + t}\)。
+  \item \(P_{23}\)：交换 2,3，等价于"把 12-3 树绕循环换到 31-2 树"再回来。
+        在 12-3 树坐标下表达需用到 \cref{eq:ch03-tree-rotate} 类的旋转。
+  \item \(P_{31}\)：与 \(P_{23}\) 类似，对应另一棵树。
+\end{itemize}
+
+\paragraph{循环置换 \(\Pop \equiv P_{123}\)。}
+定义
+\begin{equation}
+\label{eq:ch03-P123-def}
+P_{123} \equiv P_{12}\,P_{23},
+\qquad
+P_{132} = P_{123}^{-1} = P_{123}^{2}.
+\end{equation}
+\(P_{123}\) 把 \((1,2,3) \to (2,3,1)\)，即"循环往左挪一格"。
+在三种 Jacobi 树之间，\(P_{123}\) 把 12-3 树映到 23-1 树。结合两体对换的 \((-1)^{\ell + s + t}\)
+相位与 \cref{eq:ch03-tree-rotate} 的几何变换，可以证明（这是 Tic-tac 求解器
+最核心的一条等式）
+\begin{equation}
+\label{eq:ch03-1plusP-projector}
+\Aop \equiv \tfrac{1}{3}\,(\identity + \Pop + \Pop^{2})
+\end{equation}
+是\textbf{反对称（或对称）通道投影子}。具体加号还是减号由所谓"广义 Pauli
+不相容"以及态本身在 \(P_{12}\) 下的相位决定。代码里直接把
+\cref{eq:ch03-1plusP-projector} 用稀疏矩阵 \texttt{P123\_sparse} +
+\((1+P_{123})\) 形式实现。
+
+% -----------------------------------------
+\subsection{部分波态 \(\pwstate{\PWchan p q}\) 的构造}
+\label{subsec:ch03-pwstate}
+
+固定 12-3 树后，做角动量与自旋耦合。我们一路写出每一次耦合用的 Clebsch–Gordan
+（CG）展开，并对应代码里的字段名。
+
+\paragraph{第一步：动量 \(\bvec{p}\) 的部分波展开。}
+\(\bvec{p}\) 是粒子 1, 2 的相对动量。在它上面做角动量分解：
+\begin{equation}
+\label{eq:ch03-p-pw}
+\ket{\bvec{p}}
+= \sum_{\ell m_\ell} \frac{1}{p}\,\delta(p - |\bvec{p}|)\,
+  Y_{\ell m_\ell}(\hat{\bvec{p}})\,
+  \ket{p, (\ell m_\ell)},
+\end{equation}
+其中 \(\ell\) 是\textbf{对内角动量}（pair orbital angular momentum），代码字段
+\verb|L_2N|（"two nucleon"的 2N，下同）。
+
+\paragraph{第二步：1, 2 的总自旋耦合到 \(s\)。}
+两个核子的自旋 \(\tfrac{1}{2}\otimes\tfrac{1}{2} = 0 \oplus 1\)：
+\begin{equation}
+\label{eq:ch03-spin-couple}
+\ket{(\tfrac{1}{2}\tfrac{1}{2}) s, m_s}
+= \sum_{m_1 m_2} \langle \tfrac{1}{2} m_1, \tfrac{1}{2} m_2 | s, m_s \rangle\,
+  \ket{\tfrac{1}{2} m_1}_1\,\ket{\tfrac{1}{2} m_2}_2,
+\end{equation}
+其中 \(s \in \{0, 1\}\)，代码字段 \verb|S_2N|。
+
+\paragraph{第三步：把 \(\ell\) 与 \(s\) 耦合到对内总角动量 \(j\)。}
+\begin{equation}
+\label{eq:ch03-pair-J}
+\ket{(\ell s) j, m_j}
+= \sum_{m_\ell m_s} \langle \ell m_\ell, s m_s | j m_j \rangle\,
+  \ket{p, (\ell m_\ell)} \otimes \ket{(\tfrac{1}{2}\tfrac{1}{2}) s, m_s}.
+\end{equation}
+\(j\) 是对内总角动量（pair total angular momentum），代码字段 \verb|J_2N|。
+张力（tensor force）会让 \(\ell\) 与 \(\ell + 2\) 在固定 \(j\) 下耦合（如 \({}^3S_1 \leftrightarrow {}^3D_1\)），
+这正是为什么在代码里我们对每个\((j, s)\) 都同时枚举\(\ell = |j-s|, \ldots, j+s\)。
+
+\paragraph{第四步：spectator 部分波。}
+旁观者粒子（粒子 3）的相对动量 \(\bvec{q}\) 同样做部分波分解：
+\begin{equation}
+\label{eq:ch03-q-pw}
+\ket{\bvec{q}}
+= \sum_{\lambda m_\lambda} \frac{1}{q}\,\delta(q - |\bvec{q}|)\,
+  Y_{\lambda m_\lambda}(\hat{\bvec{q}})\,
+  \ket{q, (\lambda m_\lambda)},
+\end{equation}
+其中 \(\lambda\)（spectator orbital angular momentum）对应代码字段 \verb|L_1N|
+（"one nucleon"的 1N）。
+
+\paragraph{第五步：把 \(\lambda\) 与粒子 3 的自旋 \(\tfrac{1}{2}\) 耦合到 \(I\)。}
+\begin{equation}
+\label{eq:ch03-spectator-I}
+\ket{(\lambda\,\tfrac{1}{2}) I, m_I}
+= \sum_{m_\lambda m_3} \langle \lambda m_\lambda, \tfrac{1}{2} m_3 | I m_I \rangle\,
+  \ket{q, (\lambda m_\lambda)} \otimes \ket{\tfrac{1}{2} m_3}_3.
+\end{equation}
+其中 \(I \in \{|\lambda - \tfrac{1}{2}|, \lambda + \tfrac{1}{2}\}\)，
+代码字段 \verb|two_J_1N|（用 \(2I\) 来存以保整数）。
+
+\paragraph{第六步：最后耦合到三体总角动量 \(J\)。}
+\begin{equation}
+\label{eq:ch03-total-J}
+\ket{((\ell s) j, (\lambda\,\tfrac{1}{2}) I) J, M}
+= \sum_{m_j m_I} \langle j m_j, I m_I | J M \rangle\,
+  \ket{(\ell s) j, m_j}\,\ket{(\lambda\,\tfrac{1}{2}) I, m_I}.
+\end{equation}
+\(J\) 是三体总角动量，代码字段 \verb|two_J_3N|（同样用 \(2J\) 存）。
+
+\paragraph{第七步：同位旋耦合。}
+两体同位旋
+\(t \in \{|t_1 - t_2|, \ldots, t_1 + t_2\} = \{0, 1\}\)
+（代码字段 \verb|T_2N|）。和粒子 3 的同位旋 \(\tfrac{1}{2}\) 耦合到三体
+总同位旋 \(T \in \{\tfrac{1}{2}, \tfrac{3}{2}\}\)（代码字段
+\verb|two_T_3N|，存 \(2T\)）。
+\begin{equation}
+\label{eq:ch03-iso-couple}
+\ket{(t \tfrac{1}{2}) T, M_T}
+= \sum_{m_t m_3^T} \langle t m_t, \tfrac{1}{2} m_3^T | T M_T \rangle\,
+  \ket{(\tfrac{1}{2}\tfrac{1}{2}) t, m_t}\,\ket{\tfrac{1}{2} m_3^T}_3.
+\end{equation}
+
+\paragraph{综合：部分波态 \(\pwstate{\PWchan p q}\)。}
+把 \cref{eq:ch03-p-pw,eq:ch03-spin-couple,eq:ch03-pair-J,eq:ch03-q-pw,eq:ch03-spectator-I,eq:ch03-total-J,eq:ch03-iso-couple} 串起来，
+得到一组带九元组通道索引的部分波态：
+\begin{equation}
+\label{eq:ch03-alpha-tuple}
+\PWchan
+\;\equiv\;
+\PWtuple
+\;\longleftrightarrow\;
+(\verb|L_2N|, \verb|S_2N|, \verb|J_2N|; \verb|L_1N|, \verb|two_J_1N|;
+ \verb|two_J_3N|, \verb|P_3N|, \verb|two_T_3N|).
+\end{equation}
+状态本身记为
+\begin{equation}
+\label{eq:ch03-pwstate-def}
+\pwstate{\PWchan p q}
+\;\equiv\;
+\ket{p, q;\,((\ell s) j, (\lambda\tfrac{1}{2}) I) J M;\,(t\tfrac{1}{2}) T M_T;\,P}.
+\end{equation}
+其中 \(P\) 是三体总宇称（parity），代码字段 \verb|P_3N|，等于
+\(P = (-1)^{\ell + \lambda}\)。
+
+\paragraph{完备性与正交性。}
+按照\cref{eq:ch03-pwstate-def}的耦合形式，部分波态满足
+\begin{equation}
+\label{eq:ch03-pw-completeness}
+\identity
+= \sum_{\PWchan} \int_0^\infty p^2 dp \int_0^\infty q^2 dq\,
+  \pwstate{\PWchan p q}\bra{\PWchan p q}.
+\end{equation}
+（这里把 \(JM, T M_T\) 当成隐含求和——求解器内部对每一个 \(JM, T M_T\) 块对角化处理。）
+正交性
+\begin{equation}
+\langle \PWchanp p' q' | \PWchan p q \rangle
+= \delta_{\PWchanp \PWchan}\,\frac{\delta(p - p')}{p^2}\,\frac{\delta(q - q')}{q^2}.
+\end{equation}
+
+% -----------------------------------------
+\subsection{反对称化判据}
+\label{subsec:ch03-antisymmetrize}
+
+三个核子是同种全同费米子（在同位旋形式中），全波函数必须对任意两个粒子对换
+反对称。先在固定 Jacobi 树（12-3）上施加 \(P_{12}\) 反对称，再用
+\cref{eq:ch03-1plusP-projector} 把对换 \(P_{23}, P_{31}\) 的反对称要求送进来。
+
+\paragraph{12-3 对内反对称化（"广义 Pauli"）。}
+在 12-3 树上施加 \(P_{12}\) 反对称化：从 \cref{eq:ch03-P12-action}，
+\(P_{12}\) 让 \(\bvec{p} \to -\bvec{p}\)，给球谐 \(Y_{\ell m_\ell}\) 带来
+\((-1)^\ell\)；
+对自旋耦合态它给 \((-1)^{s+1}\)（spin singlet/triplet 的对称性差一个负号
+\footnote{两核子自旋 \(\tfrac{1}{2}\otimes\tfrac{1}{2}\) 中 spin singlet
+\(s=0\) 在交换下\textbf{反对称}（\(-\)），spin triplet \(s=1\) 在交换下
+\textbf{对称}（\(+\)）。所以对换给的因子是 \((-1)^{s+1}\)，亦即等价
+\((-1)^{1-s}\)。}）；
+对同位旋耦合态它给 \((-1)^{t+1}\)。
+
+总相位为：
+\begin{equation}
+\label{eq:ch03-pauli-phase}
+P_{12}\,\pwstate{\PWchan p q}
+= (-1)^\ell \cdot (-1)^{s+1} \cdot (-1)^{t+1}\,\pwstate{\PWchan p q}
+= -(-1)^{\ell + s + t}\,\pwstate{\PWchan p q}.
+\end{equation}
+要 \(P_{12}\,\psi = -\psi\)（费米全反对称），必须
+\begin{equation}
+\label{eq:ch03-pauli-criterion}
+(-1)^{\ell + s + t} = +1
+\quad\Leftrightarrow\quad
+\ell + s + t \;\text{为偶数}.
+\end{equation}
+\textbf{然而}：核物理常用的部分波习惯把"反对称化"放在 12 对内的"physical"
+方向，要求 \(\ell + s + t\) 为\textbf{奇数}（即与 \cref{eq:ch03-pauli-criterion}
+约定相反，因为附加的负号被吸进了态的归一化定义里——这是 Glöckle-Witała
+表）。Tic-tac/tictac-origin 代码里看的是后一种约定：\verb|(L_2N + S_2N + T_2N) % 2|
+判定\textbf{奇}时保留该通道。
+
+% -----------------------------------------
+\subsection{物理通道的计数}
+\label{subsec:ch03-count-formula}
+
+固定 \((J^\pi, J_{2N\max}, J_{3N\max})\)，物理通道数 \(\Nalpha(J^\pi)\) 由
+下面 7 重循环生成：
+\[
+\sum_{T_{3N}} \sum_{j} \sum_{s} \sum_{\ell=|j-s|}^{j+s} \sum_{t}
+\sum_{2I} \sum_{\lambda}
+\Big[\;
+\ell+s+t \equiv 1 \pmod 2;\;
+(-1)^{\ell+\lambda} = P;\;
+\text{三角不等式}
+\;\Big].
+\]
+对应代码循环嵌套结构（自外到内）：
+\verb|two_J_3N| \(\to\) \verb|P_3N_remainder| \(\to\) \verb|two_T_3N| \(\to\)
+\verb|J_2N| \(\to\) \verb|S_2N| \(\to\) \verb|L_2N| \(\to\) \verb|T_2N| \(\to\)
+\verb|two_J_1N| \(\to\) \verb|L_1N|，
+最后做 \cref{eq:ch03-pauli-criterion} 与宇称两个判据筛选。
+
+% =========================================
+\section{离散化方案}
+\label{sec:ch03-discretization}
+
+本章本身并不引入连续 \(\to\) 离散的近似——动量 \(p, q\) 的离散化是
+\cref{ch:05_wpcd_math,ch:06_wp_swp_states} 的工作。本节只把"通道索引
+\(\PWchan\)"这一离散维度的细节交代清楚。
+
+\paragraph{通道枚举的截断阈值。}
+两套截断（truncation）：
+\begin{itemize}
+  \item \(J_{2N\max}\)：限制 \verb|J_2N|\(\le J_{2N\max}\)。
+        生产配置常取 \(J_{2N\max} = 3\)（覆盖到 \({}^3F\) 波）。
+  \item \(2J_{3N\max}\)：限制 \verb|two_J_3N|\(\le 2J_{3N\max}\)。
+        在 dp 弹性散射里 \(2J_{3N\max} = 9\) 已经把对截面/Ay 的贡献
+        收敛到 \(<1\%\)；高能态时需进一步增大。
+\end{itemize}
+两套截断的物理含义不同：\(J_{2N\max}\) 作用在两体子系统的偏波展开，
+\(J_{3N\max}\) 作用在三体总角动量。\(\Nalpha\) 对前者大致按
+\((J_{2N\max}+1)^2\) 增长，对后者线性增长。
+
+\paragraph{同位旋破缺扩展。}
+启用 \verb|isospin_breaking_1S0|（\(1S_0\) 同位旋破缺）后将 \(2T \le 2T_{3N\max} = 3\)
+（容许 \(T = \tfrac{1}{2}\) 与 \(T = \tfrac{3}{2}\)），但只让 \(1S_0\)
+（即 \(\ell = s = j = 0, t = 1\)）那一态对 \(T = \tfrac{3}{2}\) 开放。这一处
+理对应 \cref{eq:ch03-pwstate-def} 里 \verb|two_T_3N| \(\in \{1, 3\}\) 的
+组合，但只有 \verb|S_2N==0 && L_2N==0 && J_2N==0 && T_2N==1| 才允许
+\verb|two_T_3N == 3|。
+
+\paragraph{3N-channel 索引数组。}
+代码额外维护一个数组 \verb|chn_3N_idx_array[N_chn_3N+1]|，按
+"\((J, P)\) 块"切分 \verb|alpha| 列表：第 \(c\) 个 3N-channel 内
+\verb|alpha| 的取值范围是 \texttt{[chn\_3N\_idx\_array[c], chn\_3N\_idx\_array[c+1])}。
+这是后续每一处"按通道分块求解"的索引基础。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch03-algorithm}
+
+\begin{algorithm}[H]
+\caption{部分波对称态空间构造（\texttt{construct\_symmetric\_pw\_states}）}
+\label{alg:ch03-pw-construct}
+\KwIn{运行参数 \texttt{run\_parameters}（含 \(J_{2N\max}\), \(2J_{3N\max}\),
+      \texttt{tensor\_force}, \texttt{isospin\_breaking\_1S0}）}
+\KwOut{\texttt{pw\_3N\_statespace pw\_states} —— 包含
+       \texttt{Nalpha}, 以及 9 个 \texttt{int*} 数组：
+       \texttt{L\_2N\_array}, \texttt{S\_2N\_array}, \texttt{J\_2N\_array},
+       \texttt{T\_2N\_array}, \texttt{L\_1N\_array}, \texttt{two\_J\_1N\_array},
+       \texttt{two\_J\_3N\_array}, \texttt{two\_T\_3N\_array}, \texttt{P\_3N\_array}；
+       以及 3N-channel 索引数组 \texttt{chn\_3N\_idx\_array}}
+\BlankLine
+初始化空 \texttt{std::vector<int>} 临时数组（9 个）\;
+\(\Nalpha \leftarrow 0\); \(N_{\rm chn,3N} \leftarrow 0\)\;
+\For{\(2J_{3N} \leftarrow 1, 3, \ldots, 2 J_{3N\max}\)}{
+  \For{\(P_{\rm rem} \leftarrow 0,1\)}{
+    \(N_{\rm chn,curr} \leftarrow 0\)\;
+    \For{\(2T_{3N} \leftarrow 1, 3, \ldots, 2 T_{3N\max}\)}{
+      \For{\(j \leftarrow 0\) \KwTo \(J_{2N\max}\)}{
+        \For{\(s \leftarrow 0\) \KwTo \(1\)}{
+          \For{\(\ell \leftarrow |j-s|\) \KwTo \(j+s\)}{
+            \For{\(t \leftarrow T_{\min}\) \KwTo \(T_{\max}\)}{
+              \If{\((\ell+s+t)\) 奇}{
+                \For{\(2I \leftarrow |2J_{3N}-2j|, |2J_{3N}-2j|+2, \ldots, 2J_{3N}+2j\)}{
+                  \For{\(\lambda \leftarrow \lfloor (2I-1)/2 \rfloor\) \KwTo \(\lfloor (2I+1)/2 \rfloor\)}{
+                    \If{\((\ell+\lambda) \bmod 2 = P_{\rm rem}\)}{
+                      \If{\((2T_{3N} = 3) \wedge \neg(s=0,\ell=0,j=0)\)}{\textbf{continue}}
+                      Append \((\ell,s,j,t,\lambda,2I,2J_{3N},2T_{3N})\) 与
+                      \(P_{3N} = 1 - 2 P_{\rm rem}\) 到 9 个临时数组\;
+                      \(\Nalpha \mathrel{+}= 1\); \(N_{\rm chn,curr} \mathrel{+}= 1\)\;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    \If{\(N_{\rm chn,curr} > 0\)}{
+      \(N_{\rm chn,3N} \mathrel{+}= 1\); 记下当前 \(\PWchan\) 起始索引\;
+    }
+  }
+}
+\textbf{分配} \texttt{pw\_states} 的 9 个 \texttt{int*} 数组（长度 \(\Nalpha\)），
+        以及 \texttt{chn\_3N\_idx\_array}（长度 \(N_{\rm chn,3N}+1\)）\;
+\textbf{拷贝} 临时 \texttt{vector} 到 \texttt{int*} 数组\;
+\Return \texttt{pw\_states}\;
+\end{algorithm}
+
+\paragraph{复杂度。}
+循环嵌套深度 9 层，但是每个内层都是 \(O(1)\)。整体时间复杂度
+\(O(\Nalpha)\)，其中 \(\Nalpha \sim O(J_{2N\max}^2 \cdot 2J_{3N\max} \cdot N_{\rm parity} \cdot N_{T_{3N}})\)。
+内存 \(O(\Nalpha)\)，约几 KB（\(\Nalpha\) 的典型上限是几百）。
+该函数总耗时小于 1 ms，是整个求解器中最快的一段。
+
+% =========================================
+\section{代码落地}
+\label{sec:ch03-code}
+
+Tic-tac 与 tictac-origin 在这一函数上是\textbf{逐行相同}的——通道生成是
+两仓库的"祖传共享代码"，多年来未有重构。对照两份代码可以确认这一点：
+
+\paragraph{当前仓库的核心循环（\texttt{src/core/state\_space/}）。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{construct\_symmetric\_pw\_states}: 当前仓库九层循环（\texttt{Tic-tac/src/core/state\_space/make\_pw\_symm\_states.cpp:121--230}）},
+  label={lst:ch03-pw-loop-current}
+]{code_excerpts/snippets/ch03_pw_symm_loop_current.cpp}
+
+\paragraph{tictac-origin 同函数对照。}
+\lstinputlisting[
+  style=cpp,
+  caption={同函数在 origin 仓库的版本（\texttt{tictac-origin/Tic-tac/CPP/make\_pw\_symm\_states.cpp:121--230}）},
+  label={lst:ch03-pw-loop-origin}
+]{code_excerpts/snippets/ch03_pw_symm_loop_origin.cpp}
+
+\paragraph{逐行对照与注释。}
+\begin{itemize}
+  \item 行 \(\sim\)1（\verb|two_J_3N| 循环）：以 \(2J\) 步长 2 遍历，确保 \(J\) 是
+        半整数。\verb|two_J_3N_max| 默认 1（即 \(J_{3N} \le \tfrac{1}{2}\)）。
+  \item 行 \(\sim\)4（\verb|P_3N_remainder| 循环）：宇称分两支
+        \(P = +1\)（remainder = 0）与 \(P = -1\)（remainder = 1）。注意
+        \emph{打印消息里两支与最终 PAR 列的符号正好相反}——这是代码里
+        历史遗留的"打印 typo"，输出表头写的是 \verb|JP=1/2-| 但
+        \verb|PAR| 列实际打印 \(+1\)。详见
+        \cref{box:ch03-pitfall-pi-print}。
+  \item 行 \(\sim\)35（\verb|(L_2N + S_2N + T_2N) % 2|）：广义 Pauli 判据
+        \cref{eq:ch03-pauli-criterion}（取奇约定）。
+  \item 行 \(\sim\)47（\verb|((L_2N+L_1N)%2)==P_3N_remainder|）：宇称判据
+        \(P = (-1)^{\ell + \lambda}\)。
+  \item 行 \(\sim\)50（\verb|two_T_3N==3| 单挑 \(1S_0\)）：同位旋破缺扩展
+        通道仅对 \({}^1S_0\) 开放。
+  \item 行 \(\sim\)69 之后：把通过判据的九元组 \verb|push_back| 到临时
+        \verb|std::vector|，再由调用方 \texttt{copy} 到长度精确的 \texttt{int*}
+        数组——之所以分两步是为了在 vector 阶段做动态扩张、最后落盘时给
+        消费者一个连续的、固定长度的指针视图。
+\end{itemize}
+
+\paragraph{2N 唯一索引：\texttt{unique\_2N\_idx}。}
+另一个供本函数与下游势矩阵使用的辅助函数把 \((\ell, s, j, t, \text{coupled})\)
+映射到\textbf{2N 子空间唯一索引} \(\rho \in \{0, 1, 2, \ldots\}\)，对应
+未耦合 / 耦合 NN 子矩阵分块。
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{unique\_2N\_idx}: 把 \((\ell s j t)\) 投到 2N 子矩阵索引（\texttt{Tic-tac/src/core/state\_space/make\_pw\_symm\_states.cpp:4--60}）},
+  label={lst:ch03-unique-2n-idx}
+]{code_excerpts/snippets/ch03_unique_2N_idx.cpp}
+
+代码里这条函数的核心三句是：
+\begin{itemize}
+  \item \verb|coupled| 的耦合道索引 \(\verb|J_2N - 1|\)；
+  \item 未耦合道索引 \(2 \verb|J_2N| + \verb|S_2N|\)（张力打开时）；
+  \item \({}^1S_0\) 在同位旋破缺开关下被"挪到"耦合道首位（索引 0）以让
+        \(T_{3N} = \tfrac{1}{2}/\tfrac{3}{2}\) 之间通过张量耦合。
+\end{itemize}
+该函数在 \cref{ch:08_potential_matrix} 大量使用。
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch03-numerics}
+
+\begin{numericalbox}[label={box:ch03-numerical-closure}]
+\textbf{场景}：复现求解器在 190 MeV \(d+p\) 弹性散射验证里使用的部分波态
+空间。直接读取真实运行 \texttt{output/dpol\_p\_observables\_j9\_j2max3\_nijmegen\_190/solver/solver\_run.log}
+（\(J_{2N\max} = 3\), \(2J_{3N\max} = 9\), \texttt{tensor\_force=true},
+\texttt{isospin\_breaking\_1S0=true}），并交叉验证：
+
+\paragraph{(a) 总通道数。}
+求解器打印
+\begin{verbatim}
+   - There are 10 3N-channels
+   - There are 63 partial-wave states in the largest channel(s)
+\end{verbatim}
+即 \(N_{\rm chn,3N} = 10\)（对应 \(2J_{3N} \in \{1,3,5,7,9\}\) 各两个宇称
+共 10 块），最大块 \(N_{\alpha,\max} = 63\)。本场景下整个 \texttt{alpha}
+列表长度为 \(\Nalpha = 365\)（可由 log 中各通道起始索引相减累加）。
+
+\paragraph{(b) \(J^\pi = 1/2^+\) 通道的前 5 个 \(\PWchan\)（重抄自 log）。}
+代码打印格式 \texttt{(alpha, L\_2N, S\_2N, J\_2N, L\_1N, two\_J\_1N, T\_2N,
+two\_T\_3N, two\_J\_3N, P\_3N)}：
+
+\begin{center}
+\begin{tabular}{rcccccccccl}
+\toprule
+\(\PWchan\) & \(\ell\) & \(s\) & \(j\) & \(\lambda\) & \(2I\) & \(t\) & \(2T\) & \(2J\) & \(P\) & 物理标签 \\
+\midrule
+27 & 0 & 0 & 0 & 1 & 1 & 1 & 1 & 1 & \(-1\) & \(({}^1S_0)\,p_{1/2}\) \\
+28 & 1 & 1 & 0 & 0 & 1 & 1 & 1 & 1 & \(-1\) & \(({}^3P_0)\,s_{1/2}\) \\
+29 & 1 & 0 & 1 & 0 & 1 & 0 & 1 & 1 & \(-1\) & \(({}^1P_1)\,s_{1/2}\) \\
+30 & 1 & 0 & 1 & 2 & 3 & 0 & 1 & 1 & \(-1\) & \(({}^1P_1)\,d_{3/2}\) \\
+31 & 0 & 1 & 1 & 1 & 1 & 0 & 1 & 1 & \(-1\) & \(({}^3S_1)\,p_{1/2}\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{校核}：每一行的 \((\ell + s + t) \bmod 2\) 应为 1；\((\ell + \lambda) \bmod 2\)
+应等于 \(P_{\rm rem} = 1\)（即 \(P = -1\)）。读者可逐行验证：例如 27 号
+\(0+0+1 = 1\)（奇 \(\checkmark\)），\(0+1=1\)（\(P=-1\)\(\checkmark\)）。
+
+\paragraph{(c) \(2J_{3N\max} = 1\) 简化场景。}
+若把截断降至 \(2J_{3N\max} = 1\) （只保留 \(J_{3N} = \tfrac{1}{2}\)），
+其它参数不变 (\(J_{2N\max} = 3\)，\texttt{isospin\_breaking\_1S0 = true}），
+此时只剩 2 个 3N-channel：\(J^\pi = 1/2^+\) 与 \(J^\pi = 1/2^-\)。
+\(J^\pi = 1/2^+\) 块的 \(\Nalpha\) 来自 \cref{lst:ch03-pw-loop-current} 的逻辑等于：
+\begin{itemize}
+  \item \(2T_{3N} = 1\)：\(j \in \{0,1,2,3\}\)，对每个 \(j\) 的合法
+        \((\ell, s, t)\) 三元组数与对应的 \(\lambda\) 选择数加总，
+        与 log 文件 (\(2J_{3N\max} = 9\)) 中 \(J^\pi = 1/2^+\) 块前 26 个
+        条目一致（去掉最后一行 \(\verb|two_T_3N|=3\) 的 \({}^1S_0\) 加项）；
+  \item \(2T_{3N} = 3\)：仅 \({}^1S_0\) 的一项加进来。
+\end{itemize}
+合计 \(\Nalpha(J^\pi = 1/2^+) = 27\)。
+
+\paragraph{(d) 复现命令。}
+\begin{lstlisting}[style=config]
+# 运行求解器（任意小 Np_WP, Nq_WP 即可，因为 alpha 列表与网格无关）
+cd Tic-tac/CPP
+./run J_2N_max=3 two_J_3N_max=1 \
+      isospin_breaking_1S0=true tensor_force=true \
+      potential_model=N2LOopt Np_WP=10 Nq_WP=10 \
+    > /tmp/pw_check.log 2>&1
+
+# 抽取 alpha 列表（前 30 行）
+grep -A 60 "Truncating partial-wave" /tmp/pw_check.log | head -45
+\end{lstlisting}
+预期 \texttt{Constructing channel 2 with JP=1/2+:} 之下应见 27 行 \(\PWchan\)，
+其前 5 行与上表完全一致。
+
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch03-interface}
+
+\paragraph{对下游章节的输出契约。}
+\(\Nalpha\) 与 9 个 \texttt{int*} 数组以及 \texttt{chn\_3N\_idx\_array} 是
+"通道层"对全求解器的唯一接口。下游消费方与依赖位置：
+\begin{itemize}
+  \item \cref{ch:07_pw_symm_states}：把 \(\PWchan\) 与 WP/SWP 网格组合成
+        \((\PWchan, i_p, i_q)\) 三元密集索引；这是大部分稀疏矩阵的列号映射。
+  \item \cref{ch:08_potential_matrix}：用 \texttt{unique\_2N\_idx} 把
+        \((\ell, s, j, t)\) 投到 2N 子空间，构造 \(\Vop_{\rho}\) 矩阵块；
+        然后和 \(\PWchan\) 的张量积构造完整的 \(\Vop\)。
+  \item \cref{ch:09_permutation_p123}：\(\Pop\) 矩阵的稀疏元正是
+        \(\langle \PWchanp p' q' | P_{123} | \PWchan p q \rangle\)，
+        于是它在通道层是一个 \(\Nalpha \times \Nalpha\) 的"密块连接图"。
+  \item \cref{ch:10_resolvent}：通道 Resolvent \(R_\PWchan(z)\) 沿
+        \texttt{chn\_3N\_idx\_array} 切分；每个 3N 块独立求解。
+  \item \cref{ch:11_faddeev_solver}：迭代 \((\identity - K) U = K_0\) 时
+        \(K\) 的列分组按 3N 块切分；外层 OpenMP 并行也按 3N 块切分。
+\end{itemize}
+
+\paragraph{依赖图（TikZ 调用图）。}
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=4mm and 14mm,
+  every node/.style={draw, rounded corners=2pt, font=\small,
+                     inner sep=4pt, align=center},
+  arr/.style={-Stealth, thick}
+]
+  \node (params) {\texttt{run\_params}\\(\(J_{2N\max}, 2J_{3N\max}\),\\flags)};
+  \node[right=of params] (pw) {\texttt{construct\_}\\\texttt{symmetric\_}\\\texttt{pw\_states}};
+  \node[right=of pw, draw=red!50!black, thick] (ch07) {Ch 7 PW state\\矩阵索引};
+  \node[below=of ch07] (ch08) {Ch 8 \(\Vop\) 矩阵\\(\texttt{unique\_2N\_idx})};
+  \node[below=of ch08] (ch09) {Ch 9 \(\Pop\) 矩阵};
+  \node[left=of ch09] (ch10) {Ch 10 Resolvent\\(按 \texttt{chn\_3N\_idx} 切分)};
+  \node[left=of ch10] (ch11) {Ch 11 Faddeev\\求解器};
+  \draw[arr] (params) -- (pw);
+  \draw[arr] (pw) -- (ch07);
+  \draw[arr] (pw) -- (ch08);
+  \draw[arr] (pw) -- (ch09);
+  \draw[arr] (pw) -- (ch10);
+  \draw[arr] (pw) -- (ch11);
+\end{tikzpicture}
+\caption{部分波态空间构造的下游消费方调用图。}
+\label{fig:ch03-callgraph}
+\end{figure}
+
+\paragraph{对上游的依赖。}
+本函数没有真正的上游依赖——\texttt{run\_params} 由
+\texttt{set\_run\_parameters.cpp} 解析输入文件后填好；不读 NN 势的任何细
+节，纯角动量代数。这也是为什么它是整个求解器流水线第一步、且是唯一可
+以"先运行一次看通道列表"再决定网格的环节。
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch03-pitfalls}
+
+\begin{pitfallbox}[label={box:ch03-pitfall-pi-print}]
+\textbf{陷阱 1：\texttt{P\_3N\_remainder} 与 \texttt{PAR} 列符号不一致。}
+
+\cref{lst:ch03-pw-loop-current} 的循环里把 \verb|P_3N_remainder=0| 时打印
+\verb|JP=1/2-|、\verb|P_3N_remainder=1| 时打印 \verb|JP=1/2+|；但在最后一行
+\(P_{3N} = 1 - 2 P_{\rm rem}\) 给出 \verb|P_3N_remainder=0| \(\Rightarrow P = +1\)、
+\verb|P_3N_remainder=1| \(\Rightarrow P = -1\)。也就是说\textbf{打印的"通道
+标签"与表里 \texttt{PAR} 列的符号正好相反}。这是\emph{显示层}的笔误，
+不影响数值结果，但读 log 时一定以 \texttt{PAR} 列为准。
+
+避坑：每次新接手代码时先用
+\verb|grep "Constructing channel" *.log| + 对比 \texttt{PAR} 列校验一遍。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 2：自旋耦合的左右顺序（\(s \otimes I\) vs \(I \otimes s\)）。}
+
+\cref{eq:ch03-total-J} 把 \((\ell s)j\) 与 \((\lambda \tfrac{1}{2}) I\) 耦合，且\textbf{先 \(j\) 后 \(I\)}（写法 \(\ket{(jI)JM}\)）。
+这一顺序与 Glöckle-Witała 的手稿一致。
+若在新写的"对照实现"或外部基准里用了"先 \(I\) 后 \(j\)"约定（即 \(\ket{(Ij)JM}\)），
+两套耦合相差一个 \((-1)^{j+I-J}\) 因子，会造成弹性散射 Ay 与 \(iT_{11}\) 倒符号。
+经验：用 \({}^1S_0\) 的 \({}^2H\) 极化分析能力 \(iT_{11}\)
+做闭环——若它和 Witała 1985 PRC 33: 1812 表 II 不一致，
+80\% 的可能是这里搞错了顺序。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 3：反对称化判据的奇/偶约定。}
+
+\cref{eq:ch03-pauli-criterion} 给出"\(\ell + s + t\) 偶 = 反对称"的标准
+推导，但代码里写的是 \verb|(L_2N + S_2N + T_2N) % 2|，
+\textbf{留下的是奇数}。两者相差一个全局负号，吸进了态本身的归一化定义。
+新写检查器时，请\textbf{抄代码的判定语句}，不要从公式现推——否则你会
+得到一个所有态都被滤掉的空通道列表（这是早期 Tic-tac fork 维护者最常
+踩的坑之一）。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 4：Jacobi 树编号 1/2/3 vs 12/23/31。}
+
+代码与文献都习惯用"循环对换 \(P_{123}\)"作为基本算符，但
+"Jacobi 树标号"在不同文献里有两种约定：
+\begin{itemize}
+  \item Glöckle 系：树 \(i\) 即"以粒子 \(i\) 为 spectator"。本章约定与代码相同（\cref{eq:ch03-jacobi-i}）。
+  \item Faddeev 原始系：树 \((jk)\) 即"对 = (j,k)"。这两套标号的"树 1"
+        与"树 23"指的是同一个对象，但写公式时把脚标搞反会让
+        \cref{eq:ch03-tree-rotate} 翻号。
+\end{itemize}
+建议在团队内部通讯/PR review 时永远写 "spectator = 3 的 12-3 树" 而不
+是 "tree 3" 或 "tree 12"，避免歧义。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 5：\(2T_{3N} = 3\) 的"单挑 \({}^1S_0\)"判定。}
+
+代码里这一段
+\begin{lstlisting}[style=cpp,frame=none,numbers=none]
+if (two_T_3N==3){
+    if ( (S_2N==0 && L_2N==0 && J_2N==0)==false ){
+        continue;
+    }
+}
+\end{lstlisting}
+判定\textbf{没有}检查 \verb|T_2N==1|。理由是当 \verb|two_T_3N==3| 时三角不等式
+要求 \verb|T_2N=1|，所以这条隐含成立——但若以后修改了三角不等式（如把
+\verb|T_2N_max| 改超过 1），就要在这里再加一个 \verb|T_2N==1| 的检查。
+当前的 \verb|T_2N_max=1| 上限保护了这一隐含约束，但任何重构必须留意。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 6：\(\Nalpha\) 与 \texttt{chn\_3N\_idx\_array} 的"末尾占位"。}
+
+\texttt{chn\_3N\_idx\_array} 的长度是 \verb|N_chn_3N + 1|，最后一个元素等于
+\(\Nalpha\)（参见 \cref{lst:ch03-pw-loop-current} 末尾
+\verb|chn_idx_temp.push_back(Nalpha_temp)|）。这是为了让
+\verb|[chn_3N_idx_array[c], chn_3N_idx_array[c+1])| 这一区间表达
+法对最后一个 3N 块也成立。下游若按 \verb|N_chn_3N| 而不是
+\verb|N_chn_3N + 1| 申请索引数组，会读越界。
+\end{pitfallbox}

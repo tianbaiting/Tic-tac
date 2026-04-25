@@ -1,13 +1,732 @@
 % =====================================================================
 % 04_faddeev_ags.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 4 章 Faddeev 分解、AGS 方程与 U-算符
+% Wave 1 / Agent B
 % =====================================================================
 
 \chapter{Faddeev 分解、AGS 方程与 U-算符}
 \label{ch:04_faddeev_ags}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch04-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{为什么三体 LS 方程不直接可解。}
+\cref{ch:01_lippmann_schwinger} 已经在两体散射中建立了 Lippmann–Schwinger
+（LS）方程的对应代数：将 T-算符 \(\Top\) 与势 \(\Vop\) 由
+\(\Top = \Vop + \Vop\,\Gzero\,\Top\) 关联。把同一形式直接套到三体系统、
+取 \(\Vop \equiv \Vij{12}{} + \Vij{23}{} + \Vij{31}{}\)（三对两体势之和），
+得
+\begin{equation}
+\label{eq:ch04-LS-3body-naive}
+\Top = \Vop + \Vop\,\Gzero\,\Top.
+\end{equation}
+这一方程在算子层面看起来与两体 LS 一模一样，但它\textbf{在动量表象
+下是不可解（不数值化）的}。
+原因是其核 \(\Vop\,\Gzero\) 含
+\(\Vij{ij}{}\,\Gzero\) 这种"两体对在三体 Hilbert 空间内的嵌入"，每一项
+\(\Vij{ij}{}\) 都包含一个 Dirac \(\delta\) 函数（"剩下那一个粒子的动量"
+不发生散射）。具体写出动量积分核 \(K(\bvec{p}, \bvec{q}; \bvec{p}', \bvec{q}')\)：
+\(\Vij{12}{}\) 项里 \(\bvec{q}\) 完全不参与积分变量，给出
+\(\delta(\bvec{q} - \bvec{q}')\)；同理 \(\Vij{23}{}, \Vij{31}{}\) 各自给出
+另一组 \(\delta\)。这种形如 "\(\delta\) 函数 + 紧 kernel"的混合算子
+在 Banach 空间不是紧的（compact），因此 Fredholm 选择定理无法保证
+\((\identity - \Vop \Gzero)\) 可逆。
+
+这就是 \emph{disconnected kernel}（不连通核）问题：
+LS 方程在三体下因核里的 \(\delta\) 函数失效。
+Faddeev 1960、Lovelace 1964、Alt-Grassberger-Sandhas（AGS）1967 的工作把这一困境从根本上绕过。
+
+\paragraph{Faddeev–AGS 的两个关键思想。}
+\begin{enumerate}
+  \item \textbf{Faddeev 分解}：把全波函数拆成三段，
+        \(\psi = \psifad{1} + \psifad{2} + \psifad{3}\)，
+        让每一段 \(\psifad{i}\) 满足只含一个两体子势 \(\Vij{jk}{}\)
+        （\(i \neq j, k\)）的简单方程。三段之间通过\textbf{置换 \(\Pop\)}
+        关联。这样原本"不连通的 \(\delta\) 函数"被转化成"通道之间的耦合"，
+        kernel 变为紧算子。
+  \item \textbf{AGS 整合}：把 Faddeev 三式重新组合成一组对称的
+        通道间散射振幅 \(\Uampl{\beta}{\alpha}\)，再利用置换对称性把
+        三式压成单一方程。这是最终被代码数值化的形式。
+\end{enumerate}
+
+\paragraph{本章的目标。}
+本章把 Faddeev 与 AGS 推到求解器代码可直接消费的"\(U\)-方程"形式，并解释
+求解器函数 \texttt{solve\_faddeev\_equations} 的签名为什么长成那个样子。
+读完本章你应能：
+\begin{itemize}
+  \item 在纸笔上独立写出 Faddeev 三式与 AGS 形式之间的等价关系；
+  \item 看到 \texttt{solve\_faddeev.h} 的接口立刻知道每一个参数对应数学
+        上的哪个量（特别是 \texttt{P123\_sparse\_*}, \texttt{V\_WP\_*},
+        \texttt{C\_WP\_*}, \texttt{q\_com\_idx\_array}）；
+  \item 知道弹性通道 \(U_{0\beta}\) 与断裂通道 \(U_{0(0)}\) 的差别在
+        哪条公式与哪个数组上；
+  \item 知道 Tic-tac 求解器在 LS-form vs 算符 form 上的取舍。
+\end{itemize}
+
+% =========================================
+\section{数学推导}
+\label{sec:ch04-math}
+
+% -----------------------------------------
+\subsection{两体子 T 算符 \(\Tsub{i}\)}
+\label{subsec:ch04-tsub}
+
+定义"嵌入到三体 Hilbert 空间的两体 T 算符"
+\begin{equation}
+\label{eq:ch04-tsub-def}
+\Tsub{i}(\zeplus) \;\equiv\; \Vij{jk}{} + \Vij{jk}{}\,\Gzero(\zeplus)\,\Tsub{i}(\zeplus),
+\end{equation}
+其中 \((i, j, k)\) 取 \((1,2,3)\) 的循环置换，\(\Vij{jk}{}\) 是
+"对 \((j,k)\) 的两体势"（\(\bvec{q}^{(i)}\) 维度上是单位算符），
+\(\Gzero(\zeplus) = (\zeplus - \Hzero)^{-1}\) 是三体自由 Green 算符，
+\(\zeplus = E + i\eps\)。
+\(\Tsub{i}\) 与两体 \(\Top_{jk}\) 的关系为
+\(\Tsub{i} = \Top_{jk} \otimes \identity_{\bvec{q}^{(i)}}\)：
+"在 \(\bvec{p}^{(i)}\) 上是真实的两体 \(T\)，在 \(\bvec{q}^{(i)}\) 上是恒等"。
+代码里 \(\Tsub{i}\) 不直接显式出现——它被吸收到\textbf{Sturmian-Wave-Packet
+(SWP) 系数} \(C_{\PWchan}\) 与势矩阵 \(V_{\PWchan, \PWchanp}\) 的乘积里
+（即所谓 "VC-product"，详见 \cref{ch:11_faddeev_solver}）。
+
+% -----------------------------------------
+\subsection{Faddeev 三分量分解}
+\label{subsec:ch04-faddeev}
+
+设全 Hamilton 量 \(\Hop = \Hzero + \Vop = \Hzero + \sum_{(jk)} \Vij{jk}{}\)。
+Lippmann–Schwinger 形式的全波函数
+\begin{equation}
+\label{eq:ch04-LS-full}
+\ket{\Psi^{(+)}}
+= \ket{\Phi} + \Gzero(\zeplus)\,\Vop\,\ket{\Psi^{(+)}}
+= \ket{\Phi} + \Gzero(\zeplus)\,\sum_{(jk)} \Vij{jk}{}\,\ket{\Psi^{(+)}},
+\end{equation}
+其中 \(\ket{\Phi}\) 是入态。Faddeev 把右边的求和"拆分"成三段，
+\begin{equation}
+\label{eq:ch04-faddeev-decomp}
+\ket{\Psi^{(+)}} \;=\; \sum_{i=1}^{3} \ket{\psifad{i}},
+\quad
+\ket{\psifad{i}} \;\equiv\; \Gzero\,\Vij{jk}{}\,\ket{\Psi^{(+)}},
+\quad (i,j,k) \text{ 循环}.
+\end{equation}
+\(\ket{\psifad{i}}\) 称为\textbf{Faddeev 分量（Faddeev component）}。
+注意 \(\Vij{jk}{}\) 只对 \((j,k)\) 这一对作用，所以 \(\ket{\psifad{i}}\) 是
+"以粒子 \(i\) 为 spectator 的 12-3 树"那一族的"自然分量"。
+
+把 \cref{eq:ch04-faddeev-decomp} 代回 \cref{eq:ch04-LS-full}：
+\begin{equation}
+\sum_i \ket{\psifad{i}}
+= \ket{\Phi} + \Gzero \sum_{(jk)} \Vij{jk}{}\,\Big( \ket{\psifad{i}} + \ket{\psifad{j}} + \ket{\psifad{k}} \Big),
+\end{equation}
+其中 \((i, j, k)\) 仍循环排列。对每一个 \(i\) 单独取出来，并定义入态
+\(\ket{\Phi^{(i)}}\) 为"对 \(\Vij{jk}{}\) 的散射前自由态投影"，得到
+\textbf{Faddeev 方程组}：
+\begin{equation}
+\label{eq:ch04-faddeev-eqs}
+\boxed{
+\quad
+\ket{\psifad{i}}
+= \ket{\Phi^{(i)}}
++ \Gzero(\zeplus)\,\Vij{jk}{}\,\Big( \ket{\psifad{j}} + \ket{\psifad{k}} \Big),
+\qquad i = 1, 2, 3.
+\quad
+}
+\end{equation}
+关键在于：右边\textbf{不再含 \(\Vij{jk}{}\,\ket{\psifad{i}}\)} 这一项——本来应
+有的 \(\Gzero\,\Vij{jk}{}\,\ket{\psifad{i}}\) 项被 \cref{eq:ch04-faddeev-decomp}
+中 \(\ket{\psifad{i}} = \Gzero \Vij{jk}{} \ket{\Psi}\) 的定义"吸进"了 LHS。
+这正是 disconnected \(\delta\) 函数被消除的代数源头。
+
+\paragraph{核的紧性。}
+\cref{eq:ch04-faddeev-eqs} 的核是
+\(K_{ij} = \Gzero\,\Vij{jk}{}\,\delta_{ij}^{(j \neq i)}\)（即 \(j = i\) 项不
+出现）。它对每一个 \(i\)（行）只在 \(j \neq i\) 处有非零块，且每个非零块
+都伴随着"换树"——即从 12-3 树 \(\to\) 23-1 树等的 Jacobi 旋转
+（\cref{eq:ch03-tree-rotate}）。"换树"使 \(\bvec{q}^{(j)}\) 与 \(\bvec{q}^{(i)}\)
+线性无关，于是三体动量积分对\textbf{所有 6 个动量分量}都是非平凡的，
+不再有\(\delta\) 函数。Faddeev 1960 给出了核 \(K\) 在合适的能量上是 trace
+class \(\Rightarrow\) 紧 \(\Rightarrow\) Fredholm 可逆的严格证明
+（详见 Glöckle 1983 第 3 章）。
+
+% -----------------------------------------
+\subsection{用置换 \(\Pop\) 把三式压成一式}
+\label{subsec:ch04-1plusP}
+
+对全同粒子（如三个核子）三段 Faddeev 分量满足
+\begin{equation}
+\label{eq:ch04-Pop-on-psi}
+\ket{\psifad{i}} = \Pop_i\,\ket{\psifad{1}},
+\end{equation}
+其中 \(\Pop_1 = \identity\)，\(\Pop_2 = P_{123}\)，\(\Pop_3 = P_{132} = P_{123}^2\)。
+原因是循环对换把"以粒子 1 为 spectator 的分量"变到"以粒子 2 为 spectator 的分量"。
+代入 \cref{eq:ch04-faddeev-eqs} 的 \(i = 1\) 式：
+\begin{equation}
+\ket{\psifad{1}}
+= \ket{\Phi^{(1)}} + \Gzero \Vij{23}{} \big( \Pop_2 + \Pop_3 \big) \ket{\psifad{1}}
+= \ket{\Phi^{(1)}} + \Gzero \Vij{23}{} \Pop \ket{\psifad{1}},
+\end{equation}
+其中
+\begin{equation}
+\label{eq:ch04-P-sum-def}
+\Pop \;\equiv\; \Pop_2 + \Pop_3 \;=\; P_{123} + P_{132} \;=\; P_{123} + P_{123}^{-1}
+\end{equation}
+（注意：\(\Pop\) 这里是\textbf{两个循环对换之和}；它和 \cref{ch:03_jacobi_partial_wave}
+里把 \(\identity\) 也算进去的 \(\Aop = \tfrac{1}{3}(\identity + P_{123} + P_{132})\) 差一个
+\(\identity\) 项与归一因子）。代码里在 \texttt{P123\_sparse\_*} 数组中只
+显式存 \(P_{123}\)；\(P_{132}\) 由 \(P_{123}\) 转置（行/列互换）得到。
+
+\textbf{压缩后的 Faddeev 方程}：
+\begin{equation}
+\label{eq:ch04-faddeev-compact}
+\boxed{
+\quad
+\ket{\psifad{}}
+= \ket{\Phi}
++ \Gzero(\zeplus)\,\Vop\,\Pop\,\ket{\psifad{}}.
+\quad
+}
+\end{equation}
+（这里我们丢弃了下标 1，以"任一段"代表整族。\(\Vop\) 此处即 \(\Vij{23}{}\)
+在 12-3 树上的形式；与 \cref{eq:ch04-LS-3body-naive} 的求和 \(\Vop\) 不同。）
+这是单个的、紧 kernel 的、可数值化的方程。
+
+\paragraph{用 \(\Tsub{}\) 重写。}
+把 \(\Tsub{}\) 的 LS 关系（\cref{eq:ch04-tsub-def}）作用到 \cref{eq:ch04-faddeev-compact}：
+\begin{equation}
+\label{eq:ch04-faddeev-T-form}
+\Tsub{}(\zeplus)\,\Pop\,\ket{\psifad{}}
+= \Vop\,\big(\identity + \Gzero \Tsub{}\big)\,\Pop\,\ket{\psifad{}}.
+\end{equation}
+等价地——把 \cref{eq:ch04-faddeev-compact} 两边作用 \(\Vop\)、再套一次
+LS 关系——可以推到\textbf{标准形式} \cite{Glockle1983}
+\begin{equation}
+\label{eq:ch04-T-from-faddeev}
+\Top_{F}\,\ket{\Phi} = \Tsub{}\,\Pop \big( \identity + \Gzero \Top_F \big)\,\ket{\Phi},
+\end{equation}
+其中 \(\Top_F\) 是"Faddeev 形式的 T-算符"。这一形式与下面的 AGS \(U\) 算符
+是等价的，相互之间只差代数重排。
+
+% -----------------------------------------
+\subsection{AGS 方程与 \(U\) 算符}
+\label{subsec:ch04-AGS}
+
+Alt-Grassberger-Sandhas（AGS）的工作把"三体 \(\to\) 三体"散射进一步组织成
+"通道（channel）"间的转移振幅。一个"通道 \(\alpha\)"指的是在渐近自由态
+区域 \(t \to \pm\infty\) 时保持束缚的子系统：
+\begin{itemize}
+  \item \(\alpha = 0\)：\textbf{断裂通道（breakup channel）}，三个粒子全自由。
+  \item \(\alpha = 1\)：\textbf{1 + (23) 通道}，粒子 1 自由、(23) 形成束缚态
+        （在核子物理里就是氘核 \(d\)）。
+  \item \(\alpha = 2, 3\) 同理：\(2 + (31)\) 与 \(3 + (12)\)。
+\end{itemize}
+注意"通道 \(\alpha\)"\textbf{不是}\cref{ch:03_jacobi_partial_wave} 里的部分波
+通道索引——前者是"渐近态结构"，后者是"角动量耦合标签"。Tic-tac 求解器
+把两个含义都用 \(\alpha\) 当符号，难免歧义；本节中我们对前者用 \(\alpha, \beta\)，
+对后者用 \(\PWchan, \PWchanp\)（与第 3 章一致）。
+
+\paragraph{\(U_{\beta\alpha}\) 算符的定义。}
+AGS 振幅 \(\Uampl{\beta}{\alpha}\)（"通道 \(\alpha \to \beta\) 的散射算符"）满足
+\begin{equation}
+\label{eq:ch04-AGS-master}
+\boxed{
+\quad
+\Uampl{\beta}{\alpha} \;=\; \bar\delta_{\beta\alpha}\,\Gzero^{-1}
++ \sum_{\gamma=1}^{3} \bar\delta_{\beta\gamma}\,\Tsub{\gamma}\,\Gzero\,\Uampl{\gamma}{\alpha},
+\quad
+}
+\end{equation}
+其中 \(\bar\delta_{\beta\alpha} \equiv 1 - \delta_{\beta\alpha}\)。这是 9 个
+方程组成的耦合方程组（\(\alpha, \beta = 1, 2, 3\)）。
+"\(\bar\delta\)"的物理含义：当入射通道与出射通道相同时（如 \(d + p \to d + p\)，
+即 \(\beta = \alpha\)），不再做"两体子内部散射"——它是渐近束缚态的内
+部构造，已经在两体 T 算符之外了。
+
+\paragraph{用 \(\Pop\) 把 9 式压成 1 式。}
+对全同粒子，\cref{eq:ch04-Pop-on-psi} 的循环对称性让 \(\Tsub{2}, \Tsub{3}\) 都是
+\(\Tsub{1}\) 经过 \(\Pop\) 共轭得到。沿用 \cref{subsec:ch04-1plusP} 的代数，
+9 个 AGS 方程被压成单一的 \emph{对称形式}：
+\begin{equation}
+\label{eq:ch04-AGS-symm}
+\Uop \;=\; \Pop\,\Gzero^{-1} + \Pop\,\Tsub{}\,\Gzero\,\Uop.
+\end{equation}
+其中 \(\Uop\) 是"对称化的"通道间振幅。两侧都左乘 \(\Vop\)：
+\begin{equation}
+\label{eq:ch04-AGS-V-form}
+\Vop\,\Uop \;=\; \Vop\,\Pop\,\Gzero^{-1} + \Vop\,\Pop\,\Tsub{}\,\Gzero\,\Uop.
+\end{equation}
+利用 \(\Tsub{} = \Vop + \Vop\,\Gzero\,\Tsub{}\) 可以把 \(\Vop\,\Pop\,\Tsub{}\)
+组合成 \((1 + \Vop \Gzero) \Tsub{} \Pop = \ldots\)（详细代数省略，见
+Glöckle 1983 第 5 章）。最终把方程化为下面这条\textbf{Tic-tac 求解器实
+际数值化的形式}：
+\begin{equation}
+\label{eq:ch04-faddeev-Mform}
+\boxed{
+\quad
+\ket{M} \;=\; \Tsub{}\,\Pop \big( \identity + \Gzero \ket{M} \big),
+\quad
+\ket{M} \;\equiv\; \Uop\,\ket{\Phi},
+\quad
+}
+\end{equation}
+其中 \(\ket{\Phi}\) 是入态。把 \cref{eq:ch04-faddeev-Mform} 离散到部分波 + WP 网
+格上得 \((\identity - K)\,U = K_0\) 的线性方程组，其中
+\begin{equation}
+\label{eq:ch04-K-kernel}
+K = \Tsub{}\,\Pop\,\Gzero,
+\qquad
+K_0 = \Tsub{}\,\Pop\,\ket{\Phi}.
+\end{equation}
+这是 \cref{ch:11_faddeev_solver} 里 Padé 加速 Neumann 级数迭代的对象。
+
+\paragraph{弹性通道 \(U_{0\beta}\) vs 断裂通道 \(U_{0(0)}\)。}
+求解器内部统一构建上述 \(\Uop\)；从 \(\Uop\) 抽出物理观测量需要再把它投到
+具体通道：
+\begin{itemize}
+  \item 弹性 \(d + p \to d + p\)：取入态 \(\ket{\Phi^{(d)}}\) 为氘核束缚态
+        （由 SWP 系数 \(C_d\) 给出）+ 平面波 \(\ket{\bvec{q}_0}\)；
+        然后 \(\Uampl{0}{\beta} = \langle d, \bvec{q}_0' | \Uop | d, \bvec{q}_0 \rangle\)。
+        代码里这一步是 \texttt{post\_processing.cpp} 中通过
+        \texttt{deuteron\_idx\_array} 与 \texttt{q\_com\_idx\_array}
+        把 \(\Uop\) 三体矩阵元乘以 \(C_d\) 并对 \(p\) 维做求和的逻辑。
+  \item 断裂 \(d + p \to N + N + N\)：取出态为三个自由波 \(\ket{\bvec{p}_0' \bvec{q}_0'}\)；
+        \(\Uampl{0}{(0)}\)（"通道 0 \(\to\) 0"）的振幅是直接的
+        \(\langle \bvec{p}_0' \bvec{q}_0' | \Uop | d, \bvec{q}_0 \rangle\)，
+        在代码里对应 \texttt{U\_BU\_array}（"BU" = breakup）。
+\end{itemize}
+所以 \texttt{solve\_faddeev\_equations} 同时输出 \texttt{U\_array}（弹性的全 \((\PWchan, p, q)\)
+矩阵元）与 \texttt{U\_BU\_array}（断裂的全矩阵元）。
+
+% -----------------------------------------
+\subsection{与 LS-form 的连接：\((1 + P_{12})\) 因子}
+\label{subsec:ch04-LS-connect}
+
+为了和"标准 LS 形式" \(\Top = \Vop + \Vop \Gzero \Top\) 直接对照，可以把
+Faddeev/AGS 重写为
+\begin{equation}
+\label{eq:ch04-LS-link}
+\Uop \;=\; (1 - P_{12}) \Tsub{}\,(1 + \Pop) \;+\; \ldots
+\end{equation}
+其中 \((1 - P_{12})\) 是反对称化投影因子（详见 \cref{eq:ch03-1plusP-projector}
+的对称性等价物）。在等价表述中常见 "\((1 + P_{12})\,\Top\,\ldots\)"
+的写法；它对应的是\textbf{对称}（玻色式）三体波函数；要用反对称（费米
+式）则换成 \((1 - P_{12})\)。Tic-tac 求解器 \emph{隐式}处理这一因子——
+反对称化通过 \cref{ch:03_jacobi_partial_wave} 中的 \(\ell + s + t\) 奇/偶
+判据吸进了部分波态的归一化，再加上 \(\Pop = P_{123} + P_{123}^{-1}\) 自身
+的对称性，最终给出与 Witała 等同的等价代数。
+
+\textbf{硬性提醒}：在与外部 benchmark（如 Witała、Deltuva 提供的代码）对照
+矩阵元时，请先确认对方有没有把 \((1 + P_{12})\) 显式拉出。如果对方有、
+你这边没有，会差一个常数因子 2（或在反对称约定下差 \(-1\)，亦即整体取反）。
+
+% =========================================
+\section{离散化方案}
+\label{sec:ch04-discretization}
+
+\paragraph{从算符方程到矩阵方程。}
+把 \cref{eq:ch04-faddeev-Mform} 投到 \(\pwstate{\PWchan}\) 与 WP 离散
+\(\WPbin{i_p}, \WPbin{i_q}\) 的张量积基底：
+\begin{equation}
+\langle \PWchanp, i_p', i_q' | \Uop | \PWchan, i_p, i_q \rangle
+\;\to\; (U)_{(\PWchanp, i_p', i_q'),(\PWchan, i_p, i_q)}.
+\end{equation}
+具体的 WP/SWP 离散化方法留到 \cref{ch:05_wpcd_math,ch:06_wp_swp_states}。
+本节只交代"离散后的矩阵方程"长什么样。
+
+\paragraph{密集化后的线性方程。}
+求解器通过迭代解
+\begin{equation}
+\label{eq:ch04-discrete-master}
+\big( \identity - K \big)\,U \;=\; K_0,
+\qquad K = (C^T) (P_{123}) (V) (C),
+\end{equation}
+其中：
+\begin{itemize}
+  \item \(C \in \mathbb{R}^{(\Nalpha N_p^{\rm WP} N_q^{\rm WP}) \times (\ldots)}\)：
+        Sturmian-Wave-Packet（SWP）展开系数，把 \(\Tsub{}\) 与 \(\Vop\) 的乘积凝
+        缩成一个"两体 T 在 SWP 基下的列" —— 这正是为什么 \texttt{V\_WP\_*}
+        与 \texttt{C\_WP\_*} 总是成对出现。
+  \item \(P_{123}\)：\cref{ch:09_permutation_p123} 的稀疏算符，CSC 格式
+        存储为 \texttt{P123\_sparse\_val\_array}, \texttt{P123\_sparse\_row\_array},
+        \texttt{P123\_sparse\_col\_array\_csc}。
+  \item \(V\)：两体势在 WP 基下的矩阵，分为未耦合 \(\Vop_{\rm unco}\)
+        与耦合 \(\Vop_{\rm coup}\) 两块（对应 \texttt{V\_WP\_unco\_array} 与
+        \texttt{V\_WP\_coup\_array}）。
+  \item \(K_0\)：右端，等于 "\(K\) 作用在入态展开矢上"。
+  \item 全维度 \(d = \Nalpha \cdot N_p^{\rm WP} \cdot N_q^{\rm WP}\)，
+        对 \(\Nalpha = 365\), \(N_p^{\rm WP} = N_q^{\rm WP} = 30\) 给出
+        \(d = 328\,500\)；矩阵密集存储是 \(d^2 \approx 10^{11}\) 个 double，
+        约 800 GB——远超内存。代码因此\textbf{绝不显式构造 \(K\) 矩阵}，而是
+        提供一个"\(K\) 作用在向量上"的列计算 callback（\texttt{CPVC\_col\_brute\_force}
+        与其优化版），供 Padé/Neumann 迭代调用。
+\end{itemize}
+
+\paragraph{能量参数 \(\zeplus = E + i\eps\)。}
+在物理上 \(\eps \to 0^+\) 给出散射极限。但 WP/SWP 离散化\textbf{自动}赋予
+谱以一个有限分辨（即 WP bin 宽度）；这相当于在算子层面引入了一个
+"组态平均"的有限 \(\eps\)。这就是为什么 Tic-tac 不需要在代码层显式选择
+\(\eps\) 参数——它是 WP bin 宽度这一离散化选择的副产物。详见
+\cref{ch:10_resolvent} 的 R + Q 分解。
+
+\paragraph{3N-channel 块对角化。}
+\(\Uop\) 关于 \(J^\pi\) 块对角，因此 \cref{eq:ch04-discrete-master} 是
+按 \cref{ch:03_jacobi_partial_wave} 的 \texttt{chn\_3N\_idx\_array}
+切分成若干独立块求解。每一块的维度是
+\(N_{\alpha,\rm block} \cdot N_p^{\rm WP} \cdot N_q^{\rm WP}\)，
+其中 \(N_{\alpha,\rm block}\) 不超过 63（最大块）。
+不同 \(J^\pi\) 块在 OpenMP 外层并行。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch04-algorithm}
+
+\begin{algorithm}[H]
+\caption{\texttt{solve\_faddeev\_equations} 的高层流程}
+\label{alg:ch04-solve-faddeev}
+\KwIn{$P_{123}$ 稀疏矩阵 (CSC)；$\Vop_{\rm unco}, \Vop_{\rm coup}$；
+      SWP 系数 \texttt{swp\_states} (含 $C_{\rm unco}, C_{\rm coup}$)；
+      free WP states \texttt{fwp\_states}；
+      on-shell 索引数组 \texttt{chn\_os\_indexing}；
+      部分波态空间 \texttt{pw\_states} (\cref{ch:03_jacobi_partial_wave});
+      运行参数 \texttt{run\_parameters}；
+      可选 3NF 模型 \texttt{tnf}}
+\KwOut{弹性 $U$-数组 \texttt{U\_array}；断裂 $U_{\rm BU}$-数组；
+       Green 函数 \texttt{G\_array}（仅在调试模式下保存）}
+\BlankLine
+\textbf{步骤 1（预构造）：} \;
+$CT_{\rm RM} \leftarrow$ \texttt{create\_CT\_row\_maj\_3N\_pointer\_array}$(C_{\rm unco}, C_{\rm coup})$\;
+$VC_{\rm CM} \leftarrow$ \texttt{create\_VC\_col\_maj\_3N\_pointer\_array}$(V_{\rm unco}, V_{\rm coup}, C_{\rm unco}, C_{\rm coup})$\;
+\BlankLine
+\textbf{步骤 2（3NF 上下文）：} \;
+\If{\texttt{tnf} 非空}{
+  组装 \texttt{tnf\_kernel\_context}（$p_{\rm WP}, q_{\rm WP}$ 边界 + scale)\;
+}
+\BlankLine
+\textbf{步骤 3（按 3N-channel 块外层并行）：} \;
+\For{每一 3N-channel block $c \in [0, N_{\rm chn,3N})$}{
+  \For{每一 on-shell q-bin $i_{q_0} \in $ \texttt{q\_com\_idx\_array[c]}}{
+    \For{每一 deuteron-state $i_d \in $ \texttt{deuteron\_idx\_array[c]}}{
+      \BlankLine
+      \textbf{步骤 3a：} 构造 $K_0$ 列（$=K \cdot \ket{\Phi^{(i_d)}}$）\;
+      \textbf{步骤 3b：} Padé 加速 Neumann 迭代——
+              每次迭代调用 \texttt{CPVC\_col\_brute\_force}
+              （或 SIMD 优化版）逐列累乘 $K \cdot v$，
+              一边累乘一边构造 Padé 表 $[n/n]$\;
+      \textbf{步骤 3c：} 收敛判据基于相邻 Padé 阶差 $\nudif$；写入 \texttt{U\_array} 与 \texttt{U\_BU\_array}\;
+    }
+  }
+}
+\BlankLine
+\textbf{步骤 4：} 释放 \texttt{CT\_RM\_array}, \texttt{VC\_CM\_array}\;
+\Return\;
+\end{algorithm}
+
+\paragraph{复杂度分析。}
+设 \(N_{\alpha,c}\) 是第 \(c\) 个 3N 块的部分波数，\(N_{\rm WP} = N_p^{\rm WP} N_q^{\rm WP}\)。
+每次 \(K \cdot v\) 列计算的成本约
+\(O(N_{\alpha,c}^2 \cdot N_{\rm WP} \cdot \mathrm{nnz}(P_{123})/N_{\alpha,c}) = O(N_{\alpha,c} \cdot N_{\rm WP} \cdot \mathrm{nnz}(P_{123}))\)。
+Padé 收敛通常在 \(20\sim40\) 次迭代内完成。190 MeV 单 \(J^\pi\) 块、
+\(N_{\rm WP} = 30 \times 30\) 在单线程下耗时约 30 秒—2 分钟，OpenMP 跨 8 核并行
+后整套 dp 计算（10 块）约 5 分钟。
+
+\paragraph{内存。}
+\texttt{CT\_RM} 与 \texttt{VC\_CM} 是指针数组，指向\textbf{二体子块} \(V_{\rho} C_{\rho}\) 的固定 30×30 矩阵；
+总内存 \(\sim O(\Nalpha^2)\) 个指针 + \(\sim O(\rho_{\max} \cdot N_p^2)\) 个 double，
+对生产配置约 1 GB。
+
+% =========================================
+\section{代码落地}
+\label{sec:ch04-code}
+
+求解器入口位于 \texttt{src/core/faddeev\_solver/solve\_faddeev.h}（当前仓库）
+和 \texttt{CPP/solve\_faddeev.h}（origin 仓库）。
+本节给出函数签名以及辅助结构 \texttt{tnf\_kernel\_context}，
+作为后续章节（特别是 \cref{ch:11_faddeev_solver}）的"接口契约"。
+
+\paragraph{当前仓库（含 3NF）的接口签名。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{solve\_faddeev\_equations} 函数签名 + 3NF 上下文（\texttt{Tic-tac/src/core/faddeev\_solver/solve\_faddeev.h:25--65}）},
+  label={lst:ch04-faddeev-sig-current}
+]{code_excerpts/snippets/ch04_solve_faddeev_signature.cpp}
+
+\paragraph{tictac-origin（不含 3NF）的对应签名。}
+\lstinputlisting[
+  style=cpp,
+  caption={origin 版本的 \texttt{solve\_faddeev\_equations} 签名（\texttt{tictac-origin/Tic-tac/CPP/solve\_faddeev.h:25--38}）},
+  label={lst:ch04-faddeev-sig-origin}
+]{code_excerpts/snippets/ch04_solve_faddeev_origin.cpp}
+
+\paragraph{两签名的差异。}
+\begin{itemize}
+  \item \textbf{\texttt{fwp\_states} 参数}：当前仓库新增。这是 free
+        Wave-Packet（FWP）边界数组（\(p_{\rm WP}, q_{\rm WP}\) 的 bin 边界），
+        用于 3NF 计算需要的"WP 中心"参数。origin 仓库内不需要——它没有
+        3NF 模块。
+  \item \textbf{\texttt{tnf} 参数}：当前仓库的最后一个 default 实参
+        \texttt{const three\_nucleon\_force\_model* tnf = nullptr}。
+        origin 完全没有这一参数。当 \texttt{tnf == nullptr} 时（即不开 3NF），
+        当前仓库的代码在所有 3NF 分支前都做一次空指针 check 后跳过——
+        这是为了让"开 / 关 3NF"通过空对象（null object）模式实现，
+        避免在调用方分裂出两条调用路径。
+  \item \textbf{\texttt{tnf\_kernel\_context} 结构}：当前仓库新增的"3NF 数据
+        包"。它把列计算热路径需要的所有 3NF 数据打包成一个 struct，
+        避免函数签名指数级膨胀。注意 \texttt{w1\_scale} 字段——
+        这是一个诊断旋钮，把整个 \(W^{(1)}\) 项乘以一个 scaling，
+        用于 \cref{ch:17_3nf_numerical} 里的 sweep 测试。
+\end{itemize}
+
+\paragraph{每个参数的数学解释。}
+\begin{description}
+  \item[\texttt{U\_array}] \cref{eq:ch04-discrete-master} 的解，按
+        \((\PWchan, i_p, i_q, i_{p_0}, i_{q_0})\) 索引；尺寸
+        \(\Nalpha \cdot N_p \cdot N_q \cdot N_{p_0} \cdot N_{q_0}\)。
+  \item[\texttt{U\_BU\_array}] 断裂通道矩阵元，按同样索引但 \(N_{p_0}\)
+        换成"出射 \(p\) bin 数"。
+  \item[\texttt{G\_array}] 三体 Green 函数 \(\Gthree(\zeplus)\) 在 SWP 基下的
+        矩阵元；调试模式下打印用。
+  \item[\texttt{P123\_sparse\_*}] CSC 格式 \(P_{123}\)。
+        \texttt{val\_array}, \texttt{row\_array}, \texttt{col\_array\_csc}
+        三件套；\texttt{P123\_sparse\_dim} 是稀疏元数。
+        来自 \cref{ch:09_permutation_p123}。
+  \item[\texttt{V\_WP\_unco\_array}, \texttt{V\_WP\_coup\_array}]
+        二体势矩阵，未耦合 / 耦合分别存。来自 \cref{ch:08_potential_matrix}。
+  \item[\texttt{swp\_states}] SWP 系数与维度，含 \texttt{C\_SWP\_unco/coup\_array},
+        \texttt{Np\_WP}, \texttt{Nq\_WP}, \texttt{num\_2N\_unco/coup\_states}。
+        来自 \cref{ch:06_wp_swp_states}。
+  \item[\texttt{fwp\_states}] free WP 边界数组（仅当前仓库）。
+  \item[\texttt{chn\_os\_indexing}] on-shell 索引：
+        \texttt{q\_com\_idx\_array}（每个 \(\Tlab\) 在 q-bin 中映射到哪一格），
+        \texttt{deuteron\_idx\_array}（氘核 SWP 索引），
+        \texttt{num\_T\_lab}, \texttt{num\_deuteron\_states}。
+  \item[\texttt{pw\_states}] 部分波态空间，由
+        \cref{ch:03_jacobi_partial_wave} 的 \texttt{construct\_symmetric\_pw\_states}
+        填好。
+  \item[\texttt{file\_identification}] 输出文件标签字符串，控制
+        \texttt{U\_PW\_elements\_*.txt} 命名。
+  \item[\texttt{run\_parameters}] 运行参数（迭代上限、Padé 阶、收敛阈值、
+        \texttt{w1\_scale} 等）。
+  \item[\texttt{tnf}] 3NF 模型的可选注入；空指针 = 关 3NF。
+\end{description}
+
+\paragraph{辅助函数签名（同样在 .h 中，行 58--119）。}
+本章不展开这些辅助函数的实现（详见 \cref{ch:11_faddeev_solver}），
+但读者可以从签名直接看出三个观察：
+\begin{itemize}
+  \item \texttt{create\_CT\_row\_maj\_3N\_pointer\_array} 与
+        \texttt{create\_VC\_col\_maj\_3N\_pointer\_array} 都\textbf{返回指
+        针数组}（\texttt{double**}），表明 \(C^T\) 与 \(VC\) 在内存中按
+        2N 子矩阵分块；指针数组的索引则按 \((\PWchan, \PWchanp)\) 二维。
+  \item \texttt{PVC\_col\_brute\_force} 与 \texttt{CPVC\_col\_brute\_force}
+        是\textbf{列计算} routine——给定 \((i_\PWchan, i_p, i_q)\) 列号，
+        计算 \(K \cdot e_{(\PWchan, i_p, i_q)}\) 这一列，返回到 \texttt{col\_array}。
+        这是为了避免显式构造 \(K\) 矩阵。
+  \item \texttt{*\_col\_calc\_test} 是\textbf{比对工具}：把"暴力构造完整
+        矩阵再乘"与"直接调用 col 计算"两条路径的输出对比，确保正确。
+        默认关闭（\texttt{test\_PVC\_col\_routine = false}），仅 benchmark 时打开。
+\end{itemize}
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch04-numerics}
+
+\begin{numericalbox}[label={box:ch04-numerical-closure}]
+\textbf{场景}：固定 \(J^\pi = 1/2^+\) 块，\(J_{2N\max} = 3\)，
+\(2J_{3N\max} = 1\)，\(N_p^{\rm WP} = N_q^{\rm WP} = 30\)。
+求该块上 AGS 矩阵 \cref{eq:ch04-discrete-master} 的维度与稀疏度。
+
+\paragraph{(a) 部分波数。}
+由 \cref{box:ch03-numerical-closure} (c) 已知 \(\Nalpha(J^\pi = 1/2^+) = 27\)。
+
+\paragraph{(b) 单块矩阵维度。}
+\begin{equation}
+d_{\rm block} = \Nalpha \cdot N_p^{\rm WP} \cdot N_q^{\rm WP}
+= 27 \cdot 30 \cdot 30 = 24\,300.
+\end{equation}
+若密集存储 \(K\)（双精度），需要 \(24\,300^2 \times 8\,\text{B} \approx 4.7\,\text{GB}\)——单块也已不便密存。
+
+\paragraph{(c) 稀疏度估算。}
+\(P_{123}\) 在通道层是\textbf{密}的（约 \(\Nalpha^2 = 729\) 个非零通道对），
+但每个通道对内部沿 \((i_p, i_q)\) 维只在 "Jacobi 旋转后落到的 1\(\sim\)8 个 bin"
+里非零。
+经验上 \(P_{123}\) 的稀疏度 \(\rho_P \sim 1\%\)，
+因此 \texttt{P123\_sparse\_dim} \(\approx 0.01 \times d_{\rm block}^2 \approx 6 \times 10^6\) 元，
+约 100 MB（每元 = 1 个 double + 1 个 size\_t \(\approx 16\) B）。
+
+\paragraph{(d) 复现命令。}
+\begin{lstlisting}[style=config]
+# 启用 P123 稀疏度的诊断打印
+cd Tic-tac/CPP
+./run J_2N_max=3 two_J_3N_max=1 \
+      Np_WP=30 Nq_WP=30 \
+      potential_model=N2LOopt \
+      Tlab=190.0 \
+      output_folder=Output/ch04_dim_check \
+      reuse_p123=false \
+    2>&1 | tee /tmp/ch04_dim.log
+
+# 读 P123 实际稀疏元数
+grep -i "P123_sparse_dim\|nnz" /tmp/ch04_dim.log
+\end{lstlisting}
+预期 \texttt{P123\_sparse\_dim} 在 \(10^6\) 量级（具体值依赖
+3N-channel 选择与 \texttt{chebyshev\_s, chebyshev\_t} 网格参数）。
+
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch04-interface}
+
+本章定义的 \(\Uop\) 算符与 AGS 矩阵 \(K\) 是后续\textbf{所有}章节的核心。
+以下是依赖拓扑：
+
+\paragraph{上游依赖（提供给本章 \(\Uop\) 求解所需的输入）。}
+\begin{itemize}
+  \item \cref{ch:03_jacobi_partial_wave}：\(\Nalpha\) 与 9 个通道索引数组。
+  \item \cref{ch:05_wpcd_math,ch:06_wp_swp_states}：\(\WPbin{i}\) 基底与
+        \(C\) 矩阵。
+  \item \cref{ch:08_potential_matrix}：\(V\) 矩阵。
+  \item \cref{ch:09_permutation_p123}：\(P_{123}\) 稀疏矩阵。
+  \item \cref{ch:10_resolvent}：\(\Gzero\) 在 WP 基下的对角元（即"通道
+        Resolvent"）。
+\end{itemize}
+
+\paragraph{下游消费（消费 \(\Uop\) 输出的章节）。}
+\begin{itemize}
+  \item \cref{ch:11_faddeev_solver}：本章 \cref{eq:ch04-faddeev-Mform}
+        的 Padé/Neumann 数值实现；输出 \texttt{U\_array}, \texttt{U\_BU\_array}。
+  \item \cref{ch:12_observables_basics}：从 \texttt{U\_array} 提取弹性散
+        射振幅 \(M_{m_d', m_d}(\theta)\) 与微分截面 \(\diffXS\)。
+  \item \cref{ch:13_polarization_observables}：从同一 \(U\) 提取
+        \(\iTeleven, \Ttwentyzero, \Ttwentyone, \Ttwentytwo\)。
+  \item \cref{ch:14_miller_gate1}：用 \(U\) 在小角度处提取相移
+        （phase shift），即 Miller Gate 1 程式。
+  \item \cref{ch:15_3nf_physics,ch:16_3nf_pw_projection,ch:17_3nf_numerical}：
+        通过 \texttt{tnf} 注入修改 \(K\)；再次走本章流程。
+\end{itemize}
+
+\paragraph{依赖图。}
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=4mm and 8mm,
+  every node/.style={draw, rounded corners=2pt, font=\footnotesize,
+                     inner sep=3pt, align=center},
+  blk/.style={draw=black, fill=blue!8},
+  outblk/.style={draw=red!50!black, fill=red!5},
+  arr/.style={-Stealth, thick}
+]
+  \node[blk] (ch3) {Ch 3\\$\Nalpha,\PWchan$};
+  \node[blk, right=of ch3] (ch6) {Ch 6\\$C$ (SWP)};
+  \node[blk, right=of ch6] (ch8) {Ch 8\\$V$ matrix};
+  \node[blk, right=of ch8] (ch9) {Ch 9\\$P_{123}$};
+  \node[blk, right=of ch9] (ch10) {Ch 10\\$\Gzero$ (R+Q)};
+  \node[draw, fill=yellow!30, below=12mm of ch8, minimum width=5cm] (ch4)
+    {\textbf{Ch 4 (本章)}\\AGS / $\Uop$ 算符\\
+     \texttt{solve\_faddeev\_equations}};
+  \node[blk, below=of ch4] (ch11) {Ch 11\\Faddeev 求解器\\(Padé+Neumann)};
+  \node[outblk, below=10mm of ch11, xshift=-3.5cm] (ch12) {Ch 12 截面};
+  \node[outblk, below=10mm of ch11, xshift=-1cm]   (ch13) {Ch 13 极化};
+  \node[outblk, below=10mm of ch11, xshift=1.5cm]  (ch14) {Ch 14 相移};
+  \node[outblk, below=10mm of ch11, xshift=4cm]    (ch17) {Ch 15-17 3NF};
+  \draw[arr] (ch3) -- (ch4);
+  \draw[arr] (ch6) -- (ch4);
+  \draw[arr] (ch8) -- (ch4);
+  \draw[arr] (ch9) -- (ch4);
+  \draw[arr] (ch10) -- (ch4);
+  \draw[arr] (ch4) -- (ch11);
+  \draw[arr] (ch11) -- (ch12);
+  \draw[arr] (ch11) -- (ch13);
+  \draw[arr] (ch11) -- (ch14);
+  \draw[arr, dashed] (ch17) -- (ch4) node[midway, right, font=\scriptsize] {\texttt{tnf} 注入};
+\end{tikzpicture}
+\caption{第 4 章 AGS / \(\Uop\) 算符的上下游依赖与下游消费拓扑。}
+\label{fig:ch04-callgraph}
+\end{figure}
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch04-pitfalls}
+
+\begin{pitfallbox}
+\textbf{陷阱 1：\(\Tampl{\beta}{\alpha}\) vs \(\Uampl{\beta}{\alpha}\) 的符号约定。}
+
+不同文献对"通道间转移振幅"使用 \(T_{\beta\alpha}\) 与 \(U_{\beta\alpha}\) 两套
+记号，二者相差一个常数因子（通常 \(\pm 1\) 或 \(\pm i\)，依归一约定）。
+Tic-tac 内部统一用 \(U\)（即 AGS 表述）。在与 Witała 1985 PRC 的相
+移表对照时请\textbf{先确认对方用 T 还是 U}：差一个 \(-1\) 会让 Ay 倒符号
+但 \(d\sigma/d\Omega\) 不变（因为后者只取 \(|U|^2\)）。
+
+\textbf{自检}：用 LO\_internal 势在 190 MeV 跑 Ay 应得\textbf{正}峰值（约
++0.4）；若得到 \(-0.4\)，多半是这一符号搞错。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 2：复能量 \(\zeplus = E + i\eps\) 的位置。}
+
+\cref{eq:ch04-faddeev-Mform} 与 \cref{eq:ch04-AGS-symm} 都隐式依赖
+\(\zeplus = E + i\eps\) 的虚部 \(\eps\)。WP 离散化\textbf{自动}给出有效
+\(\eps_{\rm eff} \sim \Delta q_{\rm WP}^2 / (2 \mu)\)（即 bin 宽度的能量分
+辨）。
+\textbf{陷阱所在}：如果你尝试在求解器外手动加 \(i\eps\)（如修改 \texttt{make\_resolvent.cpp}
+的实部），会与 WP 的内置正则化叠加，得到双重正则化、共振峰被人为加宽。
+正确做法是\textbf{增大 \(N_q^{\rm WP}\)} 而不是显式加 \(\eps\)。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 3：与 LS 形式互转时遗漏 \((1 + P_{12})\) 因子。}
+
+\cref{subsec:ch04-LS-connect} 已经讲过：Tic-tac 把 \((1 - P_{12})\)
+\textbf{隐式}吸进部分波态归一化，外部 benchmark（如 Deltuva 的代码）通
+常\textbf{显式}写 \((1 + P_{12})\)。直接用矩阵元做对照时差一个因子
+2（玻色约定）或一个负号（费米约定）。
+
+\textbf{对照建议}：取一个在两个代码里都明确给出的"参考量"——
+通常用弹性总截面 \(\sigma_{\rm el}\)（积分过 \(\theta\) 后的 \(d\sigma/d\Omega\)）做闭环，
+而不是裸矩阵元。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 4：\texttt{q\_com\_idx\_array} 与 \texttt{deuteron\_idx\_array} 的"隐式
+长度对偶"。}
+
+\texttt{chn\_os\_indexing} 包含 \texttt{num\_T\_lab} 个 q-bin 索引（即
+"输入要求的能量在 q-WP 网格上落到第几个 bin"）和
+\texttt{num\_deuteron\_states} 个氘核 SWP 索引。这两个数组\textbf{独立长度}，
+但被嵌套循环展开为
+\texttt{num\_T\_lab \(\times\) num\_deuteron\_states} 次实际 \(K_0\) 列计算。
+
+\textbf{陷阱所在}：
+若 \texttt{deuteron\_idx\_array} 为空（如某些模型不支持氘核束缚），
+求解器会跳过整个 elastic 通道但仍保留 BU 数组分配，
+最终输出 \texttt{U\_array} 全为零的 NaN。
+日志里只会打印 "0 deuteron states"，容易漏看。
+\textbf{自检}：在 PR 修改任何 SWP 构造代码后，
+跑一遍 \texttt{python tests/test\_190mev\_data\_pipeline.py}——
+它会显式检查氘核态数量是否大于零。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 5：\texttt{tnf == nullptr} 与 \texttt{tnf->enabled() == false} 的差别。}
+
+当前仓库设计上有两套"关 3NF"的方式：
+(a) 把 \texttt{tnf} 直接传 \texttt{nullptr}；
+(b) 传一个非空但内部 \texttt{enabled() == false} 的 stub 模型。
+方式 (a) 完全跳过任何 3NF 相关分支；方式 (b) 走入分支但每个内部循环再做一次 \texttt{enabled()} 检查。
+
+\textbf{陷阱所在}：
+两种调用路径在某些数值边界（如 P123 缓存 hash key 计算）会得到\textbf{不同}的中间状态——
+即缓存命中与不命中——尽管最终物理结果一致。
+\textbf{建议}：所有生产 / sweep 跑统一走方式 (a)；只在调试 3NF 注入路径时才用 (b)。
+否则可能复现不出来上次的 \texttt{P123\_cache\_*.h5} 缓存命中。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 6：\texttt{file\_identification} 字符串与缓存文件名。}
+
+\texttt{file\_identification} 是 \texttt{solve\_faddeev\_equations} 的字符串
+参数，最终拼到 \texttt{U\_PW\_elements\_*.txt} 与 \texttt{neumann\_terms\_*.txt}
+文件名里。如果你跑一个 sweep（如多个 \texttt{w1\_scale} 值）但忘了改这个字段，
+后续跑\textbf{会覆盖前一次的输出}。
+\textbf{建议}：在 sweep 脚本里把所有可调参数（\(\Tlab\), \(N_p, N_q\), 势模
+型, \texttt{w1\_scale}）都拼进 \texttt{file\_identification}，并在 commit 信
+息里写清"本次 sweep 输出文件名规则"。
+\end{pitfallbox}
