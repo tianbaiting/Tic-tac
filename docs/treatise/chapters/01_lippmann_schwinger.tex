@@ -1,13 +1,567 @@
 % =====================================================================
 % 01_lippmann_schwinger.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% Wave 1 / Agent A —— 第 1 章 量子散射的算符结构与 Lippmann–Schwinger 方程
 % =====================================================================
 
-\chapter{量子散射的算符结构与 Lippmann–Schwinger 方程}
+\chapter{量子散射的算符结构与 Lippmann--Schwinger 方程}
 \label{ch:01_lippmann_schwinger}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% ---------------------------------------------------------------------
+\section{物理动机：从弹性散射实验到算符方程}
+\label{sec:ch01-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\subsection{两体散射观测量与代码栈的距离}
+
+整本 Tic-tac 仓库的最终目的，是把
+氘核-质子（$d+p$）在某个实验室能量 $\Tlab$ 上的微分截面 $\diffXS(\theta)$、
+张量分析能力 $\iTeleven(\theta)$、$\Ttwentyzero(\theta)$、$\Ttwentyone(\theta)$、$\Ttwentytwo(\theta)$ 等可观测量，
+与三核子哈密顿量 $\Hop = \Hzero + \Vop_{NN} + \Vop_{3N}$ 中含有的两体势 $\Vop_{NN}$
+与三体势 $\Vop_{3N}$ 自洽地联系起来。
+所谓“自洽”指的是不引入唯象修正、
+完全由量子力学第一性的散射理论加上离散化误差控制就能复现实验。
+读者首先必须明白：从 $\Hop$ 出发到截面之间，
+有两个绕不开的算符方程层级——
+两体的 \textbf{Lippmann--Schwinger (LS) 方程}（本章主题），
+以及三体的 \textbf{Faddeev/AGS 方程}（第 \ref{ch:04_faddeev_ags} 章主题）。
+
+而 LS 方程在数值上对应整个 \texttt{src/core/potential/} 目录与 \texttt{src/interactions/} 目录的全部产物。
+其中 \texttt{interactions/} 提供 $\Vop_{NN}$ 的具体模型（chiral LO/N2LOopt/Idaho-N3LO/Nijmegen/Malfliet--Tjon），
+\texttt{core/potential/} 把这些动量空间下的 $\matrixel{p'}{\Vop}{p}$ 函数评估到 wave-packet 离散网格上、
+最后供 Faddeev 求解器调用。
+我们之所以要在第 1 章首先把 LS 方程从算符结构原原本本推导出来，
+是因为如果跳过这一步直接从 wave-packet 矩阵开始讲，
+后续“为什么 $\matrixel{p'}{\Top(E)}{p}$ 在 $E = p^2/2\mu$ 上是奇异的”、
+“为什么需要 $\eps$ 处方”、
+“为什么 $\Top$ 对入态和出态的归一化定义不同”
+等数值层面的关键陷阱（详见 \cref{sec:ch01-pitfalls}）将完全无法定位到物理根源。
+
+\subsection{阅读路径与上下游边界}
+
+本章只在两体两粒子的 Hilbert 空间内讨论。
+具体来说，我们在第 \ref{ch:03_jacobi_partial_wave} 章再引入三体 Jacobi 坐标后，
+本章构建的 $\Top(E)$ 算符将作为模块嵌入到三粒子两体子系统的 Hilbert 空间，
+形成 $\Top_{\text{(2 in 3)}}$，与第 \ref{ch:09_permutation_p123} 章的置换算符 $\Pop$ 一同进入 AGS 方程。
+读者本章读完后应该掌握：
+\begin{itemize}
+  \item 散射理论的基本算符家族 $\{\Mollerpm, \Sop, \Top, \Gzero, \Gop\}$ 之间的关系；
+  \item 入态 $\statein{\bvec{p}}$、出态 $\stateout{\bvec{p}}$ 与平面波 $\ket{\bvec{p}}$ 之间的代数转化；
+  \item LS 方程
+    $\Top(E) = \Vop + \Vop\, \Gzero(E)\, \Top(E)$ 的完整推导；
+  \item 在数值评估时为什么自由 Green 函数 $\Gzero(E^+)$ 必须取 $E + i\eps$ 上极限。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{数学推导：从 Møller 算符到 LS 方程}
+\label{sec:ch01-math}
+
+\subsection{基本设定与渐近条件}
+
+考虑两个非相对论核子（不计内禀自由度，自旋与同位旋稍后引入），
+在质心系下的相对运动 Hilbert 空间 $\mathcal{H}$ 上有一个完整哈密顿量：
+\begin{equation}
+  \Hop = \Hzero + \Vop, \qquad \Hzero = \frac{\hat{\bvec{p}}^2}{2\mu},
+  \label{eq:ch01-Hsplit}
+\end{equation}
+其中 $\mu = M_p M_n / (M_p + M_n) \approx \SI{469.46}{MeV}$ 是 $np$ 系统的约化质量
+（参见 \texttt{include/constants.h} 中的 \texttt{mu23}），
+而 $\Vop$ 是一个短程相互作用，
+满足在动量表象下 $\matrixel{\bvec{p}'}{\Vop}{\bvec{p}}$ 对所有有限动量光滑、
+且当 $|\bvec{p}'|, |\bvec{p}| \to \infty$ 时随 cutoff $\Lambda$ 之外指数衰减
+（chiral EFT $\Lambda \sim 450\text{--}500\,\si{MeV}$）。
+本章的所有讨论假定 $\Vop$ 不支持束缚态以下的奇异谱（除氘核束缚态本身），
+因此连续谱 $\sigma_c(\Hop) = [0, +\infty)$ 与 $\sigma_c(\Hzero) = [0, +\infty)$ 之间有一一对应。
+
+我们用 $\ket{\bvec{p}}$ 表示自由动量本征态，归一化为
+\begin{equation}
+  \braket{\bvec{p}'}{\bvec{p}} = \delta^{(3)}(\bvec{p}' - \bvec{p}),
+  \qquad
+  \Hzero \ket{\bvec{p}} = \frac{\bvec{p}^2}{2\mu} \ket{\bvec{p}}.
+  \label{eq:ch01-plane-wave}
+\end{equation}
+\textit{物理图像}：在 $t \to \mp\infty$ 时，量子态由 $\Hzero$ 演化（粒子分得很远，不感受到 $\Vop$）；
+在 $t = 0$ 附近粒子撞在一起，感受到 $\Vop$；
+$t \to \pm\infty$ 时再次自由飞行。
+散射理论的中心问题：
+是否存在 $\mathcal{H}$ 上的态 $\Psi^{(\pm)} \in \mathcal{H}$，
+使得它们在长时间过去/未来分别和某个自由演化的渐近态吻合？
+
+\subsection{Møller 算符的定义}
+
+设 $\ket{\Phi}$ 是任一“足够好”（即在动量空间局域化为波包）的自由态，则
+\begin{equation}
+  \Mollerpm \ket{\Phi}
+  := \lim_{t \to \mp\infty}
+        e^{i\Hop t / \hbar}\, e^{-i\Hzero t / \hbar}\, \ket{\Phi}
+  \label{eq:ch01-moller-def}
+\end{equation}
+若该极限对密集子空间 $D \subset \mathcal{H}$ 中所有 $\ket{\Phi}$ 收敛，
+则 $\Mollerpm$ 唯一延拓为 $\mathcal{H}$ 上的等距算符（isometry）。
+\textbf{定义 \refstepcounter{definition}\thedefinition\label{def:ch01-in-out}（入态与出态）}：
+
+\begin{itemize}
+  \item \textbf{入态} $\statein{\bvec{p}} := \Mollerp \ket{\bvec{p}}$，
+        物理诠释：在 $t \to -\infty$ 时其行为像 $\ket{\bvec{p}}$ 的自由态。
+  \item \textbf{出态} $\stateout{\bvec{p}} := \Mollerm \ket{\bvec{p}}$，
+        物理诠释：在 $t \to +\infty$ 时其行为像 $\ket{\bvec{p}}$ 的自由态。
+\end{itemize}
+
+由于 $\Mollerpm$ 是等距：
+\begin{equation}
+  \Mollerpm^{\dagger}\, \Mollerpm = \identity,
+  \qquad
+  \Mollerpm\, \Mollerpm^{\dagger} = \identity - \Pop_{\text{B}},
+  \label{eq:ch01-moller-isom}
+\end{equation}
+其中 $\Pop_{\text{B}}$ 是哈密顿量 $\Hop$ 束缚态子空间上的投影算符
+（在两体 NN 系统中，唯一的束缚态是氘核 $\ket{d}$，故 $\Pop_{\text{B}} = \ketbra{d}{d}$）。
+这对“连续谱完备性”尤其重要，
+因为后面 LS 方程的解只在连续谱子空间上唯一。
+
+\subsection{交织关系与 S-算符}
+
+直接对 \cref{eq:ch01-moller-def} 两侧分别从左、从右乘演化算符并取 $t \to \mp\infty$，得到\textbf{交织关系} (intertwining relation):
+\begin{equation}
+  \Hop\, \Mollerpm = \Mollerpm\, \Hzero.
+  \label{eq:ch01-intertwine}
+\end{equation}
+等价地说，$\Mollerpm$ 把 $\Hzero$ 的连续谱本征态映射到 $\Hop$ 的连续谱本征态，并保持本征值不变：
+\begin{equation}
+  \Hop\, \statein{\bvec{p}} = \frac{\bvec{p}^2}{2\mu}\, \statein{\bvec{p}}, \qquad
+  \Hop\, \stateout{\bvec{p}} = \frac{\bvec{p}^2}{2\mu}\, \stateout{\bvec{p}}.
+  \label{eq:ch01-Hpsi-eigen}
+\end{equation}
+
+\textbf{定义 \refstepcounter{definition}\thedefinition\label{def:ch01-Sop}（S-算符）}：
+$\Sop := \Mollerm^{\dagger}\, \Mollerp$。
+由 \cref{eq:ch01-moller-isom} 可以验证 $\Sop$ 在连续谱上是幺正的：
+\begin{equation}
+  \Sop^{\dagger}\, \Sop = \Mollerp^{\dagger}\, \Mollerm\, \Mollerm^{\dagger}\, \Mollerp
+  = \Mollerp^{\dagger}\,(\identity - \Pop_{\text{B}})\,\Mollerp
+  = \identity - \Mollerp^{\dagger}\, \Pop_{\text{B}}\, \Mollerp.
+  \label{eq:ch01-S-unitary-step}
+\end{equation}
+注意 $\Pop_{\text{B}}\, \Mollerp = 0$（束缚态子空间正交于自由谱的像），
+因此 $\Sop^{\dagger}\Sop = \identity$。
+S-矩阵元
+\begin{equation}
+  S_{\bvec{p}'\bvec{p}} = \matrixel{\bvec{p}'}{\Sop}{\bvec{p}} = \braket{\bvec{p}'^{(-)}}{\bvec{p}^{(+)}}
+  \label{eq:ch01-Spp}
+\end{equation}
+便是从入态 $\statein{\bvec{p}}$ 到出态 $\stateout{\bvec{p}'}$ 的散射振幅，是实验直接看到的对象。
+
+\subsection{从 Møller 算符到 T-算符}
+
+设 $\ket{\Phi(t)} = e^{-i\Hzero t/\hbar} \ket{\Phi}$，
+对 \cref{eq:ch01-moller-def} 在 $\Mollerp$ 情况下做时间方向上的微分：
+\begin{align}
+  \Mollerp \ket{\Phi}
+  &= \lim_{t \to -\infty} e^{i\Hop t/\hbar}\, e^{-i\Hzero t/\hbar} \ket{\Phi}                            \notag \\
+  &= \ket{\Phi}
+     + \int_{-\infty}^{0}\!\!\dd t\,
+        \dv{t}\!\left[ e^{i\Hop t/\hbar}\, e^{-i\Hzero t/\hbar} \right] \ket{\Phi}                       \notag \\
+  &= \ket{\Phi}
+     + \frac{i}{\hbar} \int_{-\infty}^{0}\!\!\dd t\,
+        e^{i\Hop t/\hbar}\, \Vop\, e^{-i\Hzero t/\hbar} \ket{\Phi}.
+  \label{eq:ch01-moller-deriv}
+\end{align}
+为让 $t \to -\infty$ 处时间积分收敛，加入绝热因子 $e^{\eta t}$（$\eta > 0$，最后取 $\eta \to 0^+$）：
+\begin{equation}
+  \Mollerp \ket{\Phi}
+  = \ket{\Phi}
+    + \frac{i}{\hbar} \int_{-\infty}^{0}\!\!\dd t\,
+       e^{(i\Hop/\hbar + \eta) t}\, \Vop\, e^{-i\Hzero t/\hbar}\, \ket{\Phi}.
+  \label{eq:ch01-moller-adia}
+\end{equation}
+对 $\ket{\Phi} = \ket{\bvec{p}}$（$\Hzero \ket{\bvec{p}} = E \ket{\bvec{p}}$，$E = \bvec{p}^2/2\mu$），
+积分是初等的：
+\begin{align}
+  \statein{\bvec{p}}
+  &= \ket{\bvec{p}}
+    + \frac{i}{\hbar} \int_{-\infty}^{0}\!\!\dd t\,
+       e^{i(\Hop - E - i\hbar\eta) t/\hbar}\, \Vop\, \ket{\bvec{p}}                                    \notag \\
+  &= \ket{\bvec{p}}
+    + \frac{1}{E - \Hop + i\hbar\eta}\, \Vop\, \ket{\bvec{p}}                                          \notag \\
+  &= \ket{\bvec{p}} + \Gop(E^+)\, \Vop\, \ket{\bvec{p}},
+  \label{eq:ch01-LS-on-state-G}
+\end{align}
+其中我们记
+\begin{equation}
+  \Gop(E^+) := \lim_{\eta \to 0^+} \frac{1}{E - \Hop + i\hbar\eta},
+  \qquad
+  \Gzero(E^+) := \lim_{\eta \to 0^+} \frac{1}{E - \Hzero + i\hbar\eta}.
+  \label{eq:ch01-Gdef}
+\end{equation}
+（注：$E^+$ 中“$+$”特指 $E + i\eps$ 上极限，对应推迟 Green 函数；
+完全类似地，$\stateout{\bvec{p}}$ 由 $E^- = E - i\eps$ 给出超前 Green 函数。
+此处出现的 $i\eps$ 处方是数值实现里所有奇异性的物理来源，详见 \cref{sec:ch01-pitfalls}。）
+
+利用恒等式 $\Gop = \Gzero + \Gzero \Vop \Gop$（即 \textbf{Dyson 方程}，其推导见 \cref{lemma:ch01-dyson}），
+\cref{eq:ch01-LS-on-state-G} 可写成对自由 Green 函数的迭代形式：
+\begin{equation}
+  \statein{\bvec{p}} = \ket{\bvec{p}} + \Gzero(E^+)\, \Vop\, \statein{\bvec{p}}.
+  \label{eq:ch01-LS-on-state}
+\end{equation}
+\cref{eq:ch01-LS-on-state} 即\textbf{ Lippmann--Schwinger 方程}的态向量形式。
+
+\begin{lemma}[Dyson 等式]\label{lemma:ch01-dyson}
+对任意 $E \notin \sigma(\Hop) \cup \sigma(\Hzero)$，
+\begin{equation}
+  \Gop(E) = \Gzero(E) + \Gzero(E)\, \Vop\, \Gop(E)
+          = \Gzero(E) + \Gop(E)\, \Vop\, \Gzero(E).
+  \label{eq:ch01-dyson}
+\end{equation}
+\end{lemma}
+\begin{proof}
+由 $\Gop = (E - \Hop)^{-1} = (E - \Hzero - \Vop)^{-1}$ 与 $\Gzero = (E - \Hzero)^{-1}$，
+直接乘法验证：
+\begin{align*}
+  (E - \Hzero - \Vop)\, \Gzero\, &= 1 - \Vop\, \Gzero,\\
+  \Rightarrow \Gop\, (E - \Hzero - \Vop)\, \Gzero &= \Gop - \Gop\, \Vop\, \Gzero,\\
+  \Rightarrow \Gzero &= \Gop - \Gop\, \Vop\, \Gzero,
+\end{align*}
+最后一步用了 $\Gop (E - \Hzero - \Vop) = 1$。
+重排即得 $\Gop = \Gzero + \Gop \Vop \Gzero$；左右形式由对称论证给出。
+\end{proof}
+
+\subsection{T-算符与算符形式的 LS 方程}
+
+现在我们把对态的方程“去掉”，提取出与态无关的算符方程。
+\textbf{定义 \refstepcounter{definition}\thedefinition\label{def:ch01-Top}（T-算符）}：
+\begin{equation}
+  \Top(E) := \Vop + \Vop\, \Gop(E)\, \Vop
+          \quad\Longleftrightarrow\quad
+   \Top(E)\,\ket{\bvec{p}} = \Vop\, \statein{\bvec{p}} \quad (\text{当 } E = \bvec{p}^2/2\mu).
+  \label{eq:ch01-Tdef}
+\end{equation}
+将 $\Gop = \Gzero + \Gzero \Vop \Gop$（\cref{eq:ch01-dyson}）代入定义：
+\begin{align}
+  \Top(E) &= \Vop + \Vop\,(\Gzero + \Gzero \Vop \Gop)\, \Vop                              \notag \\
+          &= \Vop + \Vop\, \Gzero\, \Vop + \Vop\, \Gzero\, \Vop\, \Gop\, \Vop             \notag \\
+          &= \Vop + \Vop\, \Gzero\, (\Vop + \Vop\, \Gop\, \Vop)                           \notag \\
+          &= \Vop + \Vop\, \Gzero(E)\, \Top(E).
+  \label{eq:ch01-LS-op}
+\end{align}
+这就是\textbf{算符形式的 LS 方程}。
+完全平行地，从右乘可以推出对偶形式 $\Top = \Vop + \Top\, \Gzero\, \Vop$。
+两者等价，因为它们都是 $\Top$ 的不动点方程，且解唯一（在 $E \notin \sigma(\Hop)$ 时）。
+
+\subsection{S-矩阵与 T-矩阵的关系}
+
+按 \cref{eq:ch01-Spp} 与 \cref{def:ch01-in-out}，
+\begin{equation}
+  S_{\bvec{p}'\bvec{p}}
+  = \braket{\bvec{p}'^{(-)}}{\bvec{p}^{(+)}}
+  = \matrixel{\bvec{p}'}{\Mollerm^{\dagger}\,\Mollerp}{\bvec{p}}.
+  \label{eq:ch01-Sdef-elem}
+\end{equation}
+利用 $\statein{\bvec{p}} = \Mollerp\ket{\bvec{p}}$、$\stateout{\bvec{p}} = \Mollerm\ket{\bvec{p}}$
+与对应的 LS 方程，
+\begin{equation}
+  \stateout{\bvec{p}'} = \ket{\bvec{p}'} + \Gzero(E^-)\, \Vop\, \stateout{\bvec{p}'},
+\end{equation}
+取共轭并使用 $[\Gzero(E^-)]^{\dagger} = \Gzero(E^+)$、
+$\matrixel{\stateout{\bvec{p}'}}{\Vop}{\bvec{p}} = \matrixel{\bvec{p}'}{\Top^{\dagger}(E)}{\bvec{p}}^*$ 等若干步，
+经标准代数（见 Glöckle \cite{Glockle1983} §3.1）得
+\begin{equation}
+  S_{\bvec{p}'\bvec{p}}
+  = \delta^{(3)}(\bvec{p}' - \bvec{p})
+    - 2\pi i\, \delta(E_{p'} - E_p)\, T_{\bvec{p}'\bvec{p}}(E_p),
+  \qquad
+  T_{\bvec{p}'\bvec{p}}(E) := \matrixel{\bvec{p}'}{\Top(E)}{\bvec{p}}.
+  \label{eq:ch01-S-T-relation}
+\end{equation}
+\cref{eq:ch01-S-T-relation} 是连接“理论上 $\Top$ 矩阵元”与“实验上散射振幅”的桥梁。
+\textbf{关键提醒}：仅当能量 $E_p = E_{p'}$ 时，T-矩阵的 $\delta$-函数限制把它“推到 on-shell 面”，
+即 $|\bvec{p}'| = |\bvec{p}|$。
+LS 方程本身却允许我们求解整个 off-shell T-矩阵，
+这一点在第 \ref{ch:02_two_body_numerics} 章数值化时是关键：
+积分 $\int \dd^3 q\, \matrixel{\bvec{p}'}{\Vop}{\bvec{q}}\, \Gzero(\bvec{q})\, \matrixel{\bvec{q}}{\Top}{\bvec{p}}$
+对 $|\bvec{q}|$ 必须扫遍 $[0, \infty)$，而不仅仅是 on-shell $|\bvec{q}| = |\bvec{p}|$。
+
+\subsection{不同能量参数下的 LS 方程：束缚态 vs. 散射态}
+
+\cref{eq:ch01-LS-op} 是关于复变量 $E$ 的算符方程，
+不同的 $E$ 取法物理上对应不同问题：
+\begin{itemize}
+  \item $E = E_p + i\eps$，$E_p > 0$：散射问题（推迟 Green 函数，决定 \texttt{src/core/resolvent/} 模块中 $\Gzero^+$ 的符号）；
+  \item $E = E_p - i\eps$，$E_p > 0$：时间反向散射（超前 Green 函数）；
+  \item $E = -B < 0$：束缚态问题，$\Gzero(E)$ 解析、$\Top(E)$ 在束缚态处出现极点；
+        氘核束缚能 $\Ed = \SI{2.22457}{MeV}$ 时 $E = -\Ed$ 对应 $\Top$ 的极点位置；
+  \item $E$ 在复平面其它点：解析延拓，是 Padé 加速 (\cref{ch:11_faddeev_solver}) 的几何依据。
+\end{itemize}
+所有这些情况共享同一个算符方程 \cref{eq:ch01-LS-op}，差别仅在 $\Gzero(E)$ 的具体形式。
+
+\subsection{Galilei-boost 不变性的简短讨论}
+
+在非相对论极限下，
+$\Hzero = \hat{\bvec{p}}^2/2\mu$ 中的 $\hat{\bvec{p}}$ 是\textbf{相对动量}算符，
+而非两粒子在实验室系中的总动量
+$\hat{\bvec{P}} = \hat{\bvec{p}}_1 + \hat{\bvec{p}}_2$。
+两粒子系统总动量与相对动量解耦：
+\begin{equation}
+  \hat{\bvec{p}}_1 = \tfrac{m_1}{M}\hat{\bvec{P}} + \hat{\bvec{p}}, \qquad
+  \hat{\bvec{p}}_2 = \tfrac{m_2}{M}\hat{\bvec{P}} - \hat{\bvec{p}}, \qquad
+  M = m_1 + m_2.
+  \label{eq:ch01-relative-mom}
+\end{equation}
+质心动能 $\hat{\bvec{P}}^2/2M$ 与 $\Vop$ 对易，
+故所有散射理论结果均在质心系（$\hat{\bvec{P}} = 0$）中陈述，
+这一点 Tic-tac 内部一致——
+\texttt{find\_on\_shell\_bins()} 和 \texttt{kinematic\_transformations.cpp}
+负责把实验室能量 $\Tlab$ 转化为质心系动能 $\Tcm$ 与相对动量 $p_{\text{rel}}$。
+具体的 $\Tlab \leftrightarrow p_{\text{rel}}$ 公式见附录 A，
+本章不再展开。
+
+% ---------------------------------------------------------------------
+\section{离散化方案：从算符到动量空间核}
+\label{sec:ch01-discrete}
+
+LS 方程 \cref{eq:ch01-LS-op} 是抽象算符方程；
+要数值求解，需将算符表示在某组基上。
+最自然的选择是\textbf{动量本征态 $\{\ket{\bvec{p}}\}$}，
+其完备性
+$\int \dd^3 \bvec{p}\, \ketbra{\bvec{p}}{\bvec{p}} = \identity$
+直接给出
+\begin{equation}
+  \matrixel{\bvec{p}'}{\Top(E)}{\bvec{p}}
+  = \matrixel{\bvec{p}'}{\Vop}{\bvec{p}}
+   + \int \dd^3\bvec{q}\;
+       \frac{\matrixel{\bvec{p}'}{\Vop}{\bvec{q}}\, \matrixel{\bvec{q}}{\Top(E)}{\bvec{p}}}
+            {E - q^2/2\mu + i\eps}.
+  \label{eq:ch01-LS-momentum}
+\end{equation}
+本章讨论到此为止；接下来在第 \ref{ch:02_two_body_numerics} 章
+\begin{enumerate}
+  \item 利用旋转不变性把 \cref{eq:ch01-LS-momentum} 投影到部分波 $\matrixel{p'}{T_{\ell}(E)}{p}$；
+  \item 选择一组动量节点 $\{p_i\}$ 和权重 $\{w_i\}$ 把积分化为有限求和；
+  \item 最终得到 $N \times N$ 矩阵方程 $T = V + V G_0 T \Rightarrow T = (1 - V G_0)^{-1} V$。
+\end{enumerate}
+
+% ---------------------------------------------------------------------
+\section{算法骨架：LS 方程的求解模式}
+\label{sec:ch01-algo}
+
+在数值实现里，对一个固定能量 $E$ 与固定部分波通道 $\PWchan$，
+LS 方程的求解模式有三大类：
+\begin{enumerate}
+  \item \textbf{矩阵直接法} (matrix inversion)：
+        把 $V$ 与 $G_0$ 矩阵化，
+        解线性方程 $(\identity - V G_0)\, T = V$。
+        当 $\Vop$ 短程、动量截断 $\Lambda$ 已知时，
+        矩阵规模 $N \sim 50\text{--}200$ 已经足够。
+        这是 \texttt{src/core/potential/} + \texttt{src/utils/} 的标准做法。
+  \item \textbf{Neumann 级数 + Padé 重求和}：
+        $T = V + V G_0 V + V G_0 V G_0 V + \cdots$，
+        当 Born 级数发散（强耦合或束缚态附近）时用 Padé approximant 解析延拓。
+        Tic-tac 在三体 Faddeev 求解器中采用此法（第 \ref{ch:11_faddeev_solver} 章），
+        两体 LS 一般不必。
+  \item \textbf{Kowalski--Noyes 分离方法}：
+        把 on-shell 与 off-shell 解耦，
+        历史上由 Kowalski 提出 \cite{KowalskiNoyes1966}，
+        Tic-tac 不直接采用，但其思想见于 wave-packet 离散里 on-shell bin 的定位（第 \ref{ch:06_wp_swp_states} 章）。
+\end{enumerate}
+
+\begin{algorithm}[H]
+  \caption{两体 LS 方程在固定能量 $E$、固定部分波 $(\ell, s, j)$ 上的求解（矩阵直接法骨架）}
+  \label{alg:ch01-LS-solve}
+  \KwIn{部分波势函数 $V_{\ell\ell'}^{(j,s)}(p', p)$；动量网格 $\{p_i, w_i\}_{i=1}^{N}$；能量 $E$}
+  \KwOut{部分波 T-矩阵元 $T_{\ell\ell'}^{(j,s)}(p', p; E)$}
+  \For{$i, j \leftarrow 1$ \KwTo $N$}{
+     $V_{ij} \leftarrow V_{\ell\ell'}^{(j,s)}(p_i, p_j)$\;
+     $G^0_{jj} \leftarrow w_j\, p_j^2 / (E - p_j^2/2\mu + i\eps)$ （含 Cutkosky 主值处理，详见第 \ref{ch:02_two_body_numerics} 章）\;
+  }
+  $A \leftarrow \identity - V G^0$（矩阵乘）\;
+  $T \leftarrow A^{-1} V$（LU 分解或 GSL 直接求逆）\;
+  \Return $T$\;
+\end{algorithm}
+
+% ---------------------------------------------------------------------
+\section{代码落地：两体势作为可插拔模型}
+\label{sec:ch01-code}
+
+LS 方程的“原始数据”——
+两体势矩阵元 $\matrixel{\bvec{p}'}{\Vop}{\bvec{p}}$
+在 Tic-tac 中由抽象基类 \texttt{potential\_model} 给出。
+所有具体势模型（chiral LO/N2LOopt/Idaho-N3LO/Nijmegen/Malfliet--Tjon）
+都继承此基类。
+该接口控制了一切下游模块对“NN 势”的访问方式，
+是本章物理算符 $\Vop$ 在代码中的唯一面孔。
+
+\textbf{接口签名} —— \texttt{src/interactions/potential\_model.h}：
+
+\lstinputlisting[style=cpp,
+  caption={抽象基类 \texttt{potential\_model}：
+            为所有 $\Vop_{NN}$ 模型提供统一的 PW 矩阵元入口。
+            关键虚函数 \texttt{V(...)} 在给定动量 $(p_{\text{in}}, p_{\text{out}})$、
+            $(L, L', S, J, T, T_z)$ 量子数下，
+            返回 6 个分量的数组 \texttt{Varray[6]}（无耦合 1 个 + 耦合 4 个 + 占位 1 个）。},
+  label={lst:ch01-potential-model-h}]
+  {code_excerpts/snippets/ch01_potential_model_h.cpp}
+
+\textbf{工厂函数} —— \texttt{src/interactions/potential\_model.cpp}：
+不同的 \texttt{run\_parameters.potential\_model} 字符串路由到不同子类。
+
+\lstinputlisting[style=cpp,
+  caption={工厂函数 \texttt{fetch\_potential\_ptr()}：
+            根据输入文件中 \texttt{potential\_model=...} 字段路由到具体子类。
+            \texttt{LO\_internal} 是本卷数字闭环用的最简模型，
+            \texttt{N2LOopt}、\texttt{Idaho\_N3LO} 是生产级 chiral 势，
+            \texttt{nijmegen} 是 F77 经典 baseline。},
+  label={lst:ch01-potential-factory}]
+  {code_excerpts/snippets/ch01_potential_model_factory.cpp}
+
+注意 \cref{lst:ch01-potential-model-h} 里的 \texttt{V(...)} 函数签名：
+它\textbf{不直接返回 $\matrixel{p'}{\Top}{p}$}，
+而只返回 $\matrixel{p'}{\Vop}{p}$ 的 6 分量数组。
+LS 方程的求解（即从 $\Vop$ 推到 $\Top$）是\textbf{下游模块的责任}：
+\begin{itemize}
+  \item 在两体 NN 系统中，
+    第 \ref{ch:02_two_body_numerics} 章会给出明确的矩阵直接法实现；
+  \item 在三体 NNN 系统中，
+    Tic-tac 把 LS 求解“化掉”，
+    直接把 $\Vop$ 嵌入 wave-packet 基（第 \ref{ch:08_potential_matrix} 章），
+    再走 Faddeev 求解器（第 \ref{ch:11_faddeev_solver} 章）。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{数字闭环：LO\_internal 势的一个动量评估}
+\label{sec:ch01-numerical}
+
+为让读者立刻看到 $\matrixel{p'}{\Vop}{p}$ 不是抽象符号、
+而是一组真实的浮点数，
+我们用 \texttt{LO\_internal} 模型在 $^{1}S_0$ 通道（$L = L' = 0$, $S = 0$, $J = 0$, $T = 1$）上做一个 spot evaluation。
+
+\begin{numericalbox}
+\textbf{场景}：chiral LO 内置势 \texttt{LO\_internal}，
+$\Lambda = \SI{450}{MeV}$，$C_{1S0} = -1.12927 \times 10^{-3}\,\si{MeV^{-2}}$
+（来自 \texttt{include/constants.h}）。
+
+\textbf{部分波}：$^{1}S_0$（$L = L' = 0, S = 0, J = 0, T = 1, T_z = 0$，即 $np$）。
+
+\textbf{评估点}：
+$p_{\text{in}} = p_{\text{out}} = \SI{100}{MeV/c}$。
+LO chiral NN 势的解析形式：
+\begin{equation}
+  V_{LO}^{1S0}(p', p)
+  = C_{1S0}\; e^{-(p^2 + p'^2)/\Lambda^2}
+  + V^{\text{OPEP}}_{1S0}(p', p),
+  \label{eq:ch01-LO-form}
+\end{equation}
+其中 $V^{\text{OPEP}}$ 是单 $\pi$-交换部分。
+对 $p = p' = 100\,\si{MeV/c}$，
+contact 部分给
+\begin{equation*}
+  V^{\text{cnt}}_{1S0} = (-1.12927\times 10^{-3})\,e^{-2(100/450)^2}
+  \approx -1.07 \times 10^{-3}\,\si{MeV^{-2}}.
+\end{equation*}
+OPEP 在 $J = 0$, $L = 0$ 通道上的 Legendre 投影积分要在代码内部完成，
+此处不展开数值（\texttt{src/interactions/OPEP.cpp} 实现），
+但其量级与 contact 相当（$\sim 10^{-4}\,\si{MeV^{-2}}$）。
+
+\textbf{可复现命令}（粗略版，依赖第 \ref{ch:02_two_body_numerics} 章具体的 driver；
+此处仅展示逻辑路径）：
+\begin{lstlisting}[style=config,basicstyle=\ttfamily\small]
+# 在 examples/ 中以 LO_internal 为势构造极小输入
+cd Tic-tac && ./build.sh release
+./CPP/run CPP/Input/input.txt potential_model=LO_internal Np_WP=20 Nq_WP=20
+# 检查 build/bin/tic-tac 输出中的 V_WP 矩阵元 (1S0 channel)
+\end{lstlisting}
+完整数值表会在第 \ref{ch:02_two_body_numerics} 章 \cref{sec:ch02-numerical}给出。
+\end{numericalbox}
+
+% ---------------------------------------------------------------------
+\section{接口与依赖}
+\label{sec:ch01-interface}
+
+本章建立的 LS 方程算符在 Tic-tac 仓库中没有“一个文件、一个函数”的直接对应，
+因为它的角色是\textbf{物理基础设施}：
+\begin{itemize}
+  \item \textbf{上游接收}：\texttt{src/interactions/} 下的所有
+        \texttt{potential\_model} 子类
+        提供 $\matrixel{p'}{\Vop}{p}$ 的具体函数。
+  \item \textbf{下游输出}：第 \ref{ch:02_two_body_numerics} 章的
+        $\matrixel{p'}{\Top(E)}{p}$ 与 wave-packet 矩阵
+        $\matrixel{x_i}{\Vop}{x_j}$（第 \ref{ch:08_potential_matrix} 章），
+        通过 LS 解析关系绑定 $\Vop$ 与 $\Top$。
+  \item \textbf{对等模块}：自由 Green 函数 $\Gzero$ 在 wave-packet 基上的实现见
+        第 \ref{ch:10_resolvent} 章 \texttt{src/core/resolvent/}；
+        $i\eps$ 处方在那里以离散化形式（"R+Q decomposition"）出现。
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=10mm and 14mm,
+  every node/.style={font=\small},
+  module/.style={draw, rounded corners, minimum width=30mm, minimum height=10mm, align=center, fill=blue!5},
+  data/.style={draw, dashed, rounded corners, minimum width=30mm, minimum height=8mm, align=center, fill=yellow!10},
+]
+  \node[module] (V) {物理 $\Vop$ \\ \texttt{interactions/}};
+  \node[data, right=of V] (matrix) {$\matrixel{p'}{\Vop}{p}$ \\ 数值核};
+  \node[module, right=of matrix] (LS) {LS 求解 \\ (\cref{ch:02_two_body_numerics})};
+  \node[data, right=of LS] (T) {$\matrixel{p'}{\Top(E)}{p}$};
+  \node[module, below=of LS] (Faddeev) {Faddeev/AGS \\ (\cref{ch:04_faddeev_ags})};
+
+  \draw[->] (V) -- (matrix);
+  \draw[->] (matrix) -- (LS);
+  \draw[->] (LS) -- (T);
+  \draw[->] (T) -- (Faddeev);
+  \draw[->] (matrix) -- (Faddeev);
+\end{tikzpicture}
+\caption{LS 方程在 Tic-tac 中的位置：本章建立 $\Vop \to \Top$ 的算符级关系，下游既可直接用 $\Top$ 比较 NN 散射相移，也可绕过显式 $\Top$ 把 $\Vop$ 直接喂给 Faddeev 求解器（这是 Tic-tac 的实际选择）。}
+\label{fig:ch01-interface}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\section{常见陷阱}
+\label{sec:ch01-pitfalls}
+
+\begin{pitfallbox}
+\textbf{陷阱 1：$i\eps$ 的符号错误等于时间反向。}\\
+LS 方程对入态使用 $\Gzero(E + i\eps)$（推迟），
+对出态使用 $\Gzero(E - i\eps)$（超前）。
+若代码里把 $i\eps$ 符号写反，
+得到的 $\Top$ 矩阵元的复共轭关系被破坏，
+散射相移的虚部出现负号，
+S-矩阵不再幺正。
+在 \texttt{src/core/resolvent/} 模块中 \texttt{epsilon\_principal\_value\_real}
+变量必须是\textbf{严格正数}，
+对应 $E + i\eps$ 上极限。
+历史上 Sean 论文的 fork 版本里有一个误把 $\eps$ 取作复值的写法，
+导致 Padé 收敛序列出现假极点；
+当前 Tic-tac 的写法已修正。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 2：能量约定 $E_{\text{cm}}$ vs $\Tlab$。}\\
+LS 方程里 $E$ 是\textbf{两体相对系总能量}（含动能），
+而非任何一方在实验室系的动能 $\Tlab$。
+对 $np$ 系统：
+$E = T_{\text{cm}} = (1/2)\,\mu\, v_{\text{rel}}^2 = (M_n / (M_n + M_p))\, \Tlab$
+（非相对论近似），不是 $\Tlab$ 本身。
+Tic-tac 的输入文件接受 $\Tlab$，
+内部由 \texttt{find\_on\_shell\_bins()} 函数完成转换；
+但读者在手算 sanity check 时极易忘掉这个 $1/2$ 因子，
+导致截面相差 4 倍。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 3：T-矩阵的 on-shell $\delta$-函数被误写成离散差。}\\
+\cref{eq:ch01-S-T-relation} 中 $\delta(E_{p'} - E_p)$ 是连续 Dirac $\delta$，
+在动量空间归一化下需要乘以 $4 p \mu$ 才能化为 $\delta(p' - p)$；
+在 wave-packet 离散化（第 \ref{ch:05_wpcd_math} 章）里它变成 Kronecker $\delta_{ij}$ 加上一个 bin 宽度因子。
+若读者直接把连续 $\delta$ 替换为 $\delta_{ij}$ 而忘掉 Jacobi 因子 $4p\mu$，
+phase shift 会差一个常数因子。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 4：对耦合道的 $\Top$ 用错符号约定。}\\
+$3S_1$--$3D_1$ 等张量耦合道里，
+关于 $V_{\ell\ell'}$ 的非对角元符号有两种约定（Stapp 与 Blatt 各一套）。
+Tic-tac 内部沿用 Sean 选定的约定（\texttt{extract\_potential\_element\_from\_array()} 中 \texttt{sgn = -1}），
+若把 \texttt{sgn} 改作 $+1$ 就退化到束缚态 benchmark 用的约定，
+两体相移会通过，
+但混合相位 $\eps_1$ 的符号反掉，
+张量极化观测量符号全错。
+此细节将在第 \ref{ch:02_two_body_numerics} 章 \cref{sec:ch02-code} 重新讨论。
+\end{pitfallbox}

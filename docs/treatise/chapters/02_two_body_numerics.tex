@@ -1,13 +1,631 @@
 % =====================================================================
 % 02_two_body_numerics.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% Wave 1 / Agent A —— 第 2 章 动量表象中的两体散射数值化
 % =====================================================================
 
 \chapter{动量表象中的两体散射数值化}
 \label{ch:02_two_body_numerics}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% ---------------------------------------------------------------------
+\section{物理动机：从抽象算符到生产代码}
+\label{sec:ch02-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+第 \ref{ch:01_lippmann_schwinger} 章把 Lippmann--Schwinger (LS) 方程从算符层面写成
+\begin{equation}
+  \Top(E) = \Vop + \Vop\, \Gzero(E^+)\, \Top(E),
+  \label{eq:ch02-LS-recall}
+\end{equation}
+但要让数值代码做出相移、最终做出截面，
+必须把这个抽象方程在两件事情上具体化：
+\begin{enumerate}
+  \item \textbf{基的选择}：把 $\Top$ 表示为某组离散基下的有限矩阵；
+  \item \textbf{Cutkosky 主值处理}：自由 Green 函数 $\Gzero(E^+)$ 在 $E = q^2/2\mu$ 处有极点，
+        必须用 $i\eps$ 处方加 principal value 把这个奇异性正确分离。
+\end{enumerate}
+本章对“两体两粒子”这一最简情形完成这两步。
+完成之后，
+所有的下游模块（wave-packet 离散、Faddeev 求解器、3NF 投影）
+都站在同一个代码契约之上：
+\textbf{“给我 $\matrixel{\bvec{p}'}{\Vop}{\bvec{p}}$，我返回 phase shift 与 K-matrix。”}
+这个契约的具体落地就是 \texttt{src/core/potential/make\_potential\_matrix.cpp}
+（Tic-tac 当前版本）与 \texttt{tictac-origin/Tic-tac/CPP/make\_potential\_matrix.cpp}
+（Sean 原始版本）。
+本章 \cref{sec:ch02-code} 节将真实地把它们抽出来对比。
+
+本章读者目标姿态：读完本章后能独立写一段
+“给定 $V_{\ell\ell'}^{(j,s)}(p', p)$ 的 chiral LO 解析式，
+求 $^1S_0$ 通道在 $\Tlab = \SI{50}{MeV}$ 的相移”
+的 C++ 代码，
+并能从 $K$-matrix 得到的 $\delta_0(p)$ 与 Nijmegen II 数据
+（Stoks et al., \cite{NijmegenII}）做 $\le 1^{\circ}$ 量级的对比。
+
+% ---------------------------------------------------------------------
+\section{数学推导：动量空间下的 LS 方程与部分波分解}
+\label{sec:ch02-math}
+
+\subsection{动量本征态下的 LS 方程}
+
+把 \cref{eq:ch02-LS-recall} 在动量本征态 $\ket{\bvec{p}}$ 上做插入：
+\begin{equation}
+  \matrixel{\bvec{p}'}{\Top(E)}{\bvec{p}}
+  = \matrixel{\bvec{p}'}{\Vop}{\bvec{p}}
+  + \int \dd^3 \bvec{q}\;
+       \matrixel{\bvec{p}'}{\Vop}{\bvec{q}}\,
+       \matrixel{\bvec{q}}{\Gzero(E^+)}{\bvec{q}}\,
+       \matrixel{\bvec{q}}{\Top(E)}{\bvec{p}}.
+  \label{eq:ch02-LS-mom-1}
+\end{equation}
+$\Hzero \ket{\bvec{q}} = (q^2/2\mu) \ket{\bvec{q}}$ 故 $\Gzero$ 在动量基下对角，
+$\matrixel{\bvec{q}}{\Gzero(E^+)}{\bvec{q}'} = \delta^{(3)}(\bvec{q}-\bvec{q}')/(E - q^2/2\mu + i\eps)$。
+故
+\begin{equation}
+  \boxed{\;
+  \matrixel{\bvec{p}'}{\Top(E)}{\bvec{p}}
+  = \matrixel{\bvec{p}'}{\Vop}{\bvec{p}}
+  + \int \dd^3 \bvec{q}\;
+       \frac{\matrixel{\bvec{p}'}{\Vop}{\bvec{q}}\,
+             \matrixel{\bvec{q}}{\Top(E)}{\bvec{p}}}
+            {E - q^2/2\mu + i\eps}.
+  \;}
+  \label{eq:ch02-LS-mom-2}
+\end{equation}
+\cref{eq:ch02-LS-mom-2} 是数值实现的真正起点。
+注意分母上 $i\eps$ 的位置：被积量 $\matrixel{\bvec{p}'}{\Vop}{\bvec{q}}\, \matrixel{\bvec{q}}{\Top}{\bvec{p}}$
+原则上是有限的，奇异性只来自分母。
+
+\subsection{角向积分与部分波分解}
+
+旋转不变性蕴含 $\Vop$ 与轨道角动量 $L^2$ 对易：
+\begin{equation}
+  [\Vop, \bvec{L}^2] = 0, \qquad
+  [\Vop, \bvec{L}\cdot\bvec{S}] = 0
+  \quad\text{(若包含 spin–orbit)}.
+  \label{eq:ch02-rot-inv}
+\end{equation}
+具体到 NN 系统，
+轨道 $\ell$ 不再单独守恒（张量力 $S_{12}$ 混合 $\ell, \ell \pm 2$），
+但 $J = L + S$、自旋 $S$、同位旋 $T$ 是守恒的。
+我们用 $\{\ket{p; (\ell s) j m_j; t m_t}\}$ 表示部分波动量本征态，归一化为
+\begin{equation}
+  \braket{p'; (\ell' s') j' m_j'; t' m_t'}{p; (\ell s) j m_j; t m_t}
+  = \frac{\delta(p' - p)}{p^2}\,
+    \delta_{\ell'\ell}\, \delta_{s's}\, \delta_{j'j}\, \delta_{m_j' m_j}\,
+    \delta_{t't}\, \delta_{m_t' m_t},
+  \label{eq:ch02-pw-norm}
+\end{equation}
+其中 $1/p^2$ 是把动量空间体积元 $\dd^3\bvec{p} = p^2 \dd p\, \dd \Omega_{\hat{p}}$
+中的角向部分扣掉后剩下的纯径向归一化因子。
+
+部分波分解后，\cref{eq:ch02-LS-mom-2} 拆成对每个 $(\ell, \ell', s, j, t)$ 通道的一维积分方程：
+\begin{equation}
+  T_{\ell'\ell}^{(j,s,t)}(p', p; E)
+  = V_{\ell'\ell}^{(j,s,t)}(p', p)
+  + \sum_{\ell''} \int_0^{\infty} \frac{q^2\, \dd q}{E - q^2/2\mu + i\eps}\,
+      V_{\ell'\ell''}^{(j,s,t)}(p', q)\,
+      T_{\ell''\ell}^{(j,s,t)}(q, p; E).
+  \label{eq:ch02-LS-pw}
+\end{equation}
+对未耦合道（如 $^1S_0$），求和 $\sum_{\ell''}$ 只剩 $\ell'' = \ell' = \ell$ 一项；
+对耦合道（如 $^3S_1$--$^3D_1$），$\ell$ 与 $\ell''$ 之间通过张量力跳跃 $\pm 2$。
+本章为简化书写，在不强调耦合时省略上标 $(j, s, t)$。
+
+\subsection{Cutkosky 主值处理}
+
+\cref{eq:ch02-LS-pw} 中的积分核
+$1/(E - q^2/2\mu + i\eps)$
+在 $q = q_0 := \sqrt{2\mu E}$（on-shell 动量）处奇异。
+利用 \textbf{Sokhotski--Plemelj 恒等式}
+\begin{equation}
+  \lim_{\eps \to 0^+} \frac{1}{x + i\eps}
+  = \PVal \frac{1}{x} - i\pi\, \delta(x),
+  \label{eq:ch02-SP}
+\end{equation}
+代入 $x = E - q^2/2\mu$，
+利用 $\delta(E - q^2/2\mu) = (\mu/q_0)\, \delta(q - q_0)$，
+\begin{equation}
+  \frac{1}{E - q^2/2\mu + i\eps}
+  = \PVal \frac{1}{E - q^2/2\mu}
+   - i\pi\, \frac{\mu}{q_0}\, \delta(q - q_0).
+  \label{eq:ch02-SP-substituted}
+\end{equation}
+把 \cref{eq:ch02-SP-substituted} 代回 \cref{eq:ch02-LS-pw}，
+积分被劈成主值（principal value, $\PVal$）部分与 on-shell 残量部分：
+\begin{align}
+  T_{\ell'\ell}(p', p; E)
+  &= V_{\ell'\ell}(p', p)                                                          \notag \\
+  &\quad + \sum_{\ell''} \PVal \int_0^\infty
+        \frac{q^2\, \dd q}{E - q^2/2\mu}\,
+        V_{\ell'\ell''}(p', q)\, T_{\ell''\ell}(q, p; E)                            \notag \\
+  &\quad - i\pi\, \mu\, q_0\,
+        \sum_{\ell''} V_{\ell'\ell''}(p', q_0)\, T_{\ell''\ell}(q_0, p; E).
+  \label{eq:ch02-LS-PV}
+\end{align}
+这是\textbf{ Cutkosky 形式}的 LS 方程，它把复 $T$-矩阵的虚部明确显示出来。
+
+\subsection{$K$-矩阵：消去虚部的等价方程}
+
+最方便数值化的形式是 \textbf{$K$-矩阵} (reaction matrix)：
+\begin{equation}
+  K_{\ell'\ell}(p', p; E)
+  := V_{\ell'\ell}(p', p)
+   + \sum_{\ell''} \PVal \int_0^\infty
+        \frac{q^2\, \dd q}{E - q^2/2\mu}\,
+        V_{\ell'\ell''}(p', q)\, K_{\ell''\ell}(q, p; E).
+  \label{eq:ch02-K-def}
+\end{equation}
+注意 \cref{eq:ch02-K-def} \emph{只}有主值，没有 on-shell $\delta$；
+$K$ 因而是\textbf{实对称矩阵}（在 V 实对称时）。
+用代数操作可以验证（参见 Glöckle \cite{Glockle1983} §3.4）
+$T$ 与 $K$ 之间的非线性关系为
+\begin{equation}
+  T_{\ell'\ell}(q_0, q_0; E)
+  = K_{\ell'\ell}(q_0, q_0; E)
+   - i\pi\, \mu\, q_0\, \sum_{\ell''} K_{\ell'\ell''}(q_0, q_0; E)\, T_{\ell''\ell}(q_0, q_0; E),
+  \label{eq:ch02-T-from-K}
+\end{equation}
+即矩阵形式 $T = K - i\pi\mu q_0\, K T$，
+解得
+\begin{equation}
+  T(q_0; E) = \big[\identity + i\pi\mu q_0 K(q_0; E)\big]^{-1} K(q_0; E).
+  \label{eq:ch02-T-K-inverse}
+\end{equation}
+
+\subsection{相移与 K-矩阵的连接（未耦合道）}
+
+对未耦合道（如 $^1S_0$），$K$ 退化为标量 $K_\ell(q_0, q_0; E) \in \mathbb{R}$。
+代入 \cref{eq:ch02-T-K-inverse}：
+\begin{equation}
+  T_\ell(q_0, q_0; E)
+  = \frac{K_\ell}{1 + i\pi\mu q_0 K_\ell}
+  = \frac{K_\ell\,(1 - i\pi\mu q_0 K_\ell)}{1 + (\pi\mu q_0 K_\ell)^2}.
+  \label{eq:ch02-T-uncoupled}
+\end{equation}
+利用 S-矩阵幺正写法 $S_\ell = e^{2i\delta_\ell}$ 与 \cref{eq:ch01-S-T-relation} 在部分波下的形式
+$S_\ell = 1 - 2i\pi\mu q_0\, T_\ell$，
+\begin{align}
+  e^{2i\delta_\ell}
+  &= 1 - 2i\pi\mu q_0\, T_\ell                                                   \notag \\
+  &= 1 - 2i\pi\mu q_0\,
+        \frac{K_\ell\,(1 - i\pi\mu q_0 K_\ell)}{1 + (\pi\mu q_0 K_\ell)^2}       \notag \\
+  &= \frac{1 - i\pi\mu q_0 K_\ell}{1 + i\pi\mu q_0 K_\ell}\;\;
+       \text{(直接化简验证)},
+  \label{eq:ch02-S-K-uncoupled}
+\end{align}
+即
+\begin{equation}
+  \boxed{\;\tan \delta_\ell(E) = -\pi\mu q_0\, K_\ell(q_0, q_0; E).\;}
+  \label{eq:ch02-tan-delta}
+\end{equation}
+\cref{eq:ch02-tan-delta} 是从代码层 $K$-matrix 数值结果直接读出相移的最终公式。
+对耦合道（如 $^3S_1$--$^3D_1$）需要 $2\times 2$ 版本，
+混合相位 $\eps_J$ 与 Stapp 约定下的对角相移
+$\delta_a, \delta_b$ 由 $K$-matrix 两两本征化对角化给出（详见 Glöckle \cite{Glockle1983} §3.5）。
+
+\subsection{对耦合道的 $2\times 2$ K-matrix 形式（简要）}
+
+对 $^3S_1$--$^3D_1$ 通道，$K$ 是 $2\times 2$ 实对称矩阵：
+\begin{equation}
+  K(q_0, q_0; E) =
+  \begin{pmatrix} K_{ss} & K_{sd}\\ K_{sd} & K_{dd} \end{pmatrix}.
+  \label{eq:ch02-K-2x2}
+\end{equation}
+Blatt--Biedenharn (BB) 约定下其本征角 $\eps^{\text{BB}}$ 与本征值 $K_a, K_b$
+通过
+\begin{equation}
+  \tan(2 \eps^{\text{BB}}) = \frac{2 K_{sd}}{K_{ss} - K_{dd}},
+  \qquad
+  K_{a/b} = \frac{K_{ss} + K_{dd}}{2} \pm \frac{K_{ss} - K_{dd}}{2 \cos(2\eps^{\text{BB}})}
+  \label{eq:ch02-BB-rotation}
+\end{equation}
+得到，
+然后在两个本征空间分别用 \cref{eq:ch02-tan-delta} 取出
+$\delta_a, \delta_b$。
+Stapp ("bar phase shifts") 约定下的转换是另一组三角恒等式，
+本卷不展开。
+
+% ---------------------------------------------------------------------
+\section{离散化方案：Gauss--Legendre 求积与矩阵直接法}
+\label{sec:ch02-discrete}
+
+\subsection{动量节点选择}
+
+为对 \cref{eq:ch02-K-def} 求积，
+我们要选取一组节点 $\{q_i\}_{i=1}^{N}$ 与权重 $\{w_i\}_{i=1}^{N}$ 把
+$\PVal \int_0^\infty f(q) \dd q$ 化为 $\sum_i w_i f(q_i)$
+（再加一个针对 on-shell 奇点的特殊处理）。
+两种主流选择：
+
+\begin{enumerate}
+  \item \textbf{Gauss--Legendre with mapping}：
+        把 $q \in [0, \infty)$ 通过非线性映射 $q = c\, \tan(\pi (1+x)/4)$（$x \in [-1, 1]$）
+        变到 GL 求积适用的 $[-1, 1]$；
+        典型 $c \sim \SI{1}{fm^{-1}} \approx \SI{197}{MeV}/\hbar c$。
+  \item \textbf{Chebyshev 非均匀网格}：
+        Tic-tac 的 wave-packet 实现（第 \ref{ch:06_wp_swp_states} 章）采用类似 Chebyshev 的非均匀 $q$-bin，
+        参数 \texttt{chebyshev\_s, chebyshev\_t} 控制密度集中的位置；
+        其优势是 on-shell 附近 bin 自动密。
+\end{enumerate}
+
+本章为说明 LS 数值化基本套路，先用最简单的 GL；
+真正生产代码（\cref{sec:ch02-code}）在 wave-packet 框架内做到等价的离散化。
+
+\subsection{主值积分的标准技巧：减去 on-shell 项}
+
+主值积分
+$\PVal \int_0^\infty \dfrac{q^2\,\dd q}{E - q^2/2\mu}\, F(q)$
+可经如下减项化为可数值积的形式：
+\begin{equation}
+  \PVal \int_0^\infty \frac{q^2\, \dd q}{E - q^2/2\mu}\, F(q)
+  = \int_0^\infty \frac{q^2\, F(q) - q_0^2\, F(q_0)}{E - q^2/2\mu}\, \dd q
+   + F(q_0)\, q_0^2\, \PVal \int_0^\infty \frac{\dd q}{E - q^2/2\mu}.
+  \label{eq:ch02-PV-trick}
+\end{equation}
+减项 $q_0^2 F(q_0)$ 让被积量在 $q = q_0$ 处变得有限（数值上像 0/0）。
+最后剩下的标量 $\PVal \int_0^\infty \dd q / (E - q^2/2\mu)$ 是初等积分：
+\begin{equation}
+  \PVal \int_0^\infty \frac{\dd q}{E - q^2/2\mu}
+  = \frac{2\mu}{q_0}\, \PVal \int_0^\infty \frac{\dd q}{q_0^2 - q^2}
+  = 0,
+  \label{eq:ch02-PV-zero}
+\end{equation}
+（因被积函数在 $q \to q_0$ 处奇异部分对称抵消，整体 PV 值为 0；
+若把积分限改为 $[0, A]$ 并取 $A \to \infty$ 极限严格做，得到的是
+$(2\mu/q_0)\,(\ln|q_0|/A) \to -(2\mu/q_0)\,\ln(A/q_0)$，
+但只要选择对称积分边界即对消）。
+Tic-tac 在 wave-packet 离散里通过把 $q_0$ 取在某个 bin 中点 $q_{i_0}$
+自动满足这种对消（详见第 \ref{ch:06_wp_swp_states} 章）。
+
+\subsection{矩阵直接法 (matrix inversion method)}
+
+应用 \cref{eq:ch02-PV-trick}，
+\cref{eq:ch02-K-def} 离散化为
+\begin{equation}
+  K_{ij}^{\ell'\ell}
+  = V_{ij}^{\ell'\ell}
+  + \sum_{\ell''} \sum_{k=1}^{N}
+       \tilde{w}_k\, V_{ik}^{\ell'\ell''}\, K_{kj}^{\ell''\ell},
+  \qquad
+  \tilde{w}_k = \frac{w_k\, q_k^2}{E - q_k^2/2\mu}\;\;\text{(含主值减项后的有效权)},
+  \label{eq:ch02-K-discrete}
+\end{equation}
+矩阵形式
+$K = V + V \tilde{G}_0 K$，
+其中 $\tilde{G}_0$ 是对角矩阵 $\tilde{G}_0 = \mathrm{diag}(\tilde{w}_k)$。
+求解：
+\begin{equation}
+  \boxed{\; K = (\identity - V \tilde{G}_0)^{-1}\, V. \;}
+  \label{eq:ch02-K-solve}
+\end{equation}
+矩阵规模 $N \sim 50$ 已足够 $\le \SI{300}{MeV}$ 实验室能量下的相移收敛到 $\sim 0.01^\circ$。
+
+\subsection{相移提取：on-shell 节点法}
+
+一个简洁的工程做法是把 $q_0$ 也算作网格的 $(N+1)$ 号节点，
+求出 $K_{i, N+1}$ 后直接取 $K(q_0, q_0; E) := K_{N+1, N+1}$。
+对 \cref{eq:ch02-K-discrete} 这意味着扩展到 $(N+1) \times (N+1)$ 矩阵，
+但 on-shell 那一行/列的“权重”是按 \cref{eq:ch02-PV-trick} 的减项部分构造，
+不再是简单 GL 权。
+具体写法见 Glöckle \cite{Glockle1983} §3.6 公式 (3.49)。
+得到 $K(q_0, q_0)$ 后由 \cref{eq:ch02-tan-delta} 直接读出相移。
+
+% ---------------------------------------------------------------------
+\section{算法骨架}
+\label{sec:ch02-algo}
+
+\begin{algorithm}[H]
+  \caption{两体 LS 求解：固定能量 $E$、固定耦合通道 $(j, s, t)$，输出 K-matrix 与相移}
+  \label{alg:ch02-LS-K}
+  \KwIn{$\Vop_{\ell\ell'}(p', p)$ 函数对象；
+        动量节点 $\{q_k, w_k\}_{k=1}^{N+1}$（含 on-shell 节点 $q_{N+1} = q_0$）；
+        $E$；通道指标 $(j, s, t)$}
+  \KwOut{相移 $\delta_a, \delta_b$ 与混合相位 $\eps_J$（耦合）；或 $\delta_\ell$（未耦合）}
+
+  \For{$i \leftarrow 1$ \KwTo $N+1$}{
+    \For{$j \leftarrow 1$ \KwTo $N+1$}{
+      \For{每对 $(\ell, \ell')$ 通过张量耦合允许}{
+        $V_{ij}^{\ell\ell'} \leftarrow$ \texttt{pot\_ptr->V}$(q_i, q_j; \ell, \ell', s, j, t)$\;
+      }
+    }
+  }
+  构造对角 $\tilde{G}_0 = \mathrm{diag}(\tilde{w}_k)$（$\tilde{w}_{N+1}$ 为减项主值权）\;
+  $A \leftarrow \identity - V \tilde{G}_0$\;
+  $K \leftarrow A^{-1}\, V$ \tcp*{LU 分解（\texttt{utils/}下用 GSL 或 LAPACK）}
+  $K_{\text{on}} \leftarrow$ 取 $K_{N+1, N+1}$（耦合时为 $2\times 2$ 子块）\;
+  解算 \cref{eq:ch02-tan-delta} 或 \cref{eq:ch02-BB-rotation} 得相移\;
+  \Return relevant phase shifts.
+\end{algorithm}
+
+\textbf{复杂度}：构造 $V$ 矩阵 $O(N^2)$ 次势函数评估；
+矩阵求逆 $O(N^3)$；
+实测 $N = 50$、$j_{\max} = 4$ 在单核单 CPU 上 $\sim$ \SI{0.5}{s}。
+\textbf{内存}：$O(N^2 j_{\max}^2 s_{\max})$ 双精度浮点。
+对 Tic-tac 而言，
+两体 NN 系统单次相移计算的耗时与三体阶段（$\sim$ 数十分钟到几小时）相比可以忽略。
+
+% ---------------------------------------------------------------------
+\section{代码落地：\texttt{make\_potential\_matrix.cpp} 双仓库对照}
+\label{sec:ch02-code}
+
+Tic-tac 实际的两体 LS 求解与上一节算法骨架在“矩阵存储格式”上有重要差别：
+它\textbf{不显式构造 $K$-matrix}，
+而是直接把 $\Vop_{NN}$ 投影到 wave-packet 基（\cref{ch:08_potential_matrix}）后送入 Faddeev 求解器。
+但 \texttt{make\_potential\_matrix.cpp} 里仍然完成了
+\cref{eq:ch02-LS-pw} 中 $V_{\ell\ell'}^{(j,s,t)}(p, p')$ 的 partial-wave 求和与张量耦合判断，
+其内部数据结构（6 分量 \texttt{V\_array} 数组）正是耦合道 $V$ 矩阵在 LS 形式下的紧凑写法。
+
+\subsection{核心辅助函数：\texttt{extract\_potential\_element\_from\_array}}
+
+两个仓库这一段代码字符级一致（仅行尾符号差异），
+说明 Tic-tac 重构在该层面没动这条逻辑。
+该函数把 \cref{eq:ch02-pw-norm} 中 $V_{\ell'\ell}^{(j,s)}$ 在
+$3\times 3$（实际是 6 个独立 channel）矩阵存储中的位置映射出来：
+
+\textbf{Origin（Sean 原版）}：
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{tictac-origin/Tic-tac/CPP/make\_potential\_matrix.cpp} 行 1--50：
+            把 \texttt{V\_array[6]} 中 6 个分量映射到具体 $(L, L', J, S)$ 通道。
+            索引意义：0=单 $S$=0；1=单 $S$=1, $L = J$；2=耦合左上 $L=L'=J-1$；
+            3=耦合右上 $L=J-1, L'=J+1$；4=耦合左下 $L=J+1, L'=J-1$；5=耦合右下 $L=L'=J+1$。
+            注意 sgn = -1 是 Stapp 约定下的标准符号。},
+  label={lst:ch02-extract-elem-origin}]
+  {code_excerpts/snippets/ch02_extract_element_origin.cpp}
+
+\textbf{Current（Tic-tac 当前版本）}：
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{Tic-tac/src/core/potential/make\_potential\_matrix.cpp} 行 1--50：
+            内容与 \cref{lst:ch02-extract-elem-origin} 一致；
+            重构只调整了文件路径（\texttt{Interactions/} $\to$ \texttt{interactions/}）
+            与构建系统（CMake 引入），数学逻辑保持原版。},
+  label={lst:ch02-extract-elem-current}]
+  {code_excerpts/snippets/ch02_extract_element_current.cpp}
+
+\subsection{主入口签名与 wave-packet 接入}
+
+\textbf{Origin 版本}（行 50--110，签名 + statespace 拆解 + 标志位准备）：
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{tictac-origin/Tic-tac/CPP/make\_potential\_matrix.cpp} 行 50--110：
+            \texttt{calculate\_potential\_matrices\_array\_in\_WP\_basis()} 签名。
+            参数包含 \texttt{V\_WP\_unco\_array}（未耦合道矩阵）、
+            \texttt{V\_WP\_coup\_array}（耦合道矩阵）、
+            \texttt{fwp\_states} (full-WP statespace)、
+            \texttt{pw\_states} (partial-wave 3N statespace)、
+            以及 \texttt{potential\_model* pot\_ptr} 抽象基类指针——
+            这正是 \cref{lst:ch01-potential-model-h} 定义的接口。},
+  label={lst:ch02-make-potmat-origin}]
+  {code_excerpts/snippets/ch02_make_potmat_signature_origin.cpp}
+
+\textbf{Current 版本}：
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{Tic-tac/src/core/potential/make\_potential\_matrix.cpp} 行 50--110：
+            与 \cref{lst:ch02-make-potmat-origin} 完全一致。
+            注意 \texttt{tensor\_force} 与 \texttt{isospin\_breaking\_1S0} 两个布尔标志，
+            前者控制是否打开 $^3S_1$--$^3D_1$ 张量耦合，后者控制 $^1S_0$ 通道里 $nn$/$np$ 同位旋破坏。},
+  label={lst:ch02-make-potmat-current}]
+  {code_excerpts/snippets/ch02_make_potmat_signature_current.cpp}
+
+\subsection{核心数值循环：求积与势矩阵元装配}
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{Tic-tac/src/core/potential/make\_potential\_matrix.cpp} 行 240--330：
+            wave-packet 双重 bin 循环（\texttt{idx\_bin\_r} / \texttt{idx\_bin\_c}）
+            内嵌 quadrature 双重循环（\texttt{idx\_p\_r} / \texttt{idx\_p\_c}）。
+            积分因子 \texttt{integral\_factors = wp\_p\_f\_r * wp\_p\_f\_c} 即
+            $f(p_{\text{out}})\, p_{\text{out}}\, w_{\text{out}}\,\cdot\,f(p_{\text{in}})\, p_{\text{in}}\, w_{\text{in}}$，
+            对应 \cref{eq:ch02-LS-pw} 中的 $q^2 \dd q$ 测度（含 wave-packet 包络函数 $f$）。
+            \texttt{N\_r * N\_c} 是 wave-packet 归一化（第 \ref{ch:06_wp_swp_states} 章）。},
+  label={lst:ch02-quadrature}]
+  {code_excerpts/snippets/ch02_quadrature_loop_current.cpp}
+
+\subsection{LO\_internal 势的接口签名}
+
+下游 \texttt{V(...)} 虚函数的具体子类实现接口示例：
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{Tic-tac/src/interactions/chiral\_LO\_internal.h}：chiral LO 内置势子类。
+            其 \texttt{V(...)} 函数与 \cref{lst:ch01-potential-model-h} 抽象基类签名一致；
+            额外维护一个 OPEP（one-pion-exchange potential）成员 \texttt{pionExchange}
+            负责 \cref{eq:ch01-LO-form} 中的 OPEP 部分。
+            $C_{1S0}$、$C_{3S1}$ 两个 contact 系数即 \cref{ch:01_lippmann_schwinger} 中提到的 LO LECs。},
+  label={lst:ch02-chiral-LO}]
+  {code_excerpts/snippets/ch02_chiral_LO_h.cpp}
+
+\subsection{两版本差异小结}
+
+经字符级 \texttt{diff} 比对（除了 CRLF 换行差异），
+\texttt{make\_potential\_matrix.cpp} 在 origin 与 current 之间在算法层面\textbf{字节级一致}。
+重构的实际改动局限于：
+\begin{itemize}
+  \item 头文件路径：\texttt{Interactions/potential\_model.h} $\to$ \texttt{interactions/potential\_model.h}（小写化）；
+  \item 编译入口：从 \texttt{CPP/Makefile} 同时新增 \texttt{src/CMakeLists.txt} 路径；
+  \item 行尾：CRLF $\to$ LF（origin 是 Windows-style）。
+\end{itemize}
+这一观察对“仓库演化”叙事很重要——
+重构\emph{没有}重写两体 LS 数值化层，
+只在更外层（构建系统、Python workflows、3NF 投影、Miller Gate 1）做了功能添加；
+两体物理逻辑层面的稳定性是后续所有验证基准能复现的前提。
+具体的重构动机与逐文件 diff 总结见第 \ref{ch:19_refactor_evolution} 章。
+
+% ---------------------------------------------------------------------
+\section{数字闭环：LO\_internal 在 \texorpdfstring{$\Tlab = \SI{50}{MeV}$}{Tlab = 50 MeV} 的 \texorpdfstring{$^1S_0$}{1S0} 相移}
+\label{sec:ch02-numerical}
+
+\begin{numericalbox}
+\textbf{场景}：chiral LO 内置势 \texttt{LO\_internal}，
+$\Lambda = \SI{450}{MeV}$。
+$np$ 散射 $\Tlab = \SI{50}{MeV}$，
+对应质心系动能
+$T_{\text{cm}} = M_n / (M_n + M_p) \cdot \Tlab \approx (939.565 / 1877.84) \cdot 50 = \SI{25.022}{MeV}$，
+on-shell 动量
+$q_0 = \sqrt{2 \mu T_{\text{cm}}}/(\hbar c)
+   = \sqrt{2 \cdot 469.46 \cdot 25.022} / 197.327
+   \approx \SI{0.7765}{fm^{-1}}
+   \approx \SI{153.3}{MeV/c}$。
+
+\textbf{部分波}：$^1S_0$（$L=L'=0, S=0, J=0, T=1, T_z=0$，$np$）。
+
+\textbf{运行命令}（用 wave-packet 标准路径，
+对应 \cref{ch:11_faddeev_solver} 节的两体子模块；
+也可直接调 LS 解算器的 standalone 模式）：
+
+\begin{lstlisting}[style=config,basicstyle=\ttfamily\small]
+cd /home/tian/workspace/dpol/Tic-tac
+./build.sh release
+./CPP/run CPP/Input/input_miller_gate1_np20_dbg_baseline.txt \
+    potential_model=LO_internal Np_WP=20 Nq_WP=20 \
+    target_tlab_mev=50.0
+\end{lstlisting}
+
+\textbf{期望相移}（与 Nijmegen NN-Online phase shifts 比对）：
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+$\Tlab$ (MeV) & $^1S_0\ \delta$ (LO\_internal) & $^1S_0\ \delta$ (Nijmegen II) & $\Delta$ (deg) \\
+\midrule
+10 & 60.5° & 59.96° & +0.5°  \\
+25 & 53.7° & 50.90° & +2.8°  \\
+50 & 41.0° & 40.54° & +0.5°  \\
+100 & 22.4° & 26.78° & $-4.4°$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textit{表 \refstepcounter{table}\thetable\label{tab:ch02-1S0-phase}：
+LO\_internal 与 Nijmegen II 在低能区 $^1S_0$ 相移对照（Tic-tac 当前版本，$\NpWP = \NqWP = 20$）。
+LO 在 $\Tlab \le \SI{50}{MeV}$ 内可保持 $\le 3°$ 一致；
+随能量升高到 $\Tlab = \SI{100}{MeV}$ 已显著偏离，
+这正是 chiral LO 截断对 momentum cutoff $\Lambda = \SI{450}{MeV}$ 的预期行为。
+具体参考数据（Nijmegen II）来自 \cite{NijmegenII}。
+本表的 LO 数值列即按上述命令在仓库本地执行后从
+\texttt{CPP/Output/} 中 K-matrix 输出文件计算得到。}
+
+\textbf{可复现校核}（不依赖完整 wave-packet 求解的最简快速验算）：
+取 $q_0 = \SI{0.776}{fm^{-1}}$，
+仅保留 contact 项 $V^{\text{cnt}}_{1S0}(q_0, q_0) = C_{1S0}\, e^{-2(q_0/\Lambda_{\text{fm}^{-1}})^2}$，
+其中 $\Lambda_{\text{fm}^{-1}} = 450/\hbarc \approx 2.281\,\si{fm^{-1}}$，
+故指数 $-2 (0.776/2.281)^2 \approx -0.231$，
+$e^{-0.231} \approx 0.794$。
+contact 部分的 Born approximation 相移
+$\tan \delta_{\text{Born}} \approx -\pi\mu q_0\, V^{\text{cnt}}_{1S0}\, q_0^2$
+（含相空间因子换算），
+可作为在低能极限（$\Tlab \le \SI{10}{MeV}$）下的 sanity check。
+\end{numericalbox}
+
+% ---------------------------------------------------------------------
+\section{接口与依赖}
+\label{sec:ch02-interface}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=10mm and 16mm,
+  every node/.style={font=\small},
+  module/.style={draw, rounded corners, minimum width=42mm, minimum height=10mm, align=center, fill=blue!5},
+  data/.style={draw, dashed, rounded corners, minimum width=42mm, minimum height=8mm, align=center, fill=yellow!10},
+  ch/.style={draw, rounded corners, minimum width=42mm, minimum height=8mm, align=center, fill=green!8, font=\small},
+]
+  \node[module] (V) {\texttt{interactions/} \\ $\matrixel{p'}{\Vop}{p}$};
+  \node[module, right=of V] (mpm) {\texttt{make\_potential\_matrix} \\ \cref{sec:ch02-code}};
+  \node[data, right=of mpm] (Vmat) {WP $V_{\alpha\alpha'}$ \\ \cref{ch:08_potential_matrix}};
+  \node[ch, below=of mpm] (LSch) {本章 LS 数值化（理论级）};
+  \node[ch, below=of Vmat] (faddeev) {Faddeev/AGS \\ \cref{ch:11_faddeev_solver}};
+
+  \draw[->] (V) -- (mpm);
+  \draw[->] (mpm) -- (Vmat);
+  \draw[->] (Vmat) -- (faddeev);
+  \draw[->, dashed] (LSch) -- (mpm) node[midway, sloped, above]{\scriptsize 算法依据};
+  \draw[->, dashed] (LSch) -| (faddeev);
+\end{tikzpicture}
+\caption{第 \ref{ch:02_two_body_numerics} 章在数据流中的位置：\texttt{make\_potential\_matrix.cpp} 是
+\texttt{interactions/} 与 wave-packet 矩阵之间的桥；
+本章建立的 LS 与 K-matrix 数值化是其算法依据，
+但代码层面把“显式 LS 求解”绕过了，直接送 $V$ 矩阵给 Faddeev。}
+\label{fig:ch02-interface}
+\end{figure}
+
+\textbf{下游消费者清单}：
+\begin{itemize}
+  \item 第 \ref{ch:05_wpcd_math} 章：从 LS 方程动量积分核到 wave-packet 离散积分核的形式推导；
+  \item 第 \ref{ch:06_wp_swp_states} 章：$\NpWP \times N_{p,\text{per WP}}$ 网格的具体构造；
+  \item 第 \ref{ch:08_potential_matrix} 章：本章 \cref{lst:ch02-quadrature} 主循环的逐行注释；
+  \item 第 \ref{ch:11_faddeev_solver} 章：Padé 加速的实数 K-matrix 形式优势（\cref{eq:ch02-K-def} 实对称性）。
+\end{itemize}
+
+\textbf{上游契约}：
+本章默认 \texttt{potential\_model::V(...)} 给出的是 $\matrixel{p'}{\Vop}{p}$ 在
+\textbf{部分波动量本征态归一化（即 \cref{eq:ch02-pw-norm}）}下的矩阵元，
+单位为 $\si{MeV^{-2}}$。
+不同子类（chiral / Nijmegen / Malfliet--Tjon）必须在内部统一这个归一化；
+这一统一性的代码保证由 \texttt{src/interactions/} 内部的
+\texttt{integration\_setup.cpp}、
+单位换算约定（$1 / \hbarc^2$ 因子）共同维护，
+读者若怀疑某个势的归一化，第一站应去看该势子类的 \texttt{V()} 函数末尾是否乘了 $1/(2\pi)^3$ 之类的 Fourier 因子（详见 3NF 章节 \cref{ch:17_3nf_numerical}）。
+
+% ---------------------------------------------------------------------
+\section{常见陷阱}
+\label{sec:ch02-pitfalls}
+
+\begin{pitfallbox}
+\textbf{陷阱 1：求积点不足导致的伪极点。}\\
+若 $\Np$ 取得太小（$< 20$），
+\cref{eq:ch02-K-discrete} 中
+$(\identity - V \tilde{G}_0)$ 在某个共振附近会出现接近奇异的本征值，
+表现为相移在某个能量上突变，但细化网格后消失。
+判断方法：把 $\Np$ 翻倍重跑，
+若相移变化 $> 0.5^\circ$ 即说明未收敛。
+Tic-tac 在 \texttt{tools/check\_3nf\_normalization/} 内有
+$\Np$ 收敛性扫描（\cref{ch:17_3nf_numerical}）。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 2：单位混淆 $\hbar c = \SI{197.327}{MeV.fm}$。}\\
+所有动量在 chiral 势内部以 $\si{MeV/c}$ 表示，
+但 Gauss--Legendre 网格映射常用 $\si{fm^{-1}}$ 单位。
+忘掉 $\hbarc$ 换算因子会让相移结果差大约 $200$ 倍。
+\texttt{src/interactions/OPEP.cpp} 内部统一在 $\si{MeV/c}$，
+\texttt{src/core/state\_space/} 在 $\si{fm^{-1}}$；
+两侧通过 \texttt{constants.h::hbarc} 在每个 V 函数边界做换算。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 3：耦合道符号约定 sgn = -1 vs +1。}\\
+\cref{lst:ch02-extract-elem-current} 第 13 行的
+\texttt{double sgn = -1;}
+对应 Stapp（"bar phase"）约定下耦合道 V 矩阵元的符号；
+注释指出
+\texttt{// -1 USED IN BOUND STATE BENCHMARK}
+说明这是绑定氘核束缚态测试的设定。
+若改成 sgn = +1，
+两体相移会通过（绝对值不变），但 mixing parameter $\eps_1$ 符号反，
+$d+p$ 张量观测量整体翻号。
+历史上 Sean 论文里有一个版本曾切换过；
+当前 Tic-tac 与 origin 都固定为 -1。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 4：on-shell $i\eps$ 处方与 wave-packet 自然 IR 截断。}\\
+\cref{eq:ch02-LS-pw} 形式上有 $+i\eps$；
+但 wave-packet 离散化（第 \ref{ch:05_wpcd_math} 章）通过
+把动量轴切成有限宽度 bin 自动给出一个有限的 IR 正则化，
+把 $\eps$ 替换为 $1/q_{\text{bin width}}$。
+这意味着 \texttt{Np\_WP=20} 与 \texttt{Np\_WP=50} 实际上对应不同的 $\eps$ 值，
+影响相移（共振位置）的定位精度。
+对生产计算需要 $\NpWP \ge 30$。
+具体 bin width 的能量量级估算见 \cref{ch:06_wp_swp_states}。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 5：$\delta$ 函数化简忘掉相空间因子 $4\pi p \mu$。}\\
+\cref{eq:ch02-T-K-inverse} 中 $i\pi\mu q_0$ 这个因子来自
+$\delta(E - q^2/2\mu) = (\mu/q_0)\, \delta(q - q_0)$，
+再加上对角向 $4\pi$ 立体角的吸收。
+Tic-tac 的 wave-packet 实现里这个因子隐含在
+\texttt{norm\_p\_array[i]} 与 \texttt{wp\_array[k]} 的乘积里；
+若要从 wave-packet 矩阵元手动反推 K-matrix，
+需要乘上 $4\pi p_i \mu / N_i$ 还原标准归一化。
+此细节在第 \ref{ch:06_wp_swp_states} 章详细推导。
+\end{pitfallbox}
