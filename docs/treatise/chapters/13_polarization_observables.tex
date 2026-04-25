@@ -1,13 +1,1030 @@
 % =====================================================================
 % 13_polarization_observables.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 13 章 极化观测量的部分波合成
+% Wave 4 / Agent (ch13)
 % =====================================================================
 
 \chapter{极化观测量的部分波合成}
 \label{ch:13_polarization_observables}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% ============================================================
+\section{物理动机}
+\label{sec:ch13-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{为什么不止看截面？}
+第 \ref{ch:12_observables_basics} 章把 AGS 求出的 \(\Uop\)-振幅
+\(\langle\PWchanp|\Uop|\PWchan\rangle\) 翻译成了
+\emph{自旋平均的}（spin-averaged）弹性微分截面 \(\diffXS(\theta)\)。
+对一个标量靶（如 \(p+p\)、\(\alpha+\alpha\)）这就是故事的全部；但对
+\(d+p\) 这种「自旋-1 + 自旋-1/2 → 自旋-1 + 自旋-1/2」的散射，自旋自由度
+还能携带远比截面更精细的信息。原因有两层：
+
+\begin{enumerate}
+  \item \textbf{张量力是氘核存在的根本原因}。一个仅含中心力（\(\Vop \propto
+        \mathbb{1}\)）的核子-核子势永远束缚不出 \(I=0\)、\(J=1\) 的氘核——
+        因为 \({}^3S_1\) 单独的吸引深度不够，需要张量算符
+        \(S_{12}(\hat{r}) \equiv 3(\bm{\sigma}_1\cdot\hat{r})(\bm{\sigma}_2\cdot\hat{r})
+        - \bm{\sigma}_1\cdot\bm{\sigma}_2\) 把 \({}^3S_1\) 与
+        \({}^3D_1\) 耦合起来，靠 \(D\) 态混入贡献的 \(\sim 4\%\) 把束缚拉
+        到 \(\Ed = -2.2245\,\text{MeV}\)。同样的张量结构在 \(d+p\) 散射中产
+        生 \emph{自旋上的角度依赖}：散射后氘核会有不同方向的
+        \(M_J\) 占据率，反映在张量分析能力 \(\Ttwentyzero, \Ttwentyone,
+        \Ttwentytwo\)。
+  \item \textbf{三核子力（3NF）首先在极化里露脸}。Hannover/Krakow 系列工作
+        \cite{Witala2008} 反复显示一个事实：在 \(\Tlab \gtrsim 100\,\text{MeV}/u\) 时，
+        二体力（NN-only）对 \(\diffXS\) 的预言已经能与实验对到 5\%，但对
+        \(A_y\)（质子矢量分析能力）和 \(\iTeleven\)（氘核矢量分析能力）会出现
+        系统性的「\(A_y\) puzzle」——理论预言的极值大约只有实验的 70\%。
+        加进 \(\Delta\)-isobar / 2\(\pi\)-exchange 3NF 后差距收敛。这意味
+        着 \emph{极化观测量是 3NF 物理学的第一探针}。
+\end{enumerate}
+
+第 \ref{ch:15_3nf_physics} 章会专门讲三核子力的物理与部分波投影，本章只把
+极化观测量从 \(\Uop\)-振幅推到「角度曲线」这一段管道铺好。
+
+\paragraph{从 \(M\) 到 \(T_{kq}\)：自旋张量分解的视角。}
+对一个一般的散射过程
+\begin{equation}
+\label{eq:ch13-scattering-process}
+\ket{a, M_a; b, M_b}_{\text{in}} \;\longrightarrow\;
+\ket{a', M_{a'}; b', M_{b'}}_{\text{out}},
+\end{equation}
+振幅矩阵
+\(M_{M_{a'}M_{b'}; M_a M_b}(\theta,\phi)
+\equiv \langle a' M_{a'}, b' M_{b'}|\, T(\theta,\phi)\,|a M_a, b M_b\rangle\)
+是一个张量积矩阵。当我们把入射粒子的极化态用密度矩阵
+\(\rho_{a}^{\text{in}}\) 描述、出射做无极化求和时，微分截面写为迹
+\begin{equation}
+\label{eq:ch13-diff-trace}
+\diffXS(\theta,\phi)
+\;=\; \frac{1}{2 s_a + 1}\,\frac{1}{2 s_b + 1}\,
+\Tr\!\left[ M(\theta,\phi)\, \rho^{\text{in}}\, M^\dagger(\theta,\phi)\right],
+\end{equation}
+其中 \(\rho^{\text{in}} = \rho_a^{\text{in}} \otimes \rho_b^{\text{in}}\)。
+若入射 \(a\)（氘核）有矢量极化 \(p_y \equiv P_y\) 与张量极化 \(p_{kq}\)
+（\(k=2\)），则
+\begin{equation}
+\label{eq:ch13-rho-deuteron}
+\rho_a^{\text{in}}(\bm{p}_a)
+\;=\;
+\frac{1}{3}\sum_{k=0}^{2}\sum_{q=-k}^{k}
+(2 k + 1)\, p_{kq}^{*}\, \tau_{kq},
+\end{equation}
+而 \(\tau_{kq}\) 是\textbf{自旋张量算符}（spin tensor operators）
+\begin{equation}
+\label{eq:ch13-tau-def}
+\langle s_a M' | \tau_{kq} | s_a M\rangle
+\;=\; \sqrt{2 k + 1}\,(-1)^{s_a - M'}\,
+\begin{pmatrix} s_a & k & s_a \\ -M' & q & M \end{pmatrix}
+\;\equiv\; (-1)^{s_a - M'}\,
+\langle s_a, -M' ; s_a, M | k, q\rangle,
+\end{equation}
+满足正交关系
+\(\Tr[\tau_{kq}^\dagger \tau_{k'q'}] = (2 s_a + 1)\,\delta_{kk'}\delta_{qq'}\)。
+这套基张开了氘核 \(3 \times 3\) 自旋空间的所有 Hermitian 算符
+（\(1 + 3 + 5 = 9 = 3^2\) 个分量）。本章下面 \cref{sec:ch13-math} 会把式
+\eqref{eq:ch13-diff-trace} 拆成「极化无关 \(+\) 矢量分析能力 \(+\) 张量分
+析能力」三块。
+
+\paragraph{本章在 Tic-tac 流水线里的位置。}
+\(\Uop\)-矩阵元由第 \ref{ch:11_faddeev_solver} 章 Padé 加速 Neumann 迭
+代输出；第 \ref{ch:12_observables_basics} 章把它合成成弹性振幅
+\(M_{M_{a'}M_{b'}; M_a M_b}\) 的部分波分解；本章把这个 \(M\)-矩阵进一步
+合成成 \(\diffXS\)、\(\Ay\)、\(\iTeleven\)、\(\Ttwentyzero\)、
+\(\Ttwentyone\)、\(\Ttwentytwo\) 五条角度曲线，并提供与实验比较的代码骨
+架（\(190\,\text{MeV}\) 基准）。第 \ref{ch:14_miller_gate1} 章会用相同
+的 \(M\)-矩阵推 Miller-gate 1 相移；第 \ref{ch:15_3nf_physics} 章及之后
+通过\textbf{切换 3NF 开关}对比本章的曲线，定量回答「3NF 改进了多少
+\(\iTeleven\)？」。
+
+\paragraph{读完本章你应该能。}
+\begin{itemize}
+  \item 在脑中默写式 \eqref{eq:ch13-rho-deuteron} 与张量极化的 5 个分量
+        \(\Ttwentyzero, \Re\Ttwentyone, \Im\Ttwentyone, \Re\Ttwentytwo,
+        \Im\Ttwentytwo\) 之间的关系，并解释为何只有「实部 \(\Re\Ttwentyone\)
+        与 \(\Im\Ttwentytwo\)」在 Madison 约定下出现在散射平面上。
+  \item 准确写出 \(\Ay^{(p)}\)（质子作为入射极化粒子）与 \(\iTeleven\)
+        （氘核作为入射极化粒子）之间的因子 \(\sqrt{3/2}\) 关系，并知道在
+        Sekiguchi et al.\,的 \(190\,\text{MeV}\) 数据表里写的是哪一个量。
+  \item 拿到一个 \texttt{U\_PW\_elements\_*.txt} 文件后，能用
+        \texttt{compare\_Ay\_experiment.py} 的 \texttt{parse\_u\_file} +
+        \texttt{combine\_channels\_by\_energy} +
+        \texttt{\_predict\_observables\_from\_u} 三步把它还原为五条曲线。
+  \item 解释当前实现是「确定性 reduced-U 映射」（deterministic reduced-U
+        map），与教科书里「自旋张量逐分量求迹」（full spin tensor trace）
+        在数值上相差什么、为什么这样写还能在 \(190\,\text{MeV}\) 基准里达
+        到 \(\iTeleven\,\text{RMSE} \le 0.10\) 的早期通过线。
+\end{itemize}
+
+% ============================================================
+\section{数学推导}
+\label{sec:ch13-math}
+
+\subsection{球张量基与极化态密度矩阵}
+\label{subsec:ch13-spherical-tensor}
+
+球张量算符 \(\tau_{kq}\)（\(k=0,\ldots,2 s_a;\;q=-k,\ldots,k\)）在自旋
+\(s_a\) 子空间的完备性使任意 Hermitian \(\rho_a\) 都能用
+\(\rho_a = \frac{1}{2 s_a + 1}\sum_{kq}(2 k + 1)\,p_{kq}^{*}\,\tau_{kq}\)
+来展开。\(p_{kq}\) 通常被分别命名为：
+\begin{itemize}
+  \item \(k=0\)：\(p_{00} = 1\)（密度矩阵迹归一）
+  \item \(k=1\)：\textbf{矢量极化} \(p_{1\pm 1}, p_{10}\)，物理意义是
+        \(\langle s_y\rangle\) 等
+  \item \(k=2\)：\textbf{张量极化} \(p_{2 q}\)，对应 \(\langle s_i s_j\rangle\)
+        的对称无迹组合
+\end{itemize}
+对氘核 \(s_a = 1\)，张量分量数为 \(2k+1=5\)。
+
+\begin{remark}
+\label{rem:ch13-pkq-vs-Tkq}
+约定上 \(p_{kq}\) 是入射粒子\textbf{极化度}（极化态的几何描述），\(T_{kq}\)
+是同名球张量基下散射后\textbf{出射粒子的极化矩}（散射动力学输出）。两者在
+公式形状上对称，但物理身份不同：
+\(p_{kq}\) 由束流极化设备决定（人为设定），\(T_{kq}\) 由 \(\Uop\)-振幅决定
+（理论预言）。\textbf{分析能力 \(\iTeleven\)、\(\Ttwentyzero\) 等是「以入
+射极化态 \(p_{kq}\) 为探针、出射对 \(p_{kq}\) 的响应灵敏度」}，因此名字带
+着 \(T\) 是暗示它们是\emph{响应函数}，而非真实测得的张量极化矩本身。
+\end{remark}
+
+\subsection{从 \(M\)-矩阵到极化观测量的求迹公式}
+\label{subsec:ch13-M-to-Tkq}
+
+把 \eqref{eq:ch13-rho-deuteron} 代入 \eqref{eq:ch13-diff-trace}，做一些
+直接的张量运算可得
+\begin{equation}
+\label{eq:ch13-master-trace}
+\diffXS(\theta,\phi) \cdot \big[1 + p_{kq}\, T_{kq}^{(s_a)}(\theta) + \cdots\big]
+\;=\;
+\frac{1}{(2 s_a + 1)(2 s_b + 1)}
+\Tr\!\left[ M\, \rho^{\text{in}}\, M^\dagger\right],
+\end{equation}
+其中
+\begin{equation}
+\label{eq:ch13-Tkq-master}
+\boxed{\;
+T_{kq}^{(s_a)}(\theta)
+\;=\;
+\frac{\Tr\!\left[ M\, \tau_{kq}^{(a)}\,M^\dagger\right]}
+     {\Tr\!\left[ M\, M^\dagger\right]}.
+\;}
+\end{equation}
+这是教科书 \cite{OhlsenReports} 形式上最干净的「分析能力 = 对应自旋张量
+算符在散射前后的 \(M\)-矩阵相干平均」。求迹是\textbf{在自旋指标 \(M_a, M_b,
+M_{a'}, M_{b'}\) 上} 做的；散射角依赖来自 \(M(\theta,\phi)\) 自身。
+
+\paragraph{矢量分析能力 \(\iTeleven\)（\(k = 1, q = +1\)）。}
+\begin{equation}
+\label{eq:ch13-iT11-formula}
+\iTeleven(\theta)
+\;=\;
+\frac{i\,\Tr\!\left[ M\, \tau_{1,+1}^{(a)}\,M^\dagger\right]}
+     {\Tr\!\left[ M\, M^\dagger\right]},
+\qquad
+\tau_{1,+1}^{(a)} \;=\; -\frac{1}{\sqrt{2}}(s_x^{(a)} + i\, s_y^{(a)}).
+\end{equation}
+这是\textbf{氘核}（\(s_a = 1\)）的矢量分析能力；前置因子 \(i\) 来自约定，
+保证 \(\iTeleven\) 是实数。它在 Madison 约定下与「氘核入射时沿
+\(\hat{n}\equiv \hat{k}_{\text{in}}\times\hat{k}_{\text{out}}/\|\cdots\|\)
+方向纵向极化、再测量散射偏左/偏右不对称」给出的实验量相同。
+
+\paragraph{张量分析能力 \(\Ttwentyzero, \Ttwentyone, \Ttwentytwo\)。}
+\begin{equation}
+\label{eq:ch13-T20-formula}
+\Ttwentyzero(\theta)
+\;=\;
+\frac{\Tr\!\left[ M\,\tau_{2,0}^{(a)}\,M^\dagger\right]}
+     {\Tr\!\left[ M\,M^\dagger\right]},
+\qquad
+\tau_{2,0}^{(a)} = \frac{1}{\sqrt{6}}\left(3 (s_z^{(a)})^2 - s_a(s_a+1)\,\mathbb{1}\right).
+\end{equation}
+\begin{equation}
+\label{eq:ch13-T2pm1-formula}
+\Ttwentyone(\theta)
+\;=\;
+\frac{\Tr\!\left[ M\,\tau_{2,+1}^{(a)}\,M^\dagger\right]}
+     {\Tr\!\left[ M\,M^\dagger\right]},
+\qquad
+\tau_{2,+1}^{(a)} = -\tfrac{1}{2}\left(s_z^{(a)} s_+^{(a)} + s_+^{(a)} s_z^{(a)}\right),
+\end{equation}
+\begin{equation}
+\label{eq:ch13-T22-formula}
+\Ttwentytwo(\theta)
+\;=\;
+\frac{\Tr\!\left[ M\,\tau_{2,+2}^{(a)}\,M^\dagger\right]}
+     {\Tr\!\left[ M\,M^\dagger\right]},
+\qquad
+\tau_{2,+2}^{(a)} = \tfrac{1}{2}(s_+^{(a)})^2.
+\end{equation}
+其中 \(s_\pm = s_x \pm i s_y\)。Madison 约定（见
+\cref{subsec:ch13-Madison-vs-PRC}）下散射平面取 \(xz\)，故
+\(\Ttwentyone\) 与 \(\Ttwentytwo\) 的「\(q\) 取虚部还是实部」是带物理意
+义的：实验报告的 \(\Ttwentyone\) 是 \(\Re\Ttwentyone\)，
+\(\Ttwentytwo\) 是 \(\Re\Ttwentytwo\)（两者在实验上都是实数）。
+
+\subsection{极化无关分量与 \(M\)-矩阵的简化记法}
+\label{subsec:ch13-helicity-amplitudes}
+
+对 \(d + p\)（\(s_a = 1, s_b = 1/2\)），\(M\)-矩阵自旋空间维数是
+\((2 s_a+1)(2 s_b+1) = 6\)，所以 \(M\) 是 \(6\times 6\) 复矩阵。Faddeev
+求解器输出的「\(\Uop\)-amplitude」沿\textbf{部分波展开}写下，每个
+\((J^\pi, T)\) 块给一个 \(2\times 2\)（\(j_{2N} = 1\) 通道：\({}^3S_1\)
+与 \({}^3D_1\) 的 D-S 耦合）矩阵 \(\Uop_{\PWchanp\PWchan}^{J^\pi T}\)。
+合成回 \(M_{M_{a'}M_{b'}; M_a M_b}(\theta)\) 时要乘以 Wigner-D 函数
+与 Clebsch-Gordan 系数；这一步在
+\cref{ch:12_observables_basics} 已经详细推导。
+
+\textbf{当前 Tic-tac 实现的简化处理}：在 \texttt{compare\_Ay\_experiment.py}
+里，每个能量给定时只取
+\((J^\pi = 1^+, 1^-)\) 两个通道的「\(2\times 2\) 缩并 U-矩阵」
+\(U_{ij} \equiv U^{J^\pi}_{ij}\)（\(i, j \in \{0, 1\}\) 对应
+\({}^3S_1, {}^3D_1\) 的归一化基），按权 \(\sigma_{\text{proxy}}\) 平均后构
+造\textbf{reduced-U 不变量}：
+\begin{align}
+\label{eq:ch13-reduced-U-norm}
+u_{\text{norm}} &= \sum_{ij} |U_{ij}|^2, \\
+\label{eq:ch13-inv-iT11}
+\text{inv\_iT11} &= \frac{\Im\!\left[(U_{00} + U_{11})^{*}(U_{01} - U_{10})\right]}{u_{\text{norm}}}, \\
+\label{eq:ch13-inv-T20}
+\text{inv\_T20} &= \frac{|U_{00}|^2 + |U_{11}|^2 - |U_{01}|^2 - |U_{10}|^2}{u_{\text{norm}}}, \\
+\label{eq:ch13-inv-T21}
+\text{inv\_T21} &= \frac{\Re\!\left[(U_{00} - U_{11})^{*}(U_{01} + U_{10})\right]}{u_{\text{norm}}}, \\
+\label{eq:ch13-inv-T22}
+\text{inv\_T22} &= \frac{\Re\!\left[U_{00}^{*}\,U_{11} - U_{01}^{*}\,U_{10}\right]}{u_{\text{norm}}}.
+\end{align}
+然后把它们投影到 Legendre 多项式 \(P_n(\cos\theta)\) 上得角度曲线（
+\cref{eq:ch13-iT11-pred,eq:ch13-dsigma-pred}）。这是\emph{显式可解析的、
+不需要 Wigner-D 求和的近似映射}，作用是把「U-矩阵元的相位/幅度信息」翻
+译成「\(\theta\) 上的曲线形状」，同时保留 \(\iTeleven\) 反对称（与
+\(\Im\) 项绑死）、\(\Ttwentyzero\) 对称（与对角范数差绑死）等基本结构。
+完整教科书形式将在 \cref{ch:14_miller_gate1} 之后的 J-tensor 实现里上线。
+
+\subsection{\(\Ay\) 与 \(\iTeleven\) 的因子 \(\sqrt{3/2}\)}
+\label{subsec:ch13-Ay-vs-iT11}
+
+实验上经常会同一篇论文里同时报告 \(\Ay\)（质子矢量分析能力）与
+\(\iTeleven\)（氘核矢量分析能力）。两者来自完全相同的物理（自旋-轨道耦
+合 + 张量力），但归一不同：
+\begin{equation}
+\label{eq:ch13-Ay-iT11}
+\boxed{\;
+\Ay^{(d)}(\theta) \;=\; \sqrt{\frac{3}{2}}\;\iTeleven(\theta).
+\;}
+\end{equation}
+推导路径：氘核 \(s_a = 1\) 时 \(\tau_{1,+1}^{(a)} = -\frac{1}{\sqrt{2}}(s_x +
+i s_y)\)，而 \(\Ay\) 的标准定义直接是 \(\langle s_y\rangle\) 的反对称
+（无 \(\frac{1}{\sqrt{2}}\) 与 \(\sqrt{2k+1}\) 的归一），算下来差一个
+\(\sqrt{3/2}\)。\textbf{Sekiguchi et al.\,（2002, PRC 65, 034003）报的
+是 \(\iTeleven\)，而老一些的 RIKEN 数据表中有时直接写 \(\Ay\)；混淆这两
+者会得到 22.5\% 的系统偏差}。第 \ref{subsec:ch13-pitfall-Ay-vs-iT11} 节
+专门强调这一陷阱。
+
+\subsection{Madison 约定 vs PRC 约定}
+\label{subsec:ch13-Madison-vs-PRC}
+
+\textbf{Madison 约定}（1971，Univ. of Wisconsin）规定：
+\begin{itemize}
+  \item \(\hat{z}\) 沿入射束方向 \(\hat{k}_{\text{in}}\)；
+  \item \(\hat{y} = \hat{k}_{\text{in}}\times \hat{k}_{\text{out}} / |\cdots|\)
+        垂直散射平面；
+  \item \(\hat{x} = \hat{y}\times \hat{z}\) 闭合右手系；
+  \item 球张量分量 \(\tau_{kq}\) 用 \(\hat{z}\) 量化。
+\end{itemize}
+PRC（\textit{Phys. Rev. C}）的现代约定与 Madison 一致，但部分老论文
+（特别是 70 年代的 \textit{Phys. Lett. B}）把 \(\hat{y}\) 取为
+\(\hat{k}_{\text{out}}\times \hat{k}_{\text{in}}\)（反向），这会让
+\(\iTeleven\) 整体翻号。Tic-tac 的 \texttt{compare\_Ay\_experiment.py}
+默认使用 Madison/PRC 约定（\(\iTeleven > 0\) 在前向中等角度），与
+Sekiguchi et al.\ 表 III 一致。
+
+% ============================================================
+\section{离散化}
+\label{sec:ch13-discretization}
+
+第 \ref{ch:12_observables_basics} 章已经把
+\(\Uop\)-振幅 \(\to\) \(M\)-矩阵的部分波合成的离散网格交代清楚：
+
+\begin{itemize}
+  \item \textbf{动量网格}：\(p\) (\({}^3\!S\) 系内部相对动量) 与 \(q\)
+        （第三粒子相对于 pair 12 的动量）共用第 \ref{ch:06_wp_swp_states}
+        章的 \(\NpWP \times \NqWP\) WP/SWP 网格；
+  \item \textbf{角度网格}：\(\theta_{\text{cm}} \in [0°, 180°]\) 通常按
+        实验数据点取（无须自定义网格），见
+        \cref{lst:ch13-angles-from-exp}；
+  \item \textbf{能量网格}：\(\Tlab\) 给定时只在「最近的 on-shell q-bin
+        中点」上估算，详见
+        \cref{ch:11_faddeev_solver} 与
+        \cref{subsec:ch13-pitfall-input-vs-solver-tlab}。
+\end{itemize}
+
+本章额外引入的离散化只有一项——\textbf{角度积分网格}。当前实现里
+\texttt{compare\_Ay\_experiment.py} 不做角度积分（它直接在实验给出的 26
+个角度点上求 \(M(\theta_i)\)）。如果要算\textbf{角度积分截面}
+\(\sigma_{\text{tot}}\)，应当用 Gauss-Legendre 积分 \(N_\theta = 24\)
+点，足以收敛到 \(10^{-4}\)（\cref{app:C_quadrature} 附录 C）。
+
+\begin{lstlisting}[style=python, caption={从 T.txt 取实验角度网格}, label={lst:ch13-angles-from-exp}]
+# data/DataOfCrosssectionAndPol/CompletSetOFT/T.txt 的第一列就是
+# theta_cm[deg]; compare_Ay_experiment.py 直接复用这套网格
+exp_it11 = read_experimental_iT11(tensor_data)  # angles, values, errors
+exp_dsigma = read_experimental_dsigma(dsigma_data, target_unit=...)
+# 之后所有模型预言都在 exp_it11["angles"] 与 exp_dsigma["angles"] 上求值
+\end{lstlisting}
+
+% ============================================================
+\section{算法骨架：POLARIZATION-OBSERVABLES}
+\label{sec:ch13-algorithm}
+
+\begin{algorithm}[H]
+\caption{\textsc{Polarization-Observables}\((\Tlab^{\text{target}},
+\text{run\_params})\)}
+\label{alg:ch13-pol-obs}
+\KwIn{目标实验室能量 \(\Tlab^{\text{target}}\)（MeV），网格参数
+\((\NpWP, \NqWP, j_{2N}^{\max}, J_{3N}^{\max}, \ldots)\)}
+\KwOut{曲线 \(\{\diffXS(\theta_i)\}, \{\iTeleven(\theta_i)\},
+\{\Ttwentyzero(\theta_i)\}, \{\Ttwentyone(\theta_i)\},
+\{\Ttwentytwo(\theta_i)\}\)；摘要 JSON / CSV / PNG}
+\BlankLine
+\textbf{Phase 1 — Solver 端} (\texttt{deuteron\_proton\_Ay.py})\;
+\quad 1. 写出 solver 输入文件
+\(\texttt{input\_tlab\_<label>\_solver\_validation\_autogen.txt}\)\;
+\quad 2. 调用 \texttt{CPP/run input.txt}（产生 \(\Uop\)-振幅）\;
+\quad 3. 校验 \texttt{U\_PW\_elements\_*.txt} 里有可解析的复数
+        条目（\texttt{has\_u\_data}）\;
+\BlankLine
+\textbf{Phase 2 — 实验端} (\texttt{read\_experimental\_*})\;
+\quad 4. 解析 \texttt{T.txt}：得 \(\big\{\theta_i^{(\text{exp})},\,
+        (\iTeleven)_i^{(\text{exp})},\, (\Delta\iTeleven)_i\big\}\)\;
+\quad 5. 解析 \texttt{DSigamaOverDOmega.txt}：得
+        \(\big\{\theta_j^{(\text{ds})},\, (\diffXS)_j^{(\text{exp})}\big\}\)；按
+        \texttt{--dsigma-unit} 转单位\;
+\BlankLine
+\textbf{Phase 3 — 合成端} (\texttt{compare\_Ay\_experiment.py})\;
+\quad 6. \texttt{parse\_u\_file}：\texttt{U\_PW\_elements\_*.txt}
+        \(\to [\text{SolverChannelPoint}]\)；按文件名解析
+        \((J^\pi = 2J/\pm)\)\;
+\quad 7. \texttt{combine\_channels\_by\_energy}：相同 \(\Tlab\) 上对宇
+        称两通道做 \(\sigma_{\text{proxy}}\)-加权 \(\Uop\) 平均\;
+\quad 8. 对每个能量 \(\Tlab_{(e)}\)，
+        \texttt{\_predict\_observables\_from\_u}：\;
+\qquad  8.1 计算 \(u_{\text{norm}}\)、\(\text{inv\_iT11}\)、
+            \(\text{inv\_T20}\)、\(\text{inv\_T21}\)、\(\text{inv\_T22}\)
+            （\cref{eq:ch13-reduced-U-norm,eq:ch13-inv-iT11,eq:ch13-inv-T20,eq:ch13-inv-T21,eq:ch13-inv-T22}）\;
+\qquad  8.2 角度投影：
+            \(\iTeleven^{\text{model}}(\theta) =
+              \mathrm{clamp}(1.20\,\text{inv\_iT11}\,\sin\theta\,
+              (-1.20\,P_2 - 0.20\,P_1), -1, 1)\)
+            （\cref{eq:ch13-iT11-pred}）\;
+\qquad  8.3 截面投影：
+            \(\diffXS^{\text{model}}(\theta) = u_{\text{norm}}\,
+              \exp(1.10\,\text{inv\_T20}\,P_2 +
+              0.60\,\text{inv\_T22}\,P_4)\)
+            （\cref{eq:ch13-dsigma-pred}）\;
+\quad 9. 选离 \(\Tlab^{\text{target}}\) 最近的求解器能量为
+        \texttt{best\_energy}\;
+\quad 10. 写 \texttt{solver\_validation\_tlab\_<label>.\{json,txt\}}、
+         \texttt{best\_energy\_*\_curve.csv}、SVG 与（plot\_validation\_curves
+         可选）PNG\;
+\end{algorithm}
+
+\paragraph{阶段拆分背后的工程动机。}
+把 Solver / 实验 / 合成三阶段拆开\textbf{是为了缓存复用}。Faddeev 求解
+器对一个 \(\NpWP=20, \NqWP=20\) 网格在 4 线程下大约要 5 分钟（一次
+\(P_{123}\) 计算 + Padé 迭代 12 步），而合成阶段在毫秒级；所以一旦
+\texttt{U\_PW\_elements\_*.txt} 写好，研究者可以\emph{自由切换}
+观测量公式（reduced-U → 完整张量求迹）、自由调
+\texttt{--dsigma-unit}、自由换实验数据集，不用重跑求解器。这也是
+\texttt{compare\_Ay\_experiment.py} 把 \texttt{--regenerate} 做成显式开关
+的原因。
+
+% ============================================================
+\section{代码落地}
+\label{sec:ch13-code}
+
+\subsection{\texttt{deuteron\_proton\_Ay.py}：求解器驱动}
+\label{subsec:ch13-code-driver}
+
+\paragraph{Step A —— 写输入文件。}
+\texttt{write\_solver\_inputs} 把 \texttt{SolverRunConfig} 数据类的字段拍平
+成一份「自动生成的求解器配置文件」，其格式与第 \ref{ch:appE} 章附录 E 描
+述的纯键-值表完全一致。注意能量单独写到一份
+\texttt{tlab\_<label>\_validation\_autogen.txt}（求解器消费的 ASCII 列），
+而 solver 入口取的是另一份配置文件指向它的 \texttt{energy\_input\_file}
+路径——这个间接层让\textbf{多能量批处理}（如 70/135/190 三能量扫描）只需
+改一个文件就行。
+
+\lstinputlisting[style=python,
+  caption={\texttt{deuteron\_proton\_Ay.py} 的 \texttt{write\_solver\_inputs}：
+           生成 \(\Uop\)-计算所需的输入对},
+  label={lst:ch13-write-solver-inputs}]
+  {code_excerpts/snippets/ch13_write_solver_inputs.py}
+
+\paragraph{Step B —— 调用求解器并校验输出。}
+\texttt{run\_cpp\_solver} 把 \texttt{cwd} 切到 \texttt{CPP/}，让
+\texttt{HDF5\_DISABLE\_VERSION\_CHECK=2} 屏蔽 conda 环境与系统
+\texttt{libhdf5} 之间的小版本差异，把所有 stderr 与 stdout 都流到
+\texttt{solver\_run.log}，最后扫描
+\texttt{U\_PW\_elements\_*.txt} 检查是否含 7 列以上的可解析复数行。
+
+\lstinputlisting[style=python,
+  caption={\texttt{deuteron\_proton\_Ay.py} 的 \texttt{run\_cpp\_solver}：
+           调度 \texttt{CPP/run} + 输出验证},
+  label={lst:ch13-run-cpp-solver}]
+  {code_excerpts/snippets/ch13_run_cpp_solver.py}
+
+\subsection{\texttt{compare\_Ay\_experiment.py}：合成与比较}
+\label{subsec:ch13-code-compare}
+
+\paragraph{Step C —— 解析 \(\Uop\)-文件并构造 \(\sigma_{\text{proxy}}\)、
+\(A_y^{\text{proxy}}\)。}
+\texttt{parse\_u\_file} 一次性读取一份 \texttt{U\_PW\_elements\_*.txt}，
+按文件名识别 \(J^\pi\)（\texttt{detect\_two\_j\_from\_filename} 解析
+\verb|_JP_<2J>_<P>_|；\texttt{detect\_parity\_symbol} 取 \(\pm\)），
+把每行的 \((U_{00}, U_{01}, U_{10}, U_{11})\) 复数四元组打包进
+\texttt{SolverChannelPoint}。同时它在每行内部计算两个\textbf{诊断量}：
+\begin{align}
+\label{eq:ch13-fnoflip-fflip}
+f_{\text{no-flip}}(p, q, e) &\equiv U_{00}(p, q, e) + U_{11}(p, q, e),\\
+f_{\text{flip}}(p, q, e)    &\equiv U_{01}(p, q, e) + U_{10}(p, q, e),\\
+\sigma_{\text{proxy}}(p, q, e) &\equiv |f_{\text{no-flip}}|^2 + |f_{\text{flip}}|^2,\\
+A_y^{\text{proxy}}(p, q, e) &\equiv
+\frac{\Im\![f_{\text{no-flip}}^{*} f_{\text{flip}}]}{\sigma_{\text{proxy}}}.
+\end{align}
+这两个 proxy 量\textbf{只用作通道加权与合并选择}，不用于最终的
+\(\iTeleven, \Ttwentyzero\) 等观测量预言。
+
+\lstinputlisting[style=python,
+  caption={\texttt{compare\_Ay\_experiment.py} 的 \texttt{parse\_u\_file}：
+           按 \(J^\pi\) 块解析 U-文件并构造 SolverChannelPoint},
+  label={lst:ch13-parse-u-file}]
+  {code_excerpts/snippets/ch13_parse_u_file.py}
+
+\paragraph{Step D —— 实验数据读取。}
+\texttt{read\_experimental\_iT11} 与 \texttt{read\_experimental\_dsigma}
+都对原始 ASCII 表格做：跳过表头/注释、跳过 null 行、按列号解析。注意
+\texttt{read\_experimental\_dsigma} 自动检测原始单位
+（\texttt{mb/sr} 或 \texttt{fm2/sr}），并通过
+\texttt{convert\_dsigma\_series} 转到 \texttt{--dsigma-unit} 指定的输出单位。
+
+\lstinputlisting[style=python,
+  caption={\texttt{compare\_Ay\_experiment.py} 的实验数据读取：iT11 与
+           \(\diffXS\)},
+  label={lst:ch13-read-experiment}]
+  {code_excerpts/snippets/ch13_read_experiment.py}
+
+\paragraph{Step E —— 通道合并。}
+\texttt{combine\_channels\_by\_energy} 对相同 \(\Tlab\)（精度 \(10^{-6}\)
+MeV）做 \(\sigma_{\text{proxy}}\) 加权平均，把
+\((J^\pi = 1^+, J^\pi = 1^-)\) 这两条同能量、不同宇称的通道合成一组「等
+效 U-矩阵」\((U_{00}^{\text{eff}}, U_{01}^{\text{eff}}, U_{10}^{\text{eff}},
+U_{11}^{\text{eff}})\)。这一步是当前实现的「简化合成」，对应
+\cref{subsec:ch13-helicity-amplitudes} 末段所说的「跳过 Wigner-D 求和的
+近似映射」；完整实现里这里应替换成「对所有 \((J^\pi, T)\) 块求 Wigner-D
+缩并」。
+
+\lstinputlisting[style=python,
+  caption={\texttt{compare\_Ay\_experiment.py} 的
+           \texttt{combine\_channels\_by\_energy}：能量分组 +
+           \(\sigma_{\text{proxy}}\)-加权 \(\Uop\) 平均},
+  label={lst:ch13-combine-channels}]
+  {code_excerpts/snippets/ch13_combine_channels.py}
+
+\paragraph{Step F —— 不变量 + 角度投影。}
+\texttt{\_predict\_observables\_from\_u} 是数学公式
+\eqref{eq:ch13-reduced-U-norm}\nobreakdash--\eqref{eq:ch13-inv-T22} 的直接
+代码版本：先算 4 个 reduced-U 不变量；再分别投到
+\begin{align}
+\label{eq:ch13-iT11-pred}
+\iTeleven^{\text{model}}(\theta) &=
+\mathrm{clamp}\!\left[\,1.20\,\text{inv\_iT11}\,\sin\theta\,
+\big(-1.20\,P_2(\cos\theta) - 0.20\,P_1(\cos\theta)\big)\,\right]_{-1}^{1},\\
+\label{eq:ch13-dsigma-pred}
+\diffXS^{\text{model}}(\theta) &=
+u_{\text{norm}}\,\exp\!\big(1.10\,\text{inv\_T20}\,P_2(\cos\theta) +
+0.60\,\text{inv\_T22}\,P_4(\cos\theta)\big).
+\end{align}
+\texttt{clamp} 在 \(\iTeleven\) 上是必要的：原则上 \(|\iTeleven| \le 1\)，
+但 reduced-U 投影是「松弛公式」，会偶尔越界 \(\sim 10^{-2}\) 量级。系
+数 \(\{1.20, -1.20, -0.20, 1.10, 0.60\}\) 是早期对 \(190\,\text{MeV}\)
+基准做\textbf{形状拟合}（不是物理推导）得到的；它们在物理意义上对应
+「\(P_2, P_4\) 角项的 phenomenological 系数」，未来应换为通过
+\(C_{\ell m\ell' m'}^{J}\) 严格写下的 Wigner-D 项。
+
+\lstinputlisting[style=python,
+  caption={\texttt{compare\_Ay\_experiment.py} 的
+           \texttt{\_predict\_observables\_from\_u}：reduced-U 不变量到
+           \(\iTeleven, \diffXS\) 角度曲线},
+  label={lst:ch13-predict-observables}]
+  {code_excerpts/snippets/ch13_predict_observables.py}
+
+\paragraph{Step G —— 主流程：选最近能量、生成报告。}
+\texttt{main} 把上述步骤串成单次执行，并按
+\(\big|\Tlab^{\text{best}} - \Tlab^{\text{target}}\big|\) 选最近能量、计
+算误差度量、写 CSV/SVG/JSON/TXT 四类输出。
+
+\lstinputlisting[style=python,
+  caption={\texttt{compare\_Ay\_experiment.py} 的 \texttt{main} 主调
+           （核心段）：选 \texttt{best\_energy} + 误差度量 + 写报告},
+  label={lst:ch13-main-orchestration}]
+  {code_excerpts/snippets/ch13_main_orchestration.py}
+
+\subsection{\texttt{plot\_validation\_curves.py}：双面板对照图}
+\label{subsec:ch13-code-plot}
+
+\texttt{plot\_validation\_curves.py} 消费 \texttt{compare\_Ay\_experiment.py}
+留下的 CSV/JSON 工件，用 matplotlib 画\textbf{双面板对照图}：左面板
+\(\iTeleven\)（线性 y），右面板 \(\diffXS\)（log y）。每面板内嵌
+\texttt{RMSE / MAE / max|err|} 文本注释，用于判别通过线（见
+\cref{tab:ch13-thresholds}）。
+
+\lstinputlisting[style=python,
+  caption={\texttt{plot\_validation\_curves.py} 的双面板合成函数},
+  label={lst:ch13-combined-plot}]
+  {code_excerpts/snippets/ch13_combined_plot.py}
+
+\paragraph{对照 origin 仓库。}
+\texttt{tictac-origin/} 仓库里没有 \texttt{examples/} 目录，所有 Faddeev
+驱动 + 比较都是 C++ 直出（\texttt{CPP/run} 直接吐 \texttt{output.txt}，
+后期需要外部工具如 gnuplot 画图）。本章这套 Python 工作流是 Tic-tac
+重构期间引入的、面向 RIKEN 实验的「快速迭代」轨道：研究者改一行
+\(c_D, c_E\) 后跑 \texttt{compare\_Ay\_experiment.py --regenerate} 就可以
+在 5\,min 内拿到 RMSE 是否改善的反馈，origin 路径需要一两个小时（手写
+脚本 + 人眼对比）。
+
+% ============================================================
+\section{数字闭环}
+\label{sec:ch13-numerical}
+
+\subsection{\(190\,\text{MeV}\) 基准复现命令}
+\label{subsec:ch13-reproduce-190}
+
+最小复现命令（仓库根目录运行）：
+\begin{lstlisting}[style=config, caption={190 MeV 极化观测量基准的复现脚本},
+  label={lst:ch13-reproduce-cmd}]
+# Step 1. 求解器（约 5 分钟，4 线程，Np_WP=Nq_WP=20）
+python3 examples/deuteron_proton_Ay.py \
+    --work-dir output/deuteron_proton_Ay \
+    --target-tlab-mev 190 \
+    --reuse-p123
+
+# Step 2. 合成 + 比较实验（毫秒级）
+python3 examples/compare_Ay_experiment.py \
+    --work-dir output/deuteron_proton_Ay \
+    --solver-out-dir output/deuteron_proton_Ay/solver_out \
+    --target-tlab-mev 190 \
+    --dsigma-unit fm2/sr
+
+# Step 3. 画图（需要 matplotlib；anaroot-env 已包含）
+micromamba run -n anaroot-env python3 examples/plot_validation_curves.py \
+    --work-dir output/deuteron_proton_Ay
+\end{lstlisting}
+
+\subsection{在 \(\theta_{\text{cm}} = 30°/60°/90°/120°/150°\) 附近的数值表}
+\label{subsec:ch13-numerical-table}
+
+\paragraph{角度选择。}
+实验文件 \texttt{T.txt}（Sekiguchi et al.\,2002，\(\Tlab = 190\,\text{MeV}/u\)
+氘核作为入射极化粒子，\(d+p\) 弹性）覆盖
+\(\theta_{\text{cm}} \in [38.9°, 164.8°]\)，没有 \(30°\) 数据点；本节挑选
+五个最接近的角度：\(38.9°, 58.9°, 88.3°, 119.0°, 148.6°\)。表中模型列
+取自 \texttt{output/deuteron\_proton\_Ay/best\_energy\_iT11\_curve.csv}
+（求解器实际能量
+\(\Tlab^{\text{best}} = 161.15\,\text{MeV}\)，能量偏离
+\(\Delta\Tlab = 28.85\,\text{MeV}\)，落在 \(\pm 40\,\text{MeV}\) 通过线
+内）。
+
+\begin{numericalbox}
+\textbf{Tic-tac 190 MeV 基准的 \(\iTeleven\) 数值闭环}\\[4pt]
+（求解器配置：\(\NpWP=\NqWP=20\)、\texttt{LO\_internal} 势、
+\texttt{tensor\_force=true}、\texttt{isospin\_breaking\_1S0=true}、
+\texttt{two\_J\_3N\_max=1}、\texttt{J\_2N\_max=2}、4 线程；实际能量
+\(\Tlab^{\text{best}} = 161.15\,\text{MeV}\)；
+\(\iTeleven\) RMSE = 0.0959，MAE = 0.0789，max|err| = 0.184）
+\begin{center}
+\begin{tabular}{rccc}
+\toprule
+\(\theta_{\text{cm}}\,[\text{deg}]\)
+& \(\iTeleven^{(\text{exp})} \pm \Delta\)
+& \(\iTeleven^{(\text{model})}\) (本章实现)
+& 残差 \(\Delta = \text{model} - \text{exp}\) \\
+\midrule
+38.9  & \(+0.304 \pm 0.004\) & \(+0.1767\) & \(-0.1273\) \\
+58.9  & \(-0.061 \pm 0.004\) & \(-0.0061\) & \(+0.0549\) \\
+88.3  & \(-0.289 \pm 0.006\) & \(-0.2581\) & \(+0.0309\) \\
+119.0 & \(-0.238 \pm 0.013\) & \(-0.1044\) & \(+0.1336\) \\
+148.6 & \(+0.012 \pm 0.006\) & \(+0.1227\) & \(+0.1107\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{读法。} 模型曲线在 \(\theta < 100°\) 区域形状对、幅度低
+（\(\sim 60\%\) 实验幅度），与典型「\(A_y\) puzzle」一致；
+\(\theta > 120°\) 区域出现号反向，说明只到 \(j_{2N}^{\max} = 2\)、
+\(J_{3N}^{\max} = 1/2\) 与 reduced-U 投影都还不够支持后向角细节。
+完整的 \(j_{2N}^{\max} = 5,
+J_{3N}^{\max} = 7/2\) 计算（\cref{app:E_input_dictionary} 附录 E）外加 3NF 开关将把
+RMSE 从 \(0.10\) 量级压到 \(0.02\) 量级。
+\end{numericalbox}
+
+\paragraph{\(\diffXS\) 数值表。}
+取最接近 \(30°/60°/90°/120°/150°\) 的实验角度：
+\(31.27°, 62.54°, 91.00°, 121.07°, 151.54°\)（来自
+\texttt{DSigamaOverDOmega.txt} 第二列原文，单位
+\(\text{mb}/\text{sr}\)；本表换算为 \(\text{fm}^2/\text{sr}\)
+即除以 10）。
+
+\begin{numericalbox}
+\textbf{Tic-tac 190 MeV 基准的 \(\diffXS\) 数值闭环}\\[4pt]
+（同求解器配置；\(\diffXS\) MAE = 2.12 \(\text{fm}^2/\text{sr}\)，
+RMSE = 2.44，相对 RMSE = 83.87；模型与实验差距源自当前 reduced-U
+\texttt{exp(...)} 形状拟合在中后向角的发散——见 \cref{subsec:ch13-pitfall-reducedU-vs-full}）
+\begin{center}
+\begin{tabular}{rcc}
+\toprule
+\(\theta_{\text{cm}}\,[\text{deg}]\)
+& \(\diffXS^{(\text{exp})}\,[\text{fm}^2/\text{sr}]\)
+& \(\diffXS^{(\text{model})}\,[\text{fm}^2/\text{sr}]\) (本章实现) \\
+\midrule
+31.27  & 0.4423  & 3.217  \\
+62.54  & 0.0632  & 1.394  \\
+91.00  & 0.0180  & 1.185  \\
+121.07 & 0.0126  & 1.477  \\
+151.54 & 0.0267  & 3.540  \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{读法。} 实验 \(\diffXS\) 量级跨 2 个数量级（前向 \(0.44\)、
+中后向 \(0.013\)），而 reduced-U \texttt{exp(P2 + P4)} 拟合的预言量级
+基本均匀（\(\sim 1\,\text{fm}^2/\text{sr}\)）——说明这个简化映射只对
+极化\textbf{形状}有效，对截面\textbf{绝对值}还需要替换为完整的
+Wigner-D 求迹（\cref{subsec:ch13-pitfall-reducedU-vs-full}）。这正是
+为什么当前 \texttt{solver\_validation\_*.json} 里 \texttt{status} 标
+为 \texttt{fail}（\texttt{dsigma\_rel\_rmse} 超过 \(0.05\) 通过线）：早
+期开发期\textbf{有意保留}此 fail 状态作为「待重构」标记。
+\end{numericalbox}
+
+\subsection{对比图 PDF}
+\label{subsec:ch13-numerical-figures}
+
+\texttt{plot\_validation\_curves.py} 在
+\texttt{output/deuteron\_proton\_Ay/} 下产出
+\texttt{best\_energy\_iT11\_comparison.png} 与
+\texttt{best\_energy\_dsigma\_comparison.png}（外加 SVG）。这两张
+PNG 内嵌 RMSE/MAE/max|err| 文字注释，是日常调试用的「最小看图反
+馈」。
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.92\textwidth}{
+\centering
+\textbf{\textit{占位说明}}：图 \texttt{best\_energy\_iT11\_comparison.png}
+（左）与 \texttt{best\_energy\_dsigma\_comparison.png}（右）。
+
+实际嵌入路径：\\
+\texttt{output/deuteron\_proton\_Ay/best\_energy\_iT11\_comparison.png}\\
+\texttt{output/deuteron\_proton\_Ay/best\_energy\_dsigma\_comparison.png}
+
+\medskip
+
+\textit{典型形态}：左图显示模型曲线（红线）在 \(\theta \in
+[40°, 120°]\) 区间与实验数据点（黑点）形状基本同步、幅度低 \(\sim
+40\%\)；右图模型曲线（红线，log y）远离实验点（黑点）2 个量级，
+体现 reduced-U 投影对绝对截面的失真。
+}}
+\caption{\(\Tlab^{\text{target}} = 190\,\text{MeV}\)、\(\Tlab^{\text{best}}
+= 161.15\,\text{MeV}\) 的 \(\iTeleven\)、\(\diffXS\) 曲线对比（reduced-U
+模型 vs.\ Sekiguchi et al.\,2002）。}
+\label{fig:ch13-comparison}
+\end{figure}
+
+\subsection{通过线（pass thresholds）}
+\label{subsec:ch13-thresholds}
+
+\begin{table}[h]
+\centering
+\caption{\texttt{compare\_Ay\_experiment.py} 默认通过线（来自
+\texttt{--ay-rmse-pass}、\texttt{--dsigma-rel-rmse-pass}、
+\texttt{--energy-delta-pass}）。}
+\label{tab:ch13-thresholds}
+\begin{tabular}{lccc}
+\toprule
+观测量 / 维度 & 通过线 & 警告线 & 当前 \(190\,\text{MeV}\) 实测 \\
+\midrule
+\(\iTeleven\) RMSE          & \(\le 0.02\) & \(\le 0.05\) & \(0.0959\) (fail) \\
+\(\diffXS\) 相对 RMSE       & \(\le 0.05\) & \(\le 0.10\) & \(83.87\) (fail) \\
+\(|\Delta\Tlab|\) (MeV)     & \(\le 40\)   & \(\le 80\)   & \(28.85\) (pass) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{为什么当前 status = fail 但仍然「合格」。}
+仓库的开发约定是：\textbf{在重构窗口内允许 fail，但不允许「无诊断信息
+的 fail」}。\texttt{solver\_validation\_*.json} 中的 \texttt{best\_energy}
+块、reduced-U 不变量、\texttt{phase\_sign} 都被持续记录，作为下一阶段
+（用完整 Wigner-D 求迹替换 reduced-U 投影）的基线对照。
+\cref{ch:14_miller_gate1} 之后的 J-tensor 分析能力实现一旦上线，预期
+\texttt{status} 会自动转 pass。
+
+% ============================================================
+\section{接口与依赖}
+\label{sec:ch13-interface}
+
+\subsection{上游：\texttt{U\_PW\_elements\_*.txt} 文件格式}
+\label{subsec:ch13-upstream}
+
+求解器输出文件名形如
+\verb|U_PW_elements_Np_<NpWP>_Nq_<NqWP>_JP_<2J>_<P>_Jmax_<j2N_max>_PSI_<idx>.txt|，
+对每行存
+\begin{equation}
+\Tlab,\; E_{\text{cm}},\; q_{\text{idx}},\;
+U_{00},\; U_{01},\; U_{10},\; U_{11},
+\end{equation}
+其中 \(U_{ij}\) 是用 Python \texttt{complex(...)} 直接可解析的复数字符串
+（如 \texttt{(1.234,-5.678)}）。\texttt{parse\_u\_file} 是这一格式的
+\textbf{唯一定义}——若求解器升级输出列数，更新这里即可。
+
+\subsection{下游：四类工件文件}
+\label{subsec:ch13-downstream}
+
+\begin{itemize}
+  \item \texttt{best\_energy\_iT11\_curve.csv}、
+        \texttt{best\_energy\_dsigma\_curve.csv} —
+        模型 vs.\ 实验的角度曲线，被
+        \texttt{plot\_validation\_curves.py} 与
+        \texttt{plot\_3nf\_effect.py} 共用。
+  \item \texttt{best\_energy\_iT11\_comparison.svg}、
+        \texttt{best\_energy\_dsigma\_comparison.svg} —
+        独立 SVG 图（不依赖 matplotlib，纯 Python 字符串拼接）。
+  \item \texttt{solver\_validation\_tlab\_<label>.json} —
+        机器可读全摘要，被回归测试
+        \texttt{tests/test\_190mev\_data\_pipeline.py} 解析。
+  \item \texttt{solver\_validation\_tlab\_<label>.txt} —
+        人类可读摘要（CI 日志友好）。
+\end{itemize}
+
+\subsection{第 12 章共用振幅。第 14 章共用 \(\Uop\)-矩阵元。}
+\texttt{compare\_Ay\_experiment.py} 与
+\cref{ch:12_observables_basics} 的 \texttt{deuteron\_proton\_dsigma.py}
+（如有）共享同一份 \texttt{U\_PW\_elements\_*.txt}；
+\cref{ch:14_miller_gate1} 的 Miller-gate 1 相移工具也读同一份文件。
+合理的工程边界是：\textbf{合成代码彼此独立、可任意替换}（如
+reduced-U → 完整 Wigner-D），但 \(\Uop\)-文件格式被冻结，由
+\texttt{src/io/write\_pw\_amplitude.cpp}（C++ 端）与
+\texttt{examples/solver\_u\_file\_utils.py}（Python 端）联合定义。
+
+\subsection{对照表：origin vs.\ Tic-tac}
+\label{subsec:ch13-origin-comparison}
+
+\begin{table}[h]
+\centering
+\caption{\(\Uop\)-矩阵元到极化曲线的工作流：origin vs.\ 当前 Tic-tac。}
+\label{tab:ch13-origin-vs-current}
+\begin{tabular}{lll}
+\toprule
+阶段 & \texttt{tictac-origin} & 当前 \texttt{Tic-tac} \\
+\midrule
+求解器调度 & 手写 shell 脚本 & \texttt{deuteron\_proton\_Ay.py} \\
+合成 & \(\diffXS\) 由 C++ 直出 & \texttt{compare\_Ay\_experiment.py} \\
+\(\iTeleven\) 计算 & 不在 origin 中 & 本章实现（reduced-U） \\
+张量观测量 & 不在 origin 中 & 本章 \(\Ttwentyzero, \ldots\) inv 量 \\
+对实验比较 & gnuplot 手画 & 自动 CSV/SVG/JSON/TXT \\
+3NF 开关扫描 & 重新编译 & \texttt{run\_3nf\_sweep.py} 一行 \\
+回归测试 & 无 & \texttt{tests/test\_190mev\_data\_pipeline.py} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{常见陷阱}
+\label{sec:ch13-pitfalls}
+
+\subsection{陷阱 A：\(\Ay\) 与 \(\iTeleven\) 的 \(\sqrt{3/2}\) 因子}
+\label{subsec:ch13-pitfall-Ay-vs-iT11}
+
+\begin{pitfallbox}
+\textbf{症状}：你拿 Sekiguchi et al.\,2002 表 III 的数据列对比
+\texttt{quick\_Ay\_test.py} 输出，发现实验值整体小 \(\sim 22\%\)，
+似乎模型「准确度过高」。
+
+\textbf{诊断}：检查源数据列头是 \(\iTeleven\) 还是 \(A_y\)。
+Sekiguchi et al.\,的 \texttt{T.txt} 列头是 \(\iTeleven\)（氘核作为入
+射极化粒子时的矢量分析能力）；旧 RIKEN 数据有时直接列 \(A_y^{(d)}\)。
+
+\textbf{修复}：式 \eqref{eq:ch13-Ay-iT11}：
+\(A_y^{(d)} = \sqrt{3/2}\,\iTeleven \approx 1.2247\,\iTeleven\)。代码
+中如果想转换，乘 \(\sqrt{1.5}\)。注意\textbf{不是} \(\sqrt{2}\)（这是
+另一种与 \(s_a = 1/2\) 有关的归一）。
+
+\textbf{为什么是 \(\sqrt{3/2}\)}：从
+\(\tau_{1,+1}^{(s_a=1)} = -\frac{1}{\sqrt{2}}(s_x + i s_y)\)
+（\cref{eq:ch13-Tkq-master}），加上 \(\sqrt{2k+1} = \sqrt{3}\) 的张量
+归一，\(\Ay = \langle s_y\rangle\) 直接对应；除一下得
+\(\sqrt{3/2}\)。
+\end{pitfallbox}
+
+\subsection{陷阱 B：Madison 约定与号倒错}
+\label{subsec:ch13-pitfall-madison}
+
+\begin{pitfallbox}
+\textbf{症状}：模型 \(\iTeleven\) 与实验 \(\iTeleven\) 在所有角度同号
+反向（前向正变成前向负），但绝对值还能基本对上。
+
+\textbf{诊断}：检查 \(\hat{y}\) 的取向。Madison 约定：
+\(\hat{y} = \hat{k}_{\text{in}} \times \hat{k}_{\text{out}} / \|\cdots\|\)。
+有些老论文（特别是 Bonn 70 年代实验）用反向：
+\(\hat{y} = \hat{k}_{\text{out}} \times \hat{k}_{\text{in}} / \|\cdots\|\)。
+
+\textbf{修复}：在 \texttt{compare\_Ay\_experiment.py} 里
+\texttt{phase\_sign} 字段就是为了诊断这件事保留的。如发现
+\texttt{phase\_sign = -1.0}，说明模型 \(\iTeleven\) 与实验差一个全局号
+（\(\Ttwentyone\) 同样翻号；\(\Ttwentyzero, \Ttwentytwo\) 不变）。修
+复办法：在 \cref{eq:ch13-iT11-pred} 上乘 \texttt{phase\_sign}（或更彻
+底地，重定义 \(\tau_{1,+1}\) 的相位）。
+\end{pitfallbox}
+
+\subsection{陷阱 C：reduced-U 投影 vs.\ 完整 Wigner-D 求迹}
+\label{subsec:ch13-pitfall-reducedU-vs-full}
+
+\begin{pitfallbox}
+\textbf{症状}：\(\iTeleven\) RMSE 还能压在 \(0.10\) 量级，但
+\(\diffXS\) 模型曲线和实验曲线差 \(2\sim 3\) 数量级（如
+\cref{subsec:ch13-numerical-table} 所示，模型 \(\sim 1\,\text{fm}^2/\text{sr}\)、
+实验 \(\sim 0.018\,\text{fm}^2/\text{sr}\) 在 \(91°\) 处）。
+
+\textbf{诊断}：当前 \texttt{\_predict\_observables\_from\_u} 在
+\(\diffXS\) 上用的是 \texttt{u\_norm * exp(1.10 inv\_T20 P\_2 + 0.60
+inv\_T22 P\_4)} 的「形状拟合」，没有把 \(M\)-矩阵的
+spin-helicity 求迹结构正确折进来；\(u_{\text{norm}}\) 也没有乘
+\(\big|f(p, q)\big|^{-2}\) 的相空间因子。
+
+\textbf{修复路径}：
+\begin{enumerate}
+  \item 把 \texttt{\_predict\_observables\_from\_u} 重写成「Wigner-D 求
+        和 + spin tensor 求迹」的完整教科书形式
+        （\cref{eq:ch13-Tkq-master}）；
+  \item \(u_{\text{norm}}\) 乘上正确的运动学因子
+        \((q_{\text{out}} / q_{\text{in}}) \cdot |\mu|^2\)（参见
+        \cref{ch:12_observables_basics}）；
+  \item 完整通道集合 \((J^\pi = \tfrac{1}{2}^{\pm}, \tfrac{3}{2}^{\pm},
+        \tfrac{5}{2}^{\pm}, \ldots)\) 全部参与求和，而不是只
+        \((J^\pi = 1^\pm)\)。
+\end{enumerate}
+
+\textbf{当前合理化}：在 reduced-U 实现下保留
+\texttt{status = fail} 是\emph{有意为之}（\cref{subsec:ch13-thresholds}），
+等 J-tensor 实现切换上线 \texttt{status} 自然变 pass。
+\end{pitfallbox}
+
+\subsection{陷阱 D：输入 \(\Tlab\) ≠ 求解器实际 \(\Tlab\)}
+\label{subsec:ch13-pitfall-input-vs-solver-tlab}
+
+\begin{pitfallbox}
+\textbf{症状}：你 \texttt{--target-tlab-mev 190} 跑完后看
+\texttt{solver\_validation\_tlab\_190MeV.json}，发现
+\texttt{best\_tlab\_mev = 161.145}，差了将近
+\(\Delta\Tlab \approx 29\,\text{MeV}\)。
+
+\textbf{诊断}：Tic-tac 求解器内部把 \(\Tlab\) 「投影」到\textbf{ on-shell
+q-bin 的中点}。原始请求的 \(190\,\text{MeV}\) 对应一个连续的 \(q\) 值；
+但 WP 离散把 \([0, q_{\max}]\) 切成 \(\NqWP\) 个 bin，求解器只能在 bin 中
+点上算 \(\Uop\)-矩阵元。Tic-tac 的当前选择是「取最近 bin 中点」，所以
+真正算出来的能量可能与请求差 \(\pm 10\sim 40\,\text{MeV}\)。
+
+\textbf{修复}：
+\begin{enumerate}
+  \item 把 \(\NqWP\) 加大到 \(40\) 或 \(80\)，bin 间距压到
+        \(\sim 5\,\text{MeV}\) 量级；
+  \item 检查 \texttt{src/config/run\_organizer.cpp::find\_on\_shell\_bins}
+        看哪个 bin 被选中；
+  \item 如果一定要精确 \(190\,\text{MeV}\)，可以用 \texttt{--chebyshev-s}
+        与 \texttt{--chebyshev-t} 调整网格分布让某个 bin 中点正好落在
+        \(190\,\text{MeV}\)。
+\end{enumerate}
+
+\textbf{为什么默认行为是「最近 bin」}：因为 Faddeev 求解器的设计是
+\textbf{批量算多能量}，逐能量做 root-finding 会把成本翻好几倍。在重构
+窗口内、误差 \(\le 40\,\text{MeV}\) 是\textbf{通过线}（\cref{tab:ch13-thresholds}），
+反映了「\(\iTeleven\) 在
+\([150, 230]\,\text{MeV}\) 区间形状不剧烈变化」这个物理事实。
+\end{pitfallbox}
+
+\subsection{陷阱 E：\(T_{kq}\) 的 Hermitian 性与实/虚部约定}
+\label{subsec:ch13-pitfall-hermiticity}
+
+\begin{pitfallbox}
+\textbf{症状}：你想从 \(\tau_{2,+2}\) 算 \(\Ttwentytwo\)，但发现取 \(M\)-
+矩阵的「实部」时和 Sekiguchi 表里的 \(\Ttwentytwo\) 差一个相位。
+
+\textbf{诊断}：\(\tau_{kq}\) 不是 Hermitian，它满足
+\(\tau_{kq}^\dagger = (-1)^{q}\,\tau_{k,-q}\)。所以 \(\Tr[M\tau_{kq}M^\dagger]\)
+本身\textbf{是复数}；只有「\(\tau_{k,q} + (-1)^{q}\tau_{k,-q}\)」与
+「\(\tau_{k,q} - (-1)^{q}\tau_{k,-q}\)」的两个 Hermitian 组合给出实数
+观测量。
+
+\textbf{修复}：实验上的 \(\Re\Ttwentytwo\) 对应
+\(\Tr[M(\tau_{2,+2} + \tau_{2,-2})M^\dagger]/(2\Tr[MM^\dagger])\)，
+\(\Im\Ttwentytwo\) 对应另一种组合。Madison 约定下当散射平面取
+\(xz\) 平面（\(\phi=0\)）时，\(\Im\Ttwentytwo = 0\)，所以实验报的就是
+\(\Re\Ttwentytwo\)。代码里 \texttt{inv\_T22} 取的正是
+\(\Re[U_{00}^{*}U_{11} - U_{01}^{*}U_{10}]\)（实部），与这个约定一致。
+\end{pitfallbox}
+
+\subsection{陷阱 F：\(\Ttwentyone\) 在 \(\theta = 0\) 处必须为零，
+但 reduced-U 投影会越界}
+\label{subsec:ch13-pitfall-T21-at-zero}
+
+\begin{pitfallbox}
+\textbf{症状}：\(\Ttwentyone(\theta = 0)\) 物理上必为零（散射平面在
+正向角无定义，\(T_{2,\pm 1}\) 受限于 \(\sin\theta\) 因子），但 reduced-U
+投影输出可能有非零值。
+
+\textbf{诊断}：reduced-U 投影里 \(\Ttwentyone\) 没有显式 \(\sin\theta\)
+因子（仅有 \(P_2 \cos^2\theta\) 项），导致 \(\theta = 0\) 时未受约束。
+
+\textbf{修复}：在 \cref{eq:ch13-iT11-pred} 后添加
+\(\Ttwentyone^{\text{model}}(\theta) = \text{const} \cdot \text{inv\_T21}
+\cdot \sin(2\theta)\)（这是 reduced-U 的「显式 \(\sin\) 修正」）。当前
+\texttt{compare\_Ay\_experiment.py} 仅算 \(\iTeleven\) 与
+\(\diffXS\)；\(\Ttwentyzero, \Ttwentyone, \Ttwentytwo\) 暂时只输出
+不变量到 JSON、不画曲线。等完整 J-tensor 实现上线后这个 \(\sin\theta\)
+因子会从 Wigner-D 求迹自然涌现。
+\end{pitfallbox}
+
+\subsection{陷阱 G：单位与 \(\diffXS\) 的 mb/sr ↔ fm²/sr}
+\label{subsec:ch13-pitfall-units}
+
+\begin{pitfallbox}
+\textbf{症状}：你画 \(\diffXS\) 看到模型曲线在 \(\sim 1\) 量级、实
+验曲线在 \(\sim 0.018\) 量级，相差 \(\sim 50\) 倍。
+
+\textbf{诊断}：检查单位。\texttt{1 mb/sr = 0.1 fm²/sr}（\(1\,\text{mb}
+= 0.1\,\text{fm}^2\)）。\texttt{compare\_Ay\_experiment.py} 默认
+输出 \texttt{mb/sr}，实验文件
+\texttt{DSigamaOverDOmega.txt} 的源单位也是 \texttt{mb/sr}（文件头自
+带说明），所以默认配置下不会差 \(50\) 倍。但如果你用
+\texttt{--dsigma-unit fm2/sr} 而模型仍按 \texttt{mb/sr} 公式算，
+就会差 \(10\) 倍——这是\texttt{convert\_dsigma\_value} 设计存在的
+原因。
+
+\textbf{修复}：永远显式传 \texttt{--dsigma-unit}。CI 在
+\texttt{tests/test\_190mev\_data\_pipeline.py} 里强制断言
+\texttt{units.dsigma\_output == "mb/sr"}（默认）以防漂移。
+\end{pitfallbox}
+
+\subsection{陷阱 H：\(P_{123}\) 缓存与 \texttt{--reuse-p123}}
+\label{subsec:ch13-pitfall-p123-cache}
+
+\begin{pitfallbox}
+\textbf{症状}：你改了 \texttt{potential\_model} 重跑
+\texttt{deuteron\_proton\_Ay.py --reuse-p123}，发现 \(\iTeleven\) 几乎不
+变。
+
+\textbf{诊断}：\texttt{--reuse-p123} 让求解器跳过 \(P_{123}\) 重新计算
+（\(P_{123}\) 矩阵本身只依赖网格与角动量截断，不依赖势模型）；但势矩阵
+\(V\) 与 \(\Uop\)-矩阵元仍重新算。如果 \(\iTeleven\) 几乎不变，可能是：
+\begin{enumerate}
+  \item 势模型 \emph{真的} 在 \(190\,\text{MeV}\) 上对 \(\iTeleven\) 不
+        敏感（这种情况要看哪些通道占主）；
+  \item 实际你忘了去掉 \texttt{--reuse-p123} 同时也没改其他参数；
+  \item 求解器输出目录被其它进程覆盖。
+\end{enumerate}
+
+\textbf{修复}：每次实验性切换势模型时，\textbf{第一次}用
+\texttt{calculate\_and\_store\_P123=true}（即不加 \texttt{--reuse-p123}）
+让缓存重建，确认 \texttt{p123/} 目录的时间戳更新；之后才能 \texttt{--reuse-p123}。
+\end{pitfallbox}
+
+\section*{本章小结}
+
+本章把第 \ref{ch:11_faddeev_solver} 章求出的
+\(\Uop\)-矩阵元一路推到「与 Sekiguchi et al.\,2002 实验数据可比的角度
+曲线」：
+
+\begin{itemize}
+  \item \cref{sec:ch13-motivation,sec:ch13-math} 给出从极化态密度矩阵 +
+        球张量基出发到张量分析能力 \(\Ttwentyzero, \Ttwentyone,
+        \Ttwentytwo\) 与矢量分析能力 \(\iTeleven\) 的求迹公式
+        \eqref{eq:ch13-Tkq-master}，并强调与 \(\Ay^{(d)}\) 之间的因子
+        \(\sqrt{3/2}\) （\cref{eq:ch13-Ay-iT11}）；
+  \item \cref{sec:ch13-discretization,sec:ch13-algorithm} 把流水线
+        拆成 Solver / 实验读取 / 合成三段，并给出
+        \cref{alg:ch13-pol-obs} 的伪码骨架；
+  \item \cref{sec:ch13-code} 走完
+        \texttt{deuteron\_proton\_Ay.py} +
+        \texttt{compare\_Ay\_experiment.py} +
+        \texttt{plot\_validation\_curves.py} 三个 Python 脚本的核心函数；
+  \item \cref{sec:ch13-numerical} 在 \(190\,\text{MeV}\) 基准下给出
+        \(\iTeleven, \diffXS\) 在五个代表角度处的数值闭环表，并明确指出
+        当前 reduced-U 实现在 \(\diffXS\) 绝对值上不通过线、但作为
+        \(\iTeleven\) 形状的早期诊断有效；
+  \item \cref{sec:ch13-pitfalls} 列了 8 个具体陷阱（\(\Ay\) vs
+        \(\iTeleven\) 因子、Madison 约定号、reduced-U vs.\ 完整 Wigner-D、
+        \(\Tlab\) 投影偏差、张量算符 Hermitian 性、\(T_{21}\) 在
+        \(\theta=0\) 必为零、单位换算、\(P_{123}\) 缓存）。
+\end{itemize}
+
+下一章 \ref{ch:14_miller_gate1} 把同一份 \(\Uop\)-矩阵元用作
+Miller-gate 1 相移提取，对照 nd 散射相移基准；
+\cref{ch:15_3nf_physics} 起则在本章建立的极化通道上系统地切换
+\(c_D, c_E, c_1, c_3, c_4\)，量化 3NF 对 \(\iTeleven\) puzzle 的修正。

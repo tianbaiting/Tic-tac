@@ -10,8 +10,8 @@
 
 % --- 基本物理量 ---
 \newcommand{\hbarc}{\hbar c}                            % ℏc
-\newcommand{\Tlab}{T_{\text{lab}}}                      % 实验室能量
-\newcommand{\Tcm}{T_{\text{cm}}}                        % 质心系能量
+\newcommand{\Tlab}{{T_{\text{lab}}}}                    % 实验室能量（外 brace 防双下标）
+\newcommand{\Tcm}{{T_{\text{cm}}}}                      % 质心系能量
 \newcommand{\Mn}{M_n}                                   % 中子质量
 \newcommand{\Mp}{M_p}                                   % 质子质量
 \newcommand{\Md}{M_d}                                   % 氘核质量
@@ -61,10 +61,10 @@
 \newcommand{\dsigma}{d\sigma}
 \newcommand{\dOmega}{d\Omega}
 \newcommand{\diffXS}{\frac{\dsigma}{\dOmega}}           % 微分截面
-\newcommand{\iTeleven}{i T_{11}}
-\newcommand{\Ttwentyzero}{T_{20}}
-\newcommand{\Ttwentyone}{T_{21}}
-\newcommand{\Ttwentytwo}{T_{22}}
+\newcommand{\iTeleven}{{i T_{11}}}                       % 外 brace 防双下标
+\newcommand{\Ttwentyzero}{{T_{20}}}
+\newcommand{\Ttwentyone}{{T_{21}}}
+\newcommand{\Ttwentytwo}{{T_{22}}}
 \newcommand{\Ay}{A_y}                                   % 极化分析能力
 
 % --- 3NF 低能常数 ---
@@ -116,3 +116,32 @@
 \newcommand{\Tziso}{T_z}                                 % 第 3 同位旋分量  added by Wave 2 / Agent B for ch08
 \newcommand{\Vpartial}[1]{V_{#1}}                        % 部分波势 V_ℓ(p',p)  added by Wave 2 / Agent B for ch08
 \newcommand{\spectro}[3]{{}^{#1}\!#2_{#3}}               % 谱学符号 ^{2s+1}L_J  added by Wave 2 / Agent B for ch07
+
+% --- Wave 8 cleanup：跨章常用符号补全（main agent） ---
+% 用 \providecommand 兼容已用 \providecommand 的章节
+\providecommand{\Cmat}{\mathbf{C}}                       % WP-SWP 变换矩阵
+\providecommand{\Nx}{N_x}                                % x 方向求积阶
+\providecommand{\Nphi}{N_\phi}                           % φ 方向求积阶
+\providecommand{\fminv}{\text{fm}^{-1}}                  % fm⁻¹ 单位
+\providecommand{\Eb}{E_b}                                % 束缚态能量
+\providecommand{\Epcell}{{\bar{E}_p}}                    % p-bin 平均能量（subscript 避免双上标）
+\providecommand{\Eqcell}{{\bar{E}_q}}                    % q-bin 平均能量
+\providecommand{\Greschan}{G_R}                          % R-part 通道 Green
+\providecommand{\GreschanMat}{\mathbf{G}_R}              % R-part 矩阵
+\providecommand{\BCcell}{\mathrm{BC}}                    % bound–continuum cell
+\providecommand{\CCcell}{\mathrm{CC}}                    % continuum–continuum cell
+\providecommand{\Rterm}{R}                               % R 项
+\providecommand{\Qterm}{Q}                               % Q 项
+\providecommand{\DeltaP}{\Delta^{p}}                     % p-bin 宽度
+\providecommand{\DeltaM}{\Delta^{q}}                     % q-bin 宽度
+\providecommand{\NxGL}{N_x}                              % Gauss-Legendre x 阶（同 Nx）
+\providecommand{\Epsilon}{\mathcal{E}}                   % 大写花体 E（用于 SWP 能量本征值）
+\providecommand{\eepsilon}{\varepsilon}                  % alias for varepsilon
+\providecommand{\fpi}{f_\pi}                             % pion decay constant
+\providecommand{\gA}{g_A}                                % axial coupling
+\providecommand{\mpi}{m_\pi}                             % pion mass
+\providecommand{\Lchi}{\Lambda_\chi}                     % chiral cutoff
+\providecommand{\LamThreeNF}{\Lambda_{3N}}               % 3NF regulator
+\providecommand{\Wsymm}{W^{\rm sym}}                     % 3NF 反对称化算符
+\providecommand{\swpket}[1]{\widetilde{x}_{#1}}          % SWP cell 标记
+\providecommand{\degree}{^{\circ}}                       % 角度符号

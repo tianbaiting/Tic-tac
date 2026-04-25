@@ -1,13 +1,1327 @@
 % =====================================================================
 % 20_hands_on.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% Wave 6 / Agent C —— 第 20 章 上手实战路径
+%
+% Structure: 4-segment scenario format
+%   §20.1 准备环境
+%   §20.2 编译
+%   §20.3–§20.7 五个生产场景（命令 → 期望输出 → 故障排查 → 性能预期）
+%   §20.8 修改源代码后的回归测试
+%   §20.9 常见错误库（按错误信息查询）
 % =====================================================================
 
 \chapter{上手实战路径}
 \label{ch:20_hands_on}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% 章节摘要 -----------------------------------------------------------
+本章是\textbf{从零开始把 Tic-tac 跑起来}的操作手册。
+读者目标姿态：在一台干净的 Linux 工作站上拿到本仓库后，
+按本章顺序操作，
+能在数小时内复现 \cref{ch:18_origin_codebase} 与 \cref{ch:19_refactor_evolution} 中描述的全部已被验证过的工作流。
+本章不再讨论物理推导，
+也不再解释代码结构（它们在前面 19 章已经写完），
+本章\textbf{只关心动手按下回车之后会发生什么}。
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+为此，
+本章采用与全书前 19 章不同的\textbf{四段式场景模板}：
+\begin{description}
+  \item[命令] 给出可以原样复制粘贴的 shell 命令（路径、参数都已经填好）；
+  \item[期望输出] 给出运行成功时终端、日志文件、产物文件应该长什么样；
+  \item[故障排查] 给出已经在实践中遇到过、并被定位的错误模式与修复路径；
+  \item[性能预期] 给出常见网格规模下的内存占用、CPU 时间量级与并行可扩展范围。
+\end{description}
+这个四段式与本书前面的 8 段模板（物理动机/数学/离散化/算法/代码/数字/接口/陷阱）是\textbf{互补的}：
+前面 8 段回答 \emph{“为什么这么写”}，
+本章 4 段回答 \emph{“这条命令为什么不工作”}。
+
+% =====================================================================
+\section{准备环境}
+\label{sec:ch20-env}
+% =====================================================================
+
+\subsection{依赖矩阵}
+\label{sec:ch20-env-deps}
+
+Tic-tac 是一个 C++17 / Fortran 90 / Fortran 77 / Python 3 的多语言项目，
+所有外部依赖都是\textbf{二进制可获取}的（不需要从源码自编译任何科学库）。
+\cref{tab:ch20-deps} 给出最小依赖集；
+其中“最低版本”一列只在我们实际遇到过更低版本失败时才填写，
+否则按发行版默认即可。
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Tic-tac 运行所需的最小依赖集。}
+\label{tab:ch20-deps}
+\begin{tabular}{@{}llll@{}}
+\toprule
+组件 & 用途 & 最低版本 & Debian/Ubuntu 包名 \\
+\midrule
+g++           & C++17 编译器           & 9.x  & \texttt{g++} \\
+gfortran      & F90/F77 编译器         & 9.x  & \texttt{gfortran} \\
+GNU Make      & 主 Makefile 驱动       & 4.x  & \texttt{make} \\
+CMake         & 备用 CMake 路径        & 3.16 & \texttt{cmake} \\
+OpenMP        & 并行（$P_{123}$ 计算） & libgomp1 默认随 g++ 安装 & \texttt{libgomp1} \\
+GSL           & 求积/特殊函数          & 2.5  & \texttt{libgsl-dev} \\
+HDF5          & $P_{123}$ 缓存格式     & 1.10 & \texttt{libhdf5-dev} \\
+LAPACK/BLAS   & 致密线性代数           & 3.9  & \texttt{liblapack-dev} \texttt{liblapacke-dev} \texttt{libblas-dev} \\
+libcurl       & EXFOR 数据抓取         & 7.x  & \texttt{libcurl4-openssl-dev} \\
+Python 3      & 上层 workflow          & 3.9  & \texttt{python3} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Debian/Ubuntu 系统一键安装。}
+对应的最小一行命令：
+\begin{lstlisting}[style=config,caption={Debian/Ubuntu 依赖安装。}]
+sudo apt install -y g++ gfortran make cmake \
+     libgomp1 libgsl-dev libhdf5-dev \
+     liblapack-dev liblapacke-dev libblas-dev \
+     libcurl4-openssl-dev python3 python3-pip
+\end{lstlisting}
+
+\paragraph{HDF5 包名陷阱。}
+Debian/Ubuntu 把 HDF5 切成了 \emph{serial} 与 \emph{mpi} 两个并行的安装路径：
+头文件都安装到 \texttt{/usr/include/hdf5/serial/}，
+库文件名是 \texttt{libhdf5\_serial\_*}（带 \texttt{\_serial} 后缀）；
+而上游 HDF5 的“官方”库名只是 \texttt{libhdf5\_*}（不带后缀）。
+Tic-tac 的 \texttt{Makefile} 已经处理这件事：
+当 \texttt{pkg-config --exists hdf5-serial} 成功时，
+自动把链接行从 \texttt{-lhdf5\_hl\_cpp -lhdf5\_cpp -lhdf5\_hl -lhdf5}
+切成 \texttt{-lhdf5\_serial\_hl\_cpp -lhdf5\_serial\_cpp -lhdf5\_serial\_hl -lhdf5\_serial}。
+如果你的发行版既不在 Debian 体系也没有 conda 环境，
+而链接时报 \texttt{cannot find -lhdf5\_cpp}，
+请优先怀疑是 pkg-config 规则未命中（详见 \cref{sec:ch20-errors} \texttt{ERR-LINK-HDF5}）。
+
+\subsection{Conda/Micromamba 工具链}
+\label{sec:ch20-env-conda}
+
+实验室常用做法是把所有依赖塞进一个 conda 环境，
+这样多机部署时只需要复制一份 \texttt{environment.yml}。
+Tic-tac 的 \texttt{Makefile} 已经对 conda 做了\textbf{自动检测}：
+\begin{lstlisting}[style=config,caption={Makefile 中的 conda 探针片段。}]
+ifneq ($(strip $(CONDA_PREFIX)),)
+CONDA_INCLUDE := -I$(CONDA_PREFIX)/include
+CONDA_LDFLAGS := -L$(CONDA_PREFIX)/lib -Wl,-rpath,$(CONDA_PREFIX)/lib
+HDF5_LIBS := -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5
+endif
+\end{lstlisting}
+要点：
+\begin{itemize}
+  \item \texttt{CONDA\_PREFIX} 一旦非空，
+        所有头文件搜索路径都会被改写到 \texttt{\$CONDA\_PREFIX/include}；
+  \item \texttt{-Wl,-rpath} 把 conda 的 \texttt{lib/} 目录烙进可执行文件，
+        这样\textbf{不必每次运行前都 \texttt{conda activate}}；
+  \item conda 环境下用的是\textbf{无后缀}的 HDF5 库名（与 Debian \texttt{\_serial} 后缀冲突）。
+\end{itemize}
+
+\paragraph{推荐 conda 环境创建命令。}
+\begin{lstlisting}[style=config,caption={最小 conda 环境，足以让 \texttt{CPP/run} 与 Python workflow 全部跑通。}]
+micromamba create -n tictac-env -c conda-forge \
+    gxx gfortran make cmake openmp gsl \
+    hdf5 hdf5-cpp hdf5-static \
+    blas lapack liblapacke \
+    libcurl python=3.10
+micromamba activate tictac-env
+\end{lstlisting}
+
+\subsection{中文 Linux 工作站的几个坑}
+\label{sec:ch20-env-cnlocale}
+
+实验室的工作站通常装的是中文环境。
+中文 locale 与 Tic-tac 的交叉点有两处需要注意：
+
+\paragraph{(a) Python 标准输出编码。}
+\texttt{examples/} 下的脚本默认用 UTF-8 写文件
+（如 \texttt{config\_file.write\_text(..., encoding="utf-8")}），
+不依赖 locale。
+但 \texttt{print()} 出去的提示信息走 \texttt{sys.stdout}，
+受 \texttt{LANG} 与 \texttt{LC\_ALL} 影响。
+如果终端是 \texttt{LANG=zh\_CN.GBK}（旧系统），
+而脚本里有非 ASCII 字符（极少，但有），
+\texttt{print} 会抛 \texttt{UnicodeEncodeError}。
+保险做法是在 \texttt{\textasciitilde/.bashrc} 里加：
+\begin{lstlisting}[style=config]
+export LANG=zh_CN.UTF-8
+export LC_ALL=zh_CN.UTF-8
+\end{lstlisting}
+
+\paragraph{(b) gfortran 中文路径警告。}
+gfortran 不擅长处理\textbf{源文件本身放在中文路径下}的情形。
+现象是大量 \texttt{file ... not found} 但路径打印是乱码。
+避免方式：把整个 \texttt{Tic-tac/} 仓库放到全英文路径下
+（如 \texttt{\textasciitilde/workspace/Tic-tac}，而不是 \texttt{\textasciitilde/工作目录/Tic-tac}）。
+这一条是\textbf{硬要求}，
+因为 Makefile 里的 \texttt{find}、依赖 \texttt{.d} 文件、Fortran \texttt{.mod} 文件全都假设路径是 ASCII 安全的。
+
+\paragraph{(c) LaTeX 文档编译。}
+本治学手册（\texttt{docs/treatise/}）用的是 \texttt{ctex} + \texttt{xeCJK} + \texttt{Noto Serif CJK SC} 字体。
+工作站如果只装了西文字体，
+\texttt{xelatex} 会报 \texttt{Font 'Noto Serif CJK SC' not found}。
+对应安装命令：
+\begin{lstlisting}[style=config]
+sudo apt install -y fonts-noto-cjk fonts-noto-cjk-extra texlive-xetex
+\end{lstlisting}
+
+\subsection{硬件预算}
+\label{sec:ch20-env-hw}
+
+Tic-tac 的瓶颈始终是 $P_{123}$ 置换矩阵，
+其内存随 $N_p \cdot N_q$ 增长（不是 $N_p^2 N_q^2$，因为是稀疏存储），
+但生成时的瞬时内存可以达到该尺寸的若干倍。
+\cref{tab:ch20-hw} 给出建议的硬件预算。
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Tic-tac 硬件预算（基于 \texttt{LO\_internal} 势、\texttt{two\_J\_3N\_max=1}、\texttt{J\_2N\_max=2} 的实测）。}
+\label{tab:ch20-hw}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+$N_p = N_q$ & 持久 RAM (GB) & $P_{123}$ 计算时间 & Faddeev 求解时间 \\
+\midrule
+20  & $\sim 2$    & 5--15 min       & 1--3 min  \\
+30  & $\sim 6$    & 30--60 min      & 5--15 min \\
+50  & $\sim 20$   & 4--8 h          & 30--90 min \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+低于 8 GB 的机器只能跑 $N_p=N_q=20$ 的 \emph{smoke test} 配置；
+若要复现 Miller PRC 106 的 $N_{WP}=125$ 收敛点（\cref{ch:14_miller_gate1}），
+建议 64 GB 以上 + 8 核以上 CPU，
+24 小时左右一个完整 J 通道扫描。
+
+% =====================================================================
+\section{编译两条路径}
+\label{sec:ch20-build}
+% =====================================================================
+
+Tic-tac 同时维护\textbf{两条独立的}构建系统，
+原因详见 \cref{ch:19_refactor_evolution}。
+本节只给操作动作。
+
+\subsection{路径 A：Makefile（生产路径）}
+\label{sec:ch20-build-make}
+
+Python workflow 全部走这条路径。
+产物是 \texttt{CPP/run}。
+
+\paragraph{命令。}
+\begin{lstlisting}[style=config,caption={从仓库根编译 \texttt{CPP/run}。}]
+cd Tic-tac
+make -C CPP -j$(nproc)
+\end{lstlisting}
+等价地，也可以走 root 级 Makefile（被 \texttt{CPP/makefile} 转发）：
+\begin{lstlisting}[style=config]
+cd Tic-tac
+make -j$(nproc)        # 默认 TARGET=tic-tac, BUILD_DIR=build/
+\end{lstlisting}
+\texttt{CPP/makefile} 是一层薄包装，
+它把 \texttt{TARGET=\$(CURDIR)/run} 与 \texttt{BUILD\_DIR=\$(CURDIR)/build}
+传回给根 Makefile。
+也就是说：根 Makefile 与 \texttt{CPP/makefile} 编译\emph{同一份源文件}（\texttt{src/} 与 \texttt{include/}），
+只是产物命名不同。
+
+\paragraph{期望输出。}
+正常编译末尾应该看到：
+\begin{lstlisting}[style=config]
+... 大量 "编译 C++ 文件: ..." 与 "编译 Fortran ..." 行
+链接目标文件生成可执行文件...
+g++ <ALL_OBJECTS> -o /home/<you>/.../Tic-tac/CPP/run -lgomp -lgsl -lhdf5_serial_hl_cpp ...
+构建完成: /home/<you>/.../Tic-tac/CPP/run
+\end{lstlisting}
+然后 \texttt{ls -la CPP/run} 应该看到一个 $\sim 30\,\mathrm{MB}$ 大小的可执行文件，
+\texttt{file CPP/run} 应该报告 \texttt{ELF 64-bit LSB executable, x86-64, ...}。
+
+\paragraph{故障排查。}
+最常见的三类失败：
+\begin{enumerate}
+  \item \textbf{Fortran 模块顺序竞争} —
+        并行编译时偶发 \texttt{Fatal Error: Cannot open module file 'idaho\_chiral\_potential.mod'}。
+        \texttt{Makefile} 里有显式依赖
+        \texttt{\$(CHP\_PRESET\_OBJECT): \$(CHP\_MODULE\_OBJECT)}，
+        但若你手动改过 \texttt{src/interactions/chp/} 路径或文件名，
+        这条规则可能失效。
+        修复：先 \texttt{make clean}，再串行编译一次 \texttt{make -C CPP -j1}，
+        确认能跑通后再回到 \texttt{-j\$(nproc)}。
+  \item \textbf{HDF5 链接错误} — 见 \cref{sec:ch20-env-deps} 与 \cref{sec:ch20-errors} \texttt{ERR-LINK-HDF5}。
+  \item \textbf{conda 与系统库混用} — 现象是头文件来自 \texttt{/usr/include}，
+        但库来自 \texttt{\$CONDA\_PREFIX/lib}（或反之），
+        运行时崩在 \texttt{H5T\_NATIVE\_DOUBLE} 之类的符号上。
+        修复：要么彻底 \texttt{conda activate}，
+        要么彻底 \texttt{conda deactivate} + \texttt{unset CONDA\_PREFIX}，
+        然后 \texttt{make clean \&\& make -C CPP -j}。
+\end{enumerate}
+
+\paragraph{性能预期。}
+8 核工作站从零编译约 \textbf{2--4 分钟}；
+增量编译（仅改了一个 \texttt{.cpp}）约 \textbf{10--30 秒}。
+Fortran 编译比 C++ 慢一倍以上，
+其中 \texttt{src/interactions/chp/chiral-twobody-potentials.f90} 单文件就要 30 秒以上
+（这是 Idaho-N3LO 各阶贡献的展开，文件本身上千行）。
+
+\subsection{路径 B：CMake（refactor 镜像路径）}
+\label{sec:ch20-build-cmake}
+
+CMake 路径产物是 \texttt{build/bin/tic-tac}，
+脚本 \texttt{build.sh} 还会把它复制到仓库根的 \texttt{tic-tac}（不带斜杠路径）。
+
+\paragraph{命令。}
+\begin{lstlisting}[style=config,caption={CMake 路径的三种形态。}]
+./build.sh release           # 默认 Release，等价于 cmake -DCMAKE_BUILD_TYPE=Release
+./build.sh debug             # Debug，开 -O0 -g，方便 gdb
+./build.sh rebuild           # clean 后重新构建
+./build.sh clean             # 仅清理 build/
+\end{lstlisting}
+
+\paragraph{期望输出。}
+\texttt{build.sh} 用绿色 \texttt{[GREEN]} 标记关键步骤：
+\begin{lstlisting}[style=config]
+开始构建 Tic-tac (Release 模式)...
+运行 CMake 配置...
+-- The C compiler identification is GNU 11.x
+-- The CXX compiler identification is GNU 11.x
+... (CMake 配置输出)
+编译中...
+[ 1%] Building CXX object ...
+[100%] Linking CXX executable bin/tic-tac
+可执行文件已复制到根目录
+构建成功！
+可执行文件: ./tic-tac
+\end{lstlisting}
+
+\paragraph{故障排查。}
+\begin{enumerate}
+  \item \textbf{CMake 与 Makefile 选项不一致} —
+        CMake 路径\textbf{不读取} \texttt{CONDA\_PREFIX} 环境变量，
+        因此在 conda 环境下，
+        Makefile 路径与 CMake 路径可能链到不同的 HDF5 副本。
+        如果你看到一个能跑、另一个崩，
+        优先怀疑这一条。
+  \item \textbf{\texttt{nproc} 在容器里返回 1} — \texttt{build.sh} 用 \texttt{make -j\$(nproc)}，
+        在受限容器内 \texttt{nproc} 可能只返回一个核，导致编译极慢。
+        手工覆盖：\texttt{cd build \&\& make -j8}.
+\end{enumerate}
+
+\paragraph{性能预期。}
+首次 CMake 配置 5--15 秒；
+首次完整编译比 Makefile 路径\emph{慢约 20\%}（CMake 走 \texttt{Tic-tac.dir} 一层额外目录映射）。
+增量编译相当。
+
+\subsection{两条路径的产物互通性}
+\label{sec:ch20-build-interop}
+
+\textbf{重要}：两条路径产物 \texttt{CPP/run} 与 \texttt{tic-tac}（或 \texttt{build/bin/tic-tac}）
+\textbf{接受完全相同的输入文件}（\cref{ch:18_origin_codebase} 已论证），
+因此后续任何场景里出现的 \texttt{./CPP/run input.txt}，
+都可以原样替换成 \texttt{./tic-tac input.txt} 而不影响物理结果。
+但 Python workflow 默认调用 \texttt{CPP/run}（见 \texttt{deuteron\_proton\_Ay.py} 的 \texttt{--solver} 默认值），
+所以新仓库部署后\textbf{先把 Makefile 路径跑通}是最省事的。
+
+% =====================================================================
+\section{场景 1：190 MeV 验证（最经典）}
+\label{sec:ch20-scenario-190}
+% =====================================================================
+
+这是 Tic-tac 唯一被持续维护的端到端验证。
+\cref{ch:13_polarization_observables} 已给出物理意义，
+本节只关心\textbf{操作}。
+
+\subsection{命令}
+\label{sec:ch20-s1-cmd}
+
+\paragraph{第 1 步：生成 U-amplitude。}
+\begin{lstlisting}[style=config,caption={求解器一次运行，输出 \texttt{U\_PW\_elements\_*.txt}。}]
+cd Tic-tac
+python3 examples/deuteron_proton_Ay.py \
+    --work-dir output/dpol_p_190 \
+    --target-tlab-mev 190 \
+    --reuse-p123 \
+    --np 20 --nq 20 \
+    --threads 4
+\end{lstlisting}
+关键参数解读：
+\begin{itemize}
+  \item \texttt{-{}-target-tlab-mev 190}：目标实验室能量（解释见 \cref{sec:ch20-s1-pitfalls}）；
+  \item \texttt{-{}-reuse-p123}：第二次以后的运行可加，
+        让脚本把 \texttt{calculate\_and\_store\_P123=false} 写进 autogen 输入，
+        \emph{重用}已有 $P_{123}$ HDF5 缓存——这是\textbf{最大}的省时项；
+  \item \texttt{-{}-np 20 -{}-nq 20}：smoke-test 网格；
+        生产配置是 \texttt{-{}-np 50 -{}-nq 50}（见 \cref{sec:ch20-s1-perf}）。
+\end{itemize}
+
+\paragraph{第 2 步：与实验对比并写报告。}
+\begin{lstlisting}[style=config]
+python3 examples/compare_Ay_experiment.py \
+    --work-dir output/dpol_p_190 \
+    --solver-out-dir output/dpol_p_190/solver_out \
+    --target-tlab-mev 190
+\end{lstlisting}
+
+\paragraph{第 3 步（可选）：生成 PDF 用图。}
+\begin{lstlisting}[style=config]
+micromamba run -n anaroot-env python examples/plot_validation_curves.py \
+    --work-dir output/dpol_p_190
+\end{lstlisting}
+（\texttt{anaroot-env} 是实验室共用的 matplotlib 环境，
+任何带 \texttt{matplotlib} 的环境都行。）
+
+\subsection{期望输出}
+\label{sec:ch20-s1-expect}
+
+\paragraph{终端输出。}
+\texttt{deuteron\_proton\_Ay.py} 末尾会打印：
+\begin{lstlisting}[style=config]
+Tic-tac solver run finished
+return code:   0
+config file:   .../CPP/Input/input_tlab_190MeV_solver_validation_autogen.txt
+energy file:   .../CPP/Input/tlab_190MeV_validation_autogen.txt
+solver output: .../output/dpol_p_190/solver_out
+solver log:    .../output/dpol_p_190/solver_run.log
+U-files found: 8     (典型；J 通道数取决于 two_J_3N_max)
+U data rows:   yes
+\end{lstlisting}
+返回码 0 表示求解器进程正常退出；
+\texttt{U data rows: yes} 表示\textbf{至少一个} \texttt{U\_PW\_elements\_*.txt} 文件含可解析的复数行。
+
+\paragraph{产物目录。}
+\begin{lstlisting}[style=config]
+output/dpol_p_190/
+├── solver_run.log                                        # 求解器 stdout/stderr 合并
+├── solver_out/                                           # CPP/run 的输出目录
+│   ├── U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt # JP=1/2+
+│   ├── U_PW_elements_Np_20_Nq_20_JP_1_-1_Jmax_2_PSI_0.txt # JP=1/2-
+│   ├── ... 共 (two_J_3N_max+1) * 2 个文件
+└── p123/
+    ├── P123_sparse_Np_20_Nq_20_J2max_2_2J3max_1_*.h5     # 稀疏 P123 缓存
+\end{lstlisting}
+
+\paragraph{\texttt{U\_PW\_elements\_*.txt} 单行格式。}
+每行 7 个 token（更多通道时是 $3+n^2$ 个）：
+\begin{lstlisting}[style=config]
+# Tlab    Ecm     q_idx   U00                       U01                       U10                       U11
+1.90e+02  1.27e+02  14    +1.234e-01+5.678e-02j     -2.345e-02+1.011e-01j     -2.345e-02+1.011e-01j     +9.876e-02-3.210e-03j
+\end{lstlisting}
+其中 \texttt{q\_idx} 是\textbf{被求解器选中}的 on-shell q-bin 索引
+（详见 \cref{ch:11_faddeev_solver} \texttt{find\_on\_shell\_bins}），
+不是入射能量直接对应的连续动量。
+
+\paragraph{\texttt{compare\_Ay\_experiment.py} 报告。}
+该脚本写出 \texttt{output/dpol\_p\_190/solver\_validation\_tlab\_190MeV.json}
+与 \texttt{...txt}，
+含字段：
+\begin{lstlisting}[style=config]
+{
+  "target_tlab_mev": 190.0,
+  "best_energy": {
+    "tlab_mev": 187.34,                  # 实际求解能量（与 target 有差，见下）
+    "abs_delta_tlab_mev": 2.66,
+    "it11_rmse": 0.018,
+    "it11_mae":  0.014,
+    "dsigma_rmse": ...,
+    "dsigma_rel_rmse": 0.062
+  },
+  "status": "pass"  /  "warn"  /  "fail"
+}
+\end{lstlisting}
+\textbf{阈值含义}（来自 \texttt{compare\_Ay\_experiment.py}）：
+\begin{itemize}
+  \item iT11 RMSE $\le 0.02$ \texttt{pass}；$\le 0.05$ \texttt{warn}；其余 \texttt{fail}；
+  \item d$\sigma$/d$\Omega$ relative RMSE $\le 0.05$ \texttt{pass}；$\le 0.10$ \texttt{warn}；
+  \item 能量差 $|\Delta T_{\mathrm{lab}}| \le 40$ MeV \texttt{pass}（这一条非常宽，是 WPCD 离散化的天然限制）。
+\end{itemize}
+
+\subsection{故障排查}
+\label{sec:ch20-s1-pitfalls}
+
+\paragraph{P1：HDF5 缓存不匹配。}
+现象：\texttt{-{}-reuse-p123} 给定，
+但 \texttt{p123/} 里没有匹配的文件名，
+求解器开头打印
+\texttt{Reading P123\_sparse\_Np\_30\_... [FAIL]}，
+随后从头算 $P_{123}$（很慢）甚至崩在 HDF5 句柄上。
+根因：
+\texttt{P123} 缓存的文件名编码了
+$N_p, N_q, J_{2N,\max}, 2J_{3N,\max}$
+（见 \texttt{run\_dpol\_p\_observables.py::required\_p123\_sparse\_names}）。
+\textbf{任何一个变了都不能复用}。
+修复：要么去掉 \texttt{-{}-reuse-p123}，让脚本重新计算 $P_{123}$；
+要么把 \texttt{-{}-np / -{}-nq / -{}-j-2n-max / -{}-two-j-3n-max}
+对回到生成那份缓存时的值。
+\texttt{run\_dpol\_p\_observables.py} 已经会在缓存不匹配时\textbf{显式抛错}并打印缺失文件名清单。
+
+\paragraph{P2：OpenMP 线程数与可用内存的冲突。}
+\texttt{-{}-threads 16} 在 8 GB 机器上、$N_p = N_q = 30$ 时\textbf{大概率会被 OOM Killer 杀掉}。
+\texttt{P123\_omp\_num\_threads} 控制的是\textbf{置换矩阵生成阶段}的并行度，
+每个线程都要分配自己的工作内存。
+经验法则：每个线程 $\sim 0.5 (N_p N_q / 400)^{2}$ GB。
+工作站只跑 16 GB 时，
+建议 \texttt{-{}-threads 4} 起步。
+
+\paragraph{P3：Fortran/C++ ABI 不一致。}
+现象：在 conda 环境下编译的 \texttt{CPP/run}，
+拿到\textbf{未}激活 conda 的 shell 里运行，
+报 \texttt{symbol lookup error: ...: undefined symbol: \_gfortran\_st\_write\_done\_*}。
+根因：conda 里的 \texttt{libgfortran} 版本号高于系统默认。
+修复：用 \texttt{ldd CPP/run} 检查 \texttt{libgfortran.so.5} 是否走了系统路径；
+正确做法是 \texttt{Makefile} 已经写了
+\texttt{-Wl,-rpath,\$(CONDA\_PREFIX)/lib}，
+但前提是\textbf{编译时}就在 conda 环境里。
+不要跨环境构建/运行。
+
+\paragraph{P4：实际求解能量与目标能量不一致。}
+现象：\texttt{target\_tlab\_mev=190.0}，但 \texttt{best\_tlab\_mev=187.3}。
+这\textbf{不是错误}，是 WPCD 的天然行为。
+\texttt{find\_on\_shell\_bins}（\cref{ch:11_faddeev_solver}）
+在 q-bin 中点中找最接近 $q_0(T_{\mathrm{lab}})$ 的那一个，
+中点离散化天然带来 $\pm 5\sim 40$ MeV 的偏差，
+随 $N_q$ 减小而增大。
+解决：要么接受偏差（pass 阈值 40 MeV 已为此设计），
+要么开 \texttt{-{}-nq 50} 把 q-bin 加密。
+
+\paragraph{P5：实验数据单位混淆。}
+现象：\texttt{compare\_Ay\_experiment.py} 报告的 \texttt{dsigma\_rel\_rmse} 大得离谱（$> 1$）。
+根因：实验文件 \texttt{DSigamaOverDOmega.txt} 默认是 mb/sr，
+而 \texttt{compare\_Ay\_experiment.py} 也默认输出 mb/sr，正常。
+但若你额外加了 \texttt{-{}-dsigma-unit fm2/sr}，
+而忘了同时给 \texttt{run\_dpol\_p\_observables.py} 也加同一选项，
+就会把 0.1 倍的换算因子两边对不上。
+修复：用 \texttt{examples/convert\_dsigma\_units.py} 做一次性单位检查，
+或者保持默认 mb/sr 不动。
+
+\subsection{性能预期}
+\label{sec:ch20-s1-perf}
+
+\cref{tab:ch20-s1-perf} 给出 8 核工作站上的实测时间
+（\texttt{LO\_internal} 势，\texttt{two\_J\_3N\_max=1}，\texttt{J\_2N\_max=2}，
+冷启动 + \texttt{-{}-reuse-p123} 第二次的对比）。
+
+\begin{table}[ht]
+\centering
+\small
+\caption{场景 1 性能：8 核 / 32 GB 工作站实测。}
+\label{tab:ch20-s1-perf}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+$N_p = N_q$ & 持久 RAM & $P_{123}$ 计算 & Faddeev 求解 & 总时间 \\
+            & (GB)     & (cold)         & (warm)       & (warm) \\
+\midrule
+20  & 1.5  & 8 min   & 1 min   & 1 min   \\
+30  & 5    & 35 min  & 7 min   & 7 min   \\
+50  & 18   & 5 h     & 50 min  & 50 min  \\
+\bottomrule
+\end{tabular}
+\end{table}
+\textbf{意涵}：第一次跑 $N_p=N_q=20$ smoke test，
+8 分钟；
+之后 \texttt{-{}-reuse-p123} 切换势模型/能量都只要 1 分钟。
+$P_{123}$ 缓存的可复用性是\textbf{每天能跑多少次实验}的决定项，
+所以 \cref{ch:09_permutation_p123} 才会用整章的篇幅讲它的离线化。
+
+% =====================================================================
+\section{场景 2：多能量观测量 sweep}
+\label{sec:ch20-scenario-multi}
+% =====================================================================
+
+\subsection{命令}
+\label{sec:ch20-s2-cmd}
+
+把 70 / 135 / 190 MeV 三个能量一次扫完，写出 d$\sigma$/d$\Omega$、iT11、$T_{20}$、$T_{21}$、$T_{22}$ 五条曲线：
+\begin{lstlisting}[style=config,caption={多能量 dpol-p 观测量 sweep。}]
+cd Tic-tac
+python3 examples/run_dpol_p_observables.py \
+    --work-dir output/dpol_p_observables \
+    --target-tlabs-mev 70,135,190 \
+    --np 20 --nq 22 \
+    --threads 4 \
+    --dsigma-unit mb/sr
+\end{lstlisting}
+默认离散化（\texttt{-{}-np 20 -{}-nq 22 -{}-chebyshev-s 180}）已经针对这三个能量调过，
+不必每次都覆盖。
+若要复用上一节的 $P_{123}$ 缓存：
+\begin{lstlisting}[style=config]
+python3 examples/run_dpol_p_observables.py \
+    --target-tlabs-mev 70,135,190 \
+    --reuse-p123 \
+    --reuse-p123-from output/dpol_p_190/p123
+\end{lstlisting}
+注意：\textbf{\texttt{Np}/\texttt{Nq}/\texttt{J\_2N\_max} 必须严格匹配}，
+否则脚本立刻报错并列出缺失文件名。
+
+\subsection{期望输出}
+\label{sec:ch20-s2-expect}
+
+\paragraph{终端尾部。}
+\begin{lstlisting}[style=config]
+d + p multi-Tlab observable run
+===============================
+targets (Tlab MeV): 70.0, 135.0, 190.0
+dSigma/dOmega unit: mb/sr
+solver return code: 0
+
+selected solver energies:
+  target=70.0 MeV  -> solver=68.412 MeV  (delta=1.588 MeV)
+  target=135.0 MeV -> solver=132.901 MeV (delta=2.099 MeV)
+  target=190.0 MeV -> solver=187.345 MeV (delta=2.655 MeV)
+
+summary json: output/dpol_p_observables/analysis/summary.json
+analysis dir: output/dpol_p_observables/analysis
+\end{lstlisting}
+
+\paragraph{产物目录树。}
+（与 \texttt{docs/dpol\_p\_multi\_energy\_observables.md} 一致）
+\begin{lstlisting}[style=config]
+output/dpol_p_observables/
+├── inputs/
+│   ├── target_tlabs_mev.txt           # 用户给定的能量列表
+│   └── solver_input_snapshot.txt      # 完整 autogen 输入快照
+├── solver/
+│   ├── solver_run.log
+│   ├── solver_out/                    # 同场景 1
+│   └── p123/                          # 同场景 1
+├── analysis/
+│   ├── summary.json / summary.txt
+│   ├── tlab_070MeV/
+│   │   ├── observables_model.csv      # theta, dSigma, iT11, T20, T21, T22
+│   │   └── metadata.json              # u_eff 复数 + 不变量
+│   ├── tlab_135MeV/                   ...
+│   └── tlab_190MeV/                   # 还含 observables_experiment_190.csv
+│                                      # 与 comparison_experiment_190.json
+└── figures/                           # 由 plot_dpol_p_observables.py 写
+\end{lstlisting}
+
+\paragraph{\texttt{observables\_model.csv} 单行。}
+\begin{lstlisting}[style=config]
+theta_deg,dSigma_dOmega,iT11,T20,T21,T22
+20.000000,1.234567e+01,5.678e-03,-1.234e-02,2.345e-03,-3.456e-03
+...
+\end{lstlisting}
+
+\subsection{故障排查}
+\label{sec:ch20-s2-pitfalls}
+
+\paragraph{P1：autogen 输入文件错位。}
+\texttt{run\_dpol\_p\_observables.py} 把多能量列表写进
+\texttt{CPP/Input/tlab\_dpol\_observables\_autogen.txt}，
+配置写进
+\texttt{CPP/Input/input\_tlab\_dpol\_observables\_autogen.txt}。
+若你之前运行过\textbf{别的}脚本（比如 \texttt{run\_3nf\_sweep.py}）写过同名文件，
+两个 workflow 会共享 autogen 文件名导致最后一次写赢。
+检查方式：在脚本运行结束后立刻 \texttt{cat CPP/Input/input\_tlab\_dpol\_observables\_autogen.txt}
+确认 \texttt{energy\_input\_file=...tlab\_dpol\_observables\_autogen.txt} 指向你期望的能量文件。
+长期解法：在 \texttt{-{}-work-dir} 里看 \texttt{inputs/solver\_input\_snapshot.txt}，
+那是\textbf{这次运行}用过的快照，永远是对的。
+
+\paragraph{P2：通道数不够导致曲线奇怪。}
+\texttt{two\_J\_3N\_max=1} 只覆盖 $J^\Pi = 1/2^\pm$ 两个 3N 通道，
+对 70 MeV 大致够用，对 190 MeV \emph{严重欠收敛}（\cref{tab:ch20-deps} 之前的 Miller 表 8 已说明）。
+现象：\texttt{summary.json} 里 190 MeV 的 \texttt{dsigma\_rel\_rmse} 比场景 1 同参数大很多。
+根因：场景 1 的 \texttt{compare\_Ay\_experiment.py} 用的是\textbf{所有 J 文件加权合并}，
+而 \texttt{run\_dpol\_p\_observables.py} 也是合并，
+但只合并到 \texttt{two\_J\_3N\_max} 给的上限。
+修复：\texttt{-{}-two-j-3n-max 7} 提到 $J^\Pi = 7/2^\pm$，
+\texttt{-{}-j-2n-max 3} 提到 NN 高分波，
+然后准备大约 $5\times$ 更多的 RAM 和 CPU 时间。
+
+\paragraph{P3：observable 模型映射的“工程化”性质。}
+请记住：\texttt{run\_dpol\_p\_observables.py} 内部的 reduced-U $\to$ observable 映射
+（\texttt{\_model\_observables}）是一个\textbf{工程化经验拟合}，
+不是从 Madison 约定 \cite{Madison1971} 直接推出的。
+这件事在 \cref{ch:13_polarization_observables} 已分析。
+若你需要严格的 Madison 表达式，
+应当回去用 \cref{ch:11_faddeev_solver} 的 U-amplitude 直接构造 $\mathcal{M}_{m_d',m_d}$，
+而不是套这个脚本的拟合。
+
+\subsection{性能预期}
+\label{sec:ch20-s2-perf}
+
+\cref{tab:ch20-s2-perf} 给出三能量 sweep 的总时间。
+关键观察：\textbf{$P_{123}$ 只算一次}，
+因此能量数从 1 到 3 不会让总时间变 3 倍——只多 Faddeev 求解部分。
+
+\begin{table}[ht]
+\centering
+\small
+\caption{场景 2 性能（8 核 / 32 GB，3 个能量点）。}
+\label{tab:ch20-s2-perf}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+$N_p \times N_q$ & 总时间（cold） & 总时间（warm，\texttt{-{}-reuse-p123}） \\
+\midrule
+$20 \times 22$  & 12 min  & 4 min   \\
+$30 \times 30$  & 50 min  & 18 min  \\
+$50 \times 50$  & 6.5 h   & 2.5 h   \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{场景 3：3NF sweep（c\_D / c\_E 扫描）}
+\label{sec:ch20-scenario-3nf}
+% =====================================================================
+
+这是\cref{ch:15_3nf_physics}--\cref{ch:17_3nf_numerical}
+讨论的三核子力实战入口。
+脚本 \texttt{examples/run\_3nf\_sweep.py} 与文档 \texttt{examples/README\_3nf\_sweep.md}
+是用户最近一次提交（commit \texttt{3e0d6e0} 之前）添加的；
+README 与代码内容互为正文，
+所以本节不再重复 README 的物理动机。
+
+\subsection{命令}
+\label{sec:ch20-s3-cmd}
+
+\paragraph{Witala 1998 “smoking gun” 64.5 MeV。}
+\begin{lstlisting}[style=config,caption={3NF 三配置扫描（no\_3nf / zero\_lec / witala）共享 P\_123 缓存。}]
+cd Tic-tac
+python3 examples/run_3nf_sweep.py \
+    --work-dir output/3nf_sweep_64p5 \
+    --target-tlab-mev 64.5 \
+    --potential-model N2LOopt \
+    --np 20 --nq 20 --nphi 24 --nx 24 \
+    --np-per-wp 6 --nq-per-wp 6 \
+    --threads 4 --timeout 3600
+\end{lstlisting}
+脚本会按以下顺序运行三个 sub-config：
+\begin{enumerate}
+  \item \texttt{no\_3nf} — \texttt{three\_nucleon\_force=none}（$P_{123}$ 在此次计算并写盘）；
+  \item \texttt{zero\_lec} — \texttt{chiral\_N2LO} 但 $c_D = c_E = 0$（复用 $P_{123}$）；
+  \item \texttt{witala} — Witała 1998 典型 LECs $c_D = -0.20$，$c_E = -0.205$，$\Lambda_{3NF} = 500$ MeV（复用 $P_{123}$）。
+\end{enumerate}
+若你想跑 \cref{ch:13_polarization_observables} 的 190 MeV/u 基准：
+\begin{lstlisting}[style=config]
+python3 examples/run_3nf_sweep.py \
+    --work-dir output/3nf_sweep_190 \
+    --target-tlab-mev 190.0 \
+    --potential-model N2LOopt
+\end{lstlisting}
+
+\paragraph{覆盖 LECs。}
+\begin{lstlisting}[style=config]
+python3 examples/run_3nf_sweep.py \
+    --c-d -0.20 --c-e -0.205 --lambda-3nf-mev 500
+# 或者只跑特定子集：
+python3 examples/run_3nf_sweep.py --only no_3nf,witala
+\end{lstlisting}
+
+\paragraph{画图：}
+\begin{lstlisting}[style=config]
+python3 examples/plot_3nf_effect.py \
+    --work-dir output/3nf_sweep_64p5 \
+    --target-tlab-mev 64.5
+\end{lstlisting}
+
+\paragraph{诊断标度 \texttt{-{}-w1-scale}。}
+若 Neumann 级数发散（见 \cref{sec:ch20-s3-pitfalls}），
+可以用 \texttt{-{}-w1-scale 0.3} 把 $W^{(1)}$ 缩小到\textbf{物理值的 30\%}，
+让 Padé 加速能收敛——
+这只在调试 3NF 实现时使用，
+\textbf{不能}用作生产物理结果。
+
+\subsection{期望输出}
+\label{sec:ch20-s3-expect}
+
+\paragraph{终端流式输出。}
+\begin{lstlisting}[style=config]
+[3nf_sweep] (1/3) running no_3nf: tnf=none c_D=0.0 c_E=0.0 ... (calc_P123=True)
+[3nf_sweep]   -> rc=0 u_files=4 has_data=True
+[3nf_sweep] (2/3) running zero_lec: tnf=chiral_N2LO c_D=0.0 c_E=0.0 ... (calc_P123=False)
+[3nf_sweep]   -> rc=0 u_files=4 has_data=True
+[3nf_sweep] (3/3) running witala: tnf=chiral_N2LO c_D=-0.2 c_E=-0.205 ... (calc_P123=False)
+[3nf_sweep]   -> rc=0 u_files=4 has_data=True
+[3nf_sweep] summary -> output/3nf_sweep_64p5/sweep_summary_tlab_64p5MeV.json
+\end{lstlisting}
+
+\paragraph{产物目录树。}
+\begin{lstlisting}[style=config]
+output/3nf_sweep_64p5/
+├── p123/                                  # 三配置共享
+├── no_3nf/
+│   ├── solver_run.log
+│   └── solver_out/U_PW_elements_*.txt
+├── zero_lec/    ...
+├── witala/      ...
+└── sweep_summary_tlab_64p5MeV.json        # 含三次运行的 rc, u_files 列表, sweep 描述
+\end{lstlisting}
+
+\subsection{故障排查}
+\label{sec:ch20-s3-pitfalls}
+
+\paragraph{P1：3NF 归一化检查。}
+若你修改过 \texttt{src/interactions/three\_nucleon\_force\_*}
+的任何文件（W1\_1pe / W1\_2pe / 1pe\_contact / 2pe），
+\textbf{在跑 sweep 之前先做归一化检查}：
+\begin{lstlisting}[style=config,caption={独立的 3NF 矩阵元归一化检查工具。}]
+cd Tic-tac/tools/check_3nf_normalization
+make -j                       # 复用 build/CMakeFiles/Tic-tac.dir 下的 .o
+./check_3nf_normalization
+\end{lstlisting}
+该工具读 Triton-$\psi$（基态波函数），
+在三核子分波态空间收缩 $W^{(1)}$，
+对比手算 $\langle\psi|W^{(1)}|\psi\rangle$（\texttt{hand\_calc\_c1c3.py / hand\_calc\_cD.py / hand\_calc\_cE.py}）。
+通过条件：相对差 $< 10^{-3}$。
+若不通过，
+\texttt{run\_3nf\_sweep.py} 输出的 c\_D / c\_E 比较\textbf{完全无意义}。
+
+\paragraph{P2：Neumann 级数发散。}
+现象：\texttt{witala} run 的 \texttt{solver\_run.log} 出现
+\texttt{Pade resummation: max|eta\_i| > 1, falling back to dense solve}，
+随后求解时间暴涨或干脆超时。
+根因：3NF 在某些 J 通道里把 Weinberg 本征值推到单位圆外，
+Neumann 不再收敛。
+快速验证：用 \texttt{-{}-w1-scale 0.3} 重跑，
+若收敛了就证明问题确实出在 $W^{(1)}$ 大小上。
+长期解法：见 \cref{ch:11_faddeev_solver} 的 dense solve fallback；
+或者重新审视 c\_D / c\_E 取值（Witała 经典值在 64.5 MeV 之外可能不合理）。
+
+\paragraph{P3：\texttt{LO\_internal} 与 \texttt{N2LOopt} 的 LECs 继承。}
+\texttt{three\_nucleon\_force=chiral\_N2LO} 的 2PE 部分（$c_1, c_3, c_4$）
+是\textbf{从 \texttt{potential\_model} 继承}的——这条规则在 \texttt{src/interactions/three\_nucleon\_force\_model.cpp::fetch} 里。
+意涵：
+\begin{itemize}
+  \item \texttt{potential\_model=LO\_internal}：$c_1=c_3=c_4=0$，
+        因此 \texttt{zero\_lec} run 等价于 \texttt{no\_3nf}（理想 sanity check）。
+  \item \texttt{potential\_model=N2LOopt}：$c_i$ 来自 N2LOopt 的拟合值，
+        \texttt{zero\_lec} 与 \texttt{no\_3nf} 不再相等。
+\end{itemize}
+若你期望 \texttt{zero\_lec == no\_3nf}（用作回归测试），
+必须用 \texttt{-{}-potential-model LO\_internal}。
+
+\paragraph{P4：nd vs.\ dp 数据。}
+README 里已经强调：
+本 sweep 是 nd 计算，
+但 \texttt{data/DataOfCrosssectionAndPol/} 是 d+p 数据（带 Coulomb）。
+对前向角（$\theta < 60^\circ$）这两者差很大；
+对后向角接近。
+若你想拿这个 sweep 做严格的 d+p 比较，
+需要等 Coulomb 实现到位（不在当前仓库里）。
+\texttt{plot\_3nf\_effect.py} 在 \cref{ch:18_origin_codebase} 已说明它\textbf{不修正}这一点。
+
+\subsection{性能预期}
+\label{sec:ch20-s3-perf}
+
+8 核工作站、$N_p = N_q = 20$、\texttt{N2LOopt}：
+\begin{itemize}
+  \item \texttt{no\_3nf}（含 $P_{123}$ 计算）：约 12 min；
+  \item \texttt{zero\_lec}（复用 $P_{123}$）：约 6 min；
+  \item \texttt{witala}（复用 $P_{123}$）：约 6 min；
+  \item 总计 $\sim 24$ min。
+\end{itemize}
+$N_p = N_q = 50$ 时三 run 总耗时 6--9 h。
+\textbf{重要}：3NF run 的 Faddeev 求解时间通常\textbf{大于} 2NF（因为 Neumann 收敛阶数升高），
+所以 \texttt{-{}-timeout 7200} 是合理的默认值。
+
+% =====================================================================
+\section{场景 4：Miller Gate 1 相移提取}
+\label{sec:ch20-scenario-miller}
+% =====================================================================
+
+这是\cref{ch:14_miller_gate1}的实战入口：
+在 13 MeV、Nijmegen-I 势下，
+重现 Miller PRC 106, 024001 (2022) Fig. 1 左面板
+$J^\Pi = 1/2^+$ doublet 相移 $\Re\delta(^2S) \approx 105^\circ$。
+这是 2NF + Faddeev 流水线的\textbf{硬回归测试}：
+任何让 \texttt{LO\_internal} 跑得通但破坏了 \texttt{nijmegen} 接口的修改，
+都会在这里立刻暴露。
+
+\subsection{命令}
+\label{sec:ch20-s4-cmd}
+
+\paragraph{Step 1：求解。}
+\begin{lstlisting}[style=config,caption={Miller Gate 1 在 13 MeV 上的 2NF-only 求解（Nijmegen-I 势）。}]
+cd Tic-tac
+./CPP/run CPP/Input/input_miller_gate1_dbg.txt
+\end{lstlisting}
+其中 \texttt{input\_miller\_gate1\_dbg.txt} 已经预设：
+\begin{itemize}
+  \item \texttt{two\_J\_3N\_max=1, J\_2N\_max=2}（只覆盖 $1/2^\pm$ + L $\le 2$ NN）；
+  \item \texttt{Np\_WP=Nq\_WP=20}（cheap，便于 1 分钟内拿结果）；
+  \item \texttt{potential\_model=nijmegen}；
+  \item \texttt{energy\_input\_file=CPP/Input/lab\_energies\_miller\_gate1.txt}（含 13 MeV）；
+  \item \texttt{output\_folder=CPP/Output/miller\_gate1\_dbg}；
+  \item \texttt{P123\_recovery=true}（允许从崩掉的上一次运行恢复）。
+\end{itemize}
+
+\paragraph{Step 2：相移抽取。}
+\begin{lstlisting}[style=config]
+python3 examples/extract_phase_shifts.py \
+    --solver-out-dir CPP/Output/miller_gate1_dbg \
+    --tlab 13.0
+\end{lstlisting}
+该脚本严格按 Miller 论文附录 D/E 实现：
+\begin{enumerate}
+  \item 读 \texttt{U\_PW\_elements\_*.txt}，
+        把 WP-基的 $U^{WP}$ 转回 plane-wave 基：
+        $U^{plane}(q_0) = U^{WP} \cdot \bar{f}^2(q_0) / (q_0^2 \Delta E_j)
+                        = U^{WP} / (q_0 \mu_1 \Delta E_j)$；
+  \item 由 $U^{plane}$ 构造 S-矩阵：$S = I - 2\pi i\, q_0\, m_N\, U^{plane}(q_0)$；
+  \item 对角元 quick read：$\delta_{\text{diag}} = \tfrac{1}{2}\arg(S_{\text{diag}})$；
+  \item 对耦合道做 Blatt--Biedenharn 特征相移分析（详见 \cref{ch:14_miller_gate1}）。
+\end{enumerate}
+
+\subsection{期望输出}
+\label{sec:ch20-s4-expect}
+
+\paragraph{相移控制台输出。}
+\begin{lstlisting}[style=config]
+== file: U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt
+   J^P = 1/2+, two channels: (l=0,j=1/2)=2S1/2 + (l=2,j=3/2)=2D3/2
+   on-shell q_idx = 14, q0 = 78.34 MeV/c, Tlab = 12.7 MeV  (target 13.0)
+   diagonal phase shifts:
+     channel 0 (2S1/2): Re δ = 104.8°,  Im δ = 0.012°
+     channel 1 (2D3/2): Re δ =  -1.7°,  Im δ = 0.001°
+   Blatt--Biedenharn eigenphases:
+     δ1 = 105.1°,  δ2 = -1.7°,  ε = 2.4°
+\end{lstlisting}
+通过条件（来自 Miller PRC 106 Fig. 1，详见 \cref{ch:14_miller_gate1} \texttt{tools/check\_3nf\_normalization/miller\_benchmark.md} Table 2）：
+$\Re \delta_1 = 105 \pm 5^\circ$，$|\Im \delta| < 0.05^\circ$。
+
+\paragraph{Output 目录。}
+\begin{lstlisting}[style=config]
+CPP/Output/miller_gate1_dbg/
+├── U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt       # 1/2+
+├── U_PW_elements_Np_20_Nq_20_JP_1_-1_Jmax_2_PSI_0.txt      # 1/2-
+├── solver_log.txt
+└── (P123 共享在 CPP/Output/miller_gate1/)
+\end{lstlisting}
+
+\subsection{故障排查}
+\label{sec:ch20-s4-pitfalls}
+
+\paragraph{P1：on-shell q-bin 选错。}
+现象：13 MeV 目标，
+但脚本打印 \texttt{on-shell q\_idx = 7, Tlab = 4.2 MeV}。
+根因：\texttt{find\_on\_shell\_bins} 在能量列表里找最近的 q-bin 中点，
+\texttt{lab\_energies\_miller\_gate1.txt} 若被人改成多能量（13 + 35 + ...），
+而你 \texttt{-{}-tlab 13.0} 给到 \texttt{extract\_phase\_shifts.py}，
+脚本会选\textbf{所有 row 中}最接近 13 MeV 的那行
+——但 q-bin 网格是粗的，最接近不一定就是 13。
+修复：把 \texttt{lab\_energies\_miller\_gate1.txt} 改成只含一个 13.0；
+或把 \texttt{Nq\_WP} 加密，让 q-bin 中点更密集。
+
+\paragraph{P2：Nijmegen-I 接口约定。}
+\texttt{potential\_model=nijmegen} 走的是 \texttt{src/interactions/nijmegen/pnijm.f}（F77 库）。
+该库对\textbf{符号约定}的容忍度很低：
+若 isospin / spin coupling 顺序与 Tic-tac 内部约定相反，
+S 通道相移会出现 $\sim 100^\circ$ 量级的偏差。
+若你看到 $\Re \delta \approx -75^\circ$ 而不是 $+105^\circ$，
+怀疑 \texttt{src/interactions/nijmegen\_interface.cpp} 里的某个 sign flip 被改坏。
+
+\paragraph{P3：\texttt{P123\_recovery=true} 副作用。}
+该输入文件开了 \texttt{P123\_recovery=true}，
+意思是：若上一次 $P_{123}$ 计算崩了一半，
+本次跑会接着上一次的进度。
+若你修改了 $P_{123}$ 相关的源代码后立刻测，
+旧的部分 dump 还在 disk 上，
+会让你的修改\textbf{看起来没生效}。
+解法：在重新测之前 \texttt{rm -rf CPP/Output/miller\_gate1/*.h5}。
+
+\subsection{性能预期}
+\label{sec:ch20-s4-perf}
+
+\texttt{Np=Nq=20} + \texttt{nijmegen}（轻量势）：
+$P_{123}$ 计算 \textbf{6--10 min}（cold），
+Faddeev 求解 \textbf{30--60 sec}。
+是所有场景里\textbf{最便宜}的一个，
+非常适合作 commit pre-check 跑。
+
+% =====================================================================
+\section{场景 5：调试模式（dense solve）}
+\label{sec:ch20-scenario-dense}
+% =====================================================================
+
+\subsection{命令}
+\label{sec:ch20-s5-cmd}
+
+正常生产路径走 Padé 加速的 Neumann 级数（\cref{ch:11_faddeev_solver} \texttt{solve\_faddeev\_neumann\_pade}）；
+当你要\textbf{校验} Padé 结果的正确性时，
+切换到 dense solve（直接 LAPACK 求逆）。
+
+\paragraph{方法 A：手写输入文件。}
+复制 \texttt{CPP/Input/input.txt} 到 \texttt{input\_dbg\_dense.txt}，
+把
+\begin{lstlisting}[style=config]
+solve_dense=false
+\end{lstlisting}
+改成
+\begin{lstlisting}[style=config]
+solve_dense=true
+\end{lstlisting}
+\textbf{并且}把 \texttt{Np\_WP, Nq\_WP} 调到 $\le 20$（详见 \cref{sec:ch20-s5-pitfalls}）。
+然后：
+\begin{lstlisting}[style=config]
+./CPP/run CPP/Input/input_dbg_dense.txt
+\end{lstlisting}
+
+\paragraph{方法 B：内联覆盖。}
+\texttt{CPP/run} 接受 \texttt{key=value} 内联覆盖：
+\begin{lstlisting}[style=config]
+./CPP/run CPP/Input/input_miller_gate1_dbg.txt solve_dense=true
+\end{lstlisting}
+内联覆盖会\textbf{覆盖}文件里的同名键。
+
+\subsection{期望输出}
+\label{sec:ch20-s5-expect}
+
+求解器日志会打印：
+\begin{lstlisting}[style=config]
+Solve Faddeev with LAPACK:       true
+... (常规迭代日志被替换为)
+[dense] allocating dense kernel matrix: 19200 x 19200 (cdouble) -> 5.6 GB
+[dense] LAPACKE_zgesv: building, ...
+[dense] LAPACKE_zgesv: done, residual = 1.2e-13
+\end{lstlisting}
+然后 U-amplitude 与 Padé 路径\textbf{应当一致到 $10^{-10}$ 量级}（数值噪声以下）。
+任何更大的偏差都说明 Padé 实现或 dense 实现至少一方有 bug。
+
+\subsection{故障排查}
+\label{sec:ch20-s5-pitfalls}
+
+\paragraph{P1：内存爆炸预警。}
+dense solve 内存随 $\propto (N_p N_q N_\alpha)^2$ 增长。
+\cref{tab:ch20-s5-mem} 给出大致估算（cdouble = 16 字节 / 元素）。
+\begin{table}[ht]
+\centering
+\small
+\caption{Dense solve 的近似 RAM 占用（\texttt{two\_J\_3N\_max=1, J\_2N\_max=2}, $N_\alpha \approx 6$）。}
+\label{tab:ch20-s5-mem}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+$N_p N_q$ 组合 & kernel matrix (元素数) & RAM \\
+\midrule
+$15 \times 15$  & $\sim 1.8\times 10^7$ & 290 MB  \\
+$20 \times 20$  & $\sim 5.8\times 10^7$ & 920 MB  \\
+$25 \times 25$  & $\sim 1.4\times 10^8$ & 2.3 GB  \\
+$30 \times 30$  & $\sim 2.9\times 10^8$ & 4.7 GB  \\
+$50 \times 50$  & $\sim 2.3\times 10^9$ & 36 GB \\
+\bottomrule
+\end{tabular}
+\end{table}
+$N_p = N_q = 50$ 时\textbf{绝对不要开 dense solve}，
+即便机器有 64 GB（LAPACK 工作内存还要 $\sim 2\times$）。
+
+\paragraph{P2：dense 比 Padé 慢一两个数量级。}
+$N_p N_q = 20 \times 20$、\texttt{LO\_internal}：
+Padé $\sim 1$ min，dense $\sim 30$ min。
+不是 bug，是 \texttt{zgesv} 的 $O(N^3)$ 复杂度。
+
+\paragraph{P3：dense 在 \cref{ch:19_refactor_evolution} 里的语义微调。}
+重构版本（\texttt{src/core/faddeev\_solver/solve\_faddeev.cpp:1928}）的 dense solve
+与 Sean 原始版本（\texttt{tictac-origin}）有一处 sign convention 差异
+——具体见 \cref{ch:19_refactor_evolution}。
+若你比较 dense 与 Padé 结果时发现整体相位差 $\pi$，
+不是数值问题。
+
+\subsection{性能预期}
+\label{sec:ch20-s5-perf}
+
+\textbf{只跑 cheap 网格}（$\le 20 \times 20$）。
+\cref{tab:ch20-s5-time}：
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Dense solve 时间 (8 核 + LAPACK)。}
+\label{tab:ch20-s5-time}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+$N_p \times N_q$ & RAM & 时间 \\
+\midrule
+$15 \times 15$ & 0.3 GB & 5 min  \\
+$20 \times 20$ & 1 GB   & 30 min \\
+$25 \times 25$ & 2.5 GB & 90 min \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{用法纪律}：dense solve\textbf{只用于}单元/回归测试，
+\textbf{绝不}进生产 sweep。
+\texttt{run\_dpol\_p\_observables.py} 与 \texttt{run\_3nf\_sweep.py} 的 autogen 输入里
+都硬编码了 \texttt{solve\_dense=false}，
+因为这条规则被违反过多次。
+
+% =====================================================================
+\section{修改源代码后的回归测试}
+\label{sec:ch20-regression}
+% =====================================================================
+
+任何 \texttt{src/} 下的修改、
+任何 \texttt{CPP/Input/input*.txt} 模板的修改、
+任何 \texttt{examples/*.py} 的修改，
+都必须\textbf{先}过本节描述的最小回归测试。
+
+\subsection{命令}
+\label{sec:ch20-reg-cmd}
+
+\paragraph{Python pipeline 单元测试。}
+\begin{lstlisting}[style=config,caption={核心 pipeline 单元测试，不需要 CPP/run。}]
+cd Tic-tac
+python3 -m unittest tests.test_190mev_data_pipeline -v
+\end{lstlisting}
+这个测试\textbf{不调用求解器}，
+它用一份\textbf{固定的} synthetic \texttt{U\_PW\_elements\_*.txt}
+（写在临时目录里）走完
+\texttt{parse\_u\_file} → \texttt{combine\_channels\_by\_energy} → reduced-U → 阈值评估
+全链路，
+确认管线代码本身没坏。
+是\textbf{秒级}测试（典型 < 5 sec）。
+
+\paragraph{2NF baseline 测试。}
+\begin{lstlisting}[style=config]
+python3 -m unittest tests.test_2nf_miller_baseline -v
+\end{lstlisting}
+（前提是机器装了 \texttt{nijmegen} 势库且 \texttt{CPP/run} 编译过；
+内部会跑一次 Miller Gate 1 13 MeV，约 5 min。）
+
+\paragraph{3NF 物理一致性测试。}
+\begin{lstlisting}[style=config]
+python3 -m unittest tests.test_3nf_physics tests.test_3nf_matrix_elements tests.test_3nf_regression -v
+\end{lstlisting}
+该套测试包含 c\_D / c\_E 的手算对比（\texttt{tests/cpp/check\_3nf\_normalization}）。
+
+\paragraph{完整端到端 smoke test。}
+若上面都过，就再跑场景 1 cheap 配置：
+\begin{lstlisting}[style=config]
+python3 examples/deuteron_proton_Ay.py \
+    --work-dir output/regression_smoke \
+    --target-tlab-mev 190 --np 20 --nq 20
+python3 examples/compare_Ay_experiment.py \
+    --work-dir output/regression_smoke \
+    --solver-out-dir output/regression_smoke/solver_out \
+    --target-tlab-mev 190
+\end{lstlisting}
+看 \texttt{output/regression\_smoke/solver\_validation\_tlab\_190MeV.json} 的 \texttt{status} 字段。
+
+\subsection{Validation 阈值的含义}
+\label{sec:ch20-reg-thresh}
+
+\cref{tab:ch20-reg-thresh} 给出 \texttt{compare\_Ay\_experiment.py} 内置的三档阈值。
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Validation 阈值（\texttt{compare\_Ay\_experiment.py}）。}
+\label{tab:ch20-reg-thresh}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+指标 & pass & warn & fail & 物理含义 \\
+\midrule
+iT11 RMSE          & $\le 0.02$  & $\le 0.05$  & $> 0.05$  & 张量极化整体形状 \\
+d$\sigma$/d$\Omega$ rel.\ RMSE & $\le 0.05$  & $\le 0.10$  & $> 0.10$  & 截面绝对值 \\
+$|T_{\mathrm{lab}}^{\text{solver}} - T_{\mathrm{lab}}^{\text{target}}|$ & $\le 40$ MeV & $\le 80$ MeV & $> 80$ MeV & WPCD 离散化 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{为什么能量阈值这么宽？}
+\textbf{不是因为我们对结果不挑剔}。
+WPCD 把入射能量映射到 q-bin 的中点：
+$N_q = 20$ 时 q-bin 宽度 $\sim 50$ MeV
+（注意是 q-bin 不是 $T_{\mathrm{lab}}$-bin，
+但映射后近似线性），
+所以 $T_{\mathrm{lab}}$ 离散误差 $\pm 25$ MeV 是 \emph{该网格下的最优值}。
+$N_q$ 加倍能把它压到 $\pm 12$ MeV，
+但代价是 $\sim 8\times$ 计算量（$P_{123}$ $\propto N_q^3$）。
+\textbf{40 MeV 是在“cheap 网格也能 pass”和“refactor 不能让能量误差变大”之间的折衷}。
+
+\paragraph{“warn” 等级的处理纪律。}
+\texttt{warn} 不会让 CI 红，
+但应当在 commit message 里说明为什么这次 warn 是接受的
+（典型理由：势模型变了 / 网格降级了）。
+重构 PR 不应让 \texttt{pass} → \texttt{warn}；
+物理推广 PR 可以。
+
+% =====================================================================
+\section{常见错误库（按错误信息查询）}
+\label{sec:ch20-errors}
+% =====================================================================
+
+本节是\textbf{按错误信息字面量查找}的索引。
+当你看到的报错与下面某条匹配时，
+直接跳到对应的“根因 + 修复”。
+所有条目都用 \texttt{ERR-XXX} 格式编号，
+未来 commit 可以直接引用条目号。
+
+% --------------------------------
+\paragraph{ERR-BUILD-FORTRAN-MOD: \texttt{Cannot open module file 'idaho\_chiral\_potential.mod'}}
+\textbf{根因}：并行 \texttt{make -j} 时，
+F90 模块依赖未被识别——\texttt{chp-set.f90} 在
+\texttt{chiral-twobody-potentials.f90} 之前被编译。
+\textbf{修复}：先 \texttt{make clean}，再 \texttt{make -C CPP -j1} 串行一遍；
+确认根 Makefile 第 91 行的
+\texttt{\$(CHP\_PRESET\_OBJECT): \$(CHP\_MODULE\_OBJECT)}
+依赖规则没被人改过。
+
+\paragraph{ERR-BUILD-CXX17: \texttt{error: 'std::filesystem' has not been declared}}
+\textbf{根因}：g++ 版本 $< 8$；C++17 \texttt{<filesystem>} 不可用。
+\textbf{修复}：升级到 g++ 9 以上
+（\texttt{sudo apt install g++-11 \&\& sudo update-alternatives --config g++}）。
+\textbf{副带}：检查 \texttt{LDLIBS += -lstdc++fs}（旧 g++ 需要它，新 g++ 内置）。
+
+\paragraph{ERR-LINK-HDF5: \texttt{cannot find -lhdf5\_cpp / cannot find -lhdf5\_serial\_cpp}}
+\textbf{根因}：\texttt{Makefile} 的 HDF5 库名探测在你的发行版上误判。
+\textbf{修复}：手动指定。
+\begin{lstlisting}[style=config]
+# 强制使用 _serial 后缀（Debian/Ubuntu 系统包）：
+make -C CPP HDF5_LIBS="-lhdf5_serial_hl_cpp -lhdf5_serial_cpp -lhdf5_serial_hl -lhdf5_serial"
+# 或强制无后缀（conda / RHEL）：
+make -C CPP HDF5_LIBS="-lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5"
+\end{lstlisting}
+
+\paragraph{ERR-LINK-LAPACKE: \texttt{undefined reference to LAPACKE\_zgesv}}
+\textbf{根因}：缺 \texttt{liblapacke-dev}（不是 \texttt{liblapack-dev}）。
+\textbf{修复}：\texttt{sudo apt install liblapacke-dev}。
+注意：\texttt{liblapack-dev} 提供 Fortran 接口，
+\texttt{liblapacke-dev} 提供 C 接口，
+Tic-tac \texttt{src/utils/} 里两种都用。
+
+\paragraph{ERR-RUN-HDF5-VERSION: \texttt{Warning! ***HDF5 library version mismatched error***}}
+\textbf{根因}：编译时链的是 conda HDF5 1.14，运行时找到的是系统 1.10（rpath 失效）。
+\textbf{修复}：确认 \texttt{ldd CPP/run | grep hdf5} 指向\textbf{编译时}的 HDF5。
+若指错了，重新编译：\texttt{make clean \&\& make -C CPP -j}（在正确激活的环境里）。
+\textbf{注}：\texttt{deuteron\_proton\_Ay.py} 已经设置了
+\texttt{env["HDF5\_DISABLE\_VERSION\_CHECK"]="2"}，
+所以脚本跑通了不代表没问题；
+还是要修 rpath。
+
+\paragraph{ERR-RUN-P123-MISMATCH: \texttt{P123\_sparse\_Np\_30\_*.h5 not found}}
+\textbf{根因}：\texttt{-{}-reuse-p123} 给定，
+但缓存目录里的文件名编码的网格参数与本次不一致。
+\textbf{修复}：
+\begin{itemize}
+  \item 去掉 \texttt{-{}-reuse-p123}，重新计算（最稳妥，最慢）；
+  \item 或者把 \texttt{-{}-np / -{}-nq / -{}-j-2n-max / -{}-two-j-3n-max}
+        改回到生成那份缓存时的值；
+  \item 用 \texttt{run\_dpol\_p\_observables.py::required\_p123\_sparse\_names}
+        在脚本里查需要的文件名清单。
+\end{itemize}
+
+\paragraph{ERR-RUN-NEUMANN-DIVERGE: \texttt{Pade resummation: max|eta\_i| > 1, falling back to dense solve}}
+\textbf{根因}：3NF 让 Weinberg 本征值跳出单位圆，Neumann 不收敛。
+\textbf{修复}：
+\begin{itemize}
+  \item 短期：\texttt{-{}-w1-scale 0.3} 验证物理意义后再调；
+  \item 中期：检查是否是 c\_D / c\_E 取值过大；Witała 默认 ($-0.20, -0.205$) 在 64.5 MeV 安全，
+        但在 190 MeV 不一定；
+  \item 长期：升 \texttt{Np\_WP, Nq\_WP}，重新检查 fall-back-to-dense 是否仍触发；
+        若开 dense 也跑不通，说明 3NF 实现有 bug，回去过 \texttt{check\_3nf\_normalization}。
+\end{itemize}
+
+\paragraph{ERR-RUN-OOM: 进程被 OOM Killer 杀死（dmesg: \texttt{Killed process \dots (run)}）}
+\textbf{根因}：$P_{123}$ 计算阶段每个 OpenMP 线程分配的工作内存乘以线程数，
+超过物理 RAM。
+\textbf{修复}：\texttt{-{}-threads 4} 起步（不要 16）；
+若仍 OOM，降 $N_p, N_q$；
+若必须高 $N_p, N_q$，开 swap（不推荐：性能崩塌）。
+
+\paragraph{ERR-RUN-NIJMEGEN-SIGN: 13 MeV doublet $\Re \delta \approx -75^\circ$ 而不是 $+105^\circ$}
+\textbf{根因}：\texttt{src/interactions/nijmegen\_interface.cpp} 的某个 sign convention
+被人改坏了。
+\textbf{修复}：\texttt{git diff master -- src/interactions/nijmegen*}
+检查最近改动；
+对比 \texttt{tictac-origin/Tic-tac/CPP/} 同名文件；
+回滚或修正。
+
+\paragraph{ERR-RUN-UFILES-EMPTY: \texttt{U data rows: no}}
+\textbf{根因}：求解器返回 0 但所有 \texttt{U\_PW\_elements\_*.txt} 文件\textbf{表头有、数据无}。
+通常意味着 on-shell q-bin 选择失败
+（\texttt{find\_on\_shell\_bins} 返回 -1）。
+\textbf{修复}：
+\begin{itemize}
+  \item 检查 \texttt{energy\_input\_file} 里的能量值确实在 q-bin 网格的覆盖范围内
+        （\texttt{chebyshev\_s} 决定上限，默认 100\,MeV / 150\,MeV / 180\,MeV）；
+  \item 把 \texttt{chebyshev\_s} 调大到 \texttt{200} 以上；
+  \item 看 \texttt{solver\_run.log} 中的 \texttt{q\_max\_MeV}，
+        若 \texttt{q\_max\_MeV} 远小于 $q_0(T_{\mathrm{lab}})$，
+        就是上限不够。
+\end{itemize}
+
+\paragraph{ERR-RUN-PERMISSION: \texttt{Permission denied: 'CPP/run'}}
+\textbf{根因}：\texttt{git clone} 在某些 Windows-shared 文件系统上不保留 +x 位。
+\textbf{修复}：\texttt{chmod +x CPP/run}。
+
+\paragraph{ERR-LATEX-CJKFONT: \texttt{Package fontspec Error: The font 'Noto Serif CJK SC' cannot be found.}}
+\textbf{根因}：\texttt{xelatex} 找不到中日韩字体；本治学手册要求该字体。
+\textbf{修复}：\texttt{sudo apt install fonts-noto-cjk fonts-noto-cjk-extra}，
+然后 \texttt{fc-cache -fv}。
+
+\paragraph{ERR-PY-IMPORT: \texttt{ModuleNotFoundError: No module named 'tlab\_utils'}}
+\textbf{根因}：直接运行 \texttt{examples/deuteron\_proton\_Ay.py} 而\textbf{cwd 不在 \texttt{Tic-tac/}}。
+脚本相对导入依赖 \texttt{sys.path} 含 \texttt{examples/}。
+\textbf{修复}：保持
+\begin{lstlisting}[style=config]
+cd Tic-tac
+python3 examples/deuteron_proton_Ay.py ...
+\end{lstlisting}
+不要 \texttt{cd Tic-tac/examples \&\& python3 deuteron\_proton\_Ay.py}（也行，但路径解析一团糟）。
+长期解法是把 \texttt{examples/} 包化（加 \texttt{\_\_init\_\_.py}），
+但目前 Sean 原仓库不是这样组织的，
+我们暂时跟随。
+
+\paragraph{ERR-PY-MATPLOTLIB: \texttt{ImportError: ... matplotlib}}
+\textbf{根因}：求解器运行环境不一定带 matplotlib（节省镜像大小）。
+\textbf{修复}：把绘图脚本放在专门的 conda 环境里：
+\begin{lstlisting}[style=config]
+micromamba run -n anaroot-env python examples/plot_validation_curves.py ...
+\end{lstlisting}
+或在求解器环境里追加 \texttt{pip install matplotlib}。
+
+% --------------------------------
+\paragraph{未能定位时怎么办？}
+若你的错误信息不在以上列表里：
+\begin{enumerate}
+  \item 看 \texttt{solver\_run.log} 完整输出（不止最后几行——\texttt{P123} 阶段的早期 panic
+        会被后续日志 cover），
+        \texttt{grep -nE "(error|ERROR|warning|fatal|panic|abort)" solver\_run.log}；
+  \item 从 \texttt{output/<work-dir>/solver\_validation\_tlab\_*.json}
+        看 \texttt{status / best\_energy / abs\_delta\_tlab\_mev}，
+        判断是数值问题（pass / warn）还是结构问题（fail / 缺字段）；
+  \item \texttt{git log -- <出错文件>} 看最近一次改动是不是来自一个未完整 review 的 PR；
+  \item 用 \texttt{tictac-origin/} 同名文件做对照（\cref{ch:18_origin_codebase}），
+        若 origin 行为正常，就是 refactor 引入的 bug
+        （\cref{ch:19_refactor_evolution}）。
+\end{enumerate}
+把每条新错误及其修复\textbf{补回本节}，
+让下一个新人少踩一遍。
+本章是\textbf{活}文档。
+
+% =====================================================================
+% 章末小结
+% =====================================================================
+\section*{本章小结}
+\addcontentsline{toc}{section}{本章小结}
+
+至此读者应当掌握：
+\begin{itemize}
+  \item \cref{sec:ch20-env} \textbf{依赖与硬件预算} ——
+        Debian/Ubuntu 一行 \texttt{apt}、conda 一行 \texttt{micromamba}、
+        中文 locale 与中文路径的禁忌；
+  \item \cref{sec:ch20-build} \textbf{两条构建路径}的等价性 ——
+        \texttt{make -C CPP -j} 与 \texttt{./build.sh release} 接受同一份输入文件；
+  \item \cref{sec:ch20-scenario-190} 至 \cref{sec:ch20-scenario-dense}
+        \textbf{五个生产场景}的命令、输出、排查与性能预期；
+  \item \cref{sec:ch20-regression} \textbf{回归测试纪律} ——
+        \texttt{tests/test\_190mev\_data\_pipeline.py} 是秒级 gate，
+        \texttt{compare\_Ay\_experiment.py} 是分钟级 gate；
+  \item \cref{sec:ch20-errors} \textbf{15 条已知错误}的快速索引 ——
+        编译期 / 链接期 / 运行期 / Python 期一一对应。
+\end{itemize}
+
+读者目标姿态：
+读完本章，
+你应当能在干净的 8 核 / 32 GB 工作站上从零开始，
+\textbf{4 小时内}：
+\begin{enumerate}
+  \item 装好环境并编译 \texttt{CPP/run};
+  \item 跑通场景 1 smoke test 并看到 \texttt{status: pass};
+  \item 跑通场景 4 Miller Gate 1 并看到 $\Re \delta \approx 105^\circ$;
+  \item 改一行源代码后用 \texttt{python3 -m unittest tests.test\_190mev\_data\_pipeline}
+        在 5 秒内得到反馈。
+\end{enumerate}
+后续要做的物理推广（更高的 $J_{2N}$、3NF 全张量、Coulomb）
+都将以本章描述的工作流为操作基础——
+\textbf{物理变了，流水线不变}，
+这是 \cref{ch:18_origin_codebase} 与 \cref{ch:19_refactor_evolution}
+两章保持代码契约稳定的最终目的。
+
+% --- end of chapter 20 ---

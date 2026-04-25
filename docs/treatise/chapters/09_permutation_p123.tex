@@ -1,13 +1,1387 @@
 % =====================================================================
 % 09_permutation_p123.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 9 章 置换算符 P_{123} 的解析与代码实现
+% Wave 3 / Agent A
+%
+% 配套代码（current）:
+%   src/core/state\_space/make_permutation_matrix.{cpp,h}
+%   src/utils/auxiliary.cpp        (pi1_tilde / pi2_tilde / Atilde / Gtilde)
+%   src/io/disk_io_routines.cpp    (HDF5 cache)
+%   src/core/faddeev_solver/solve_faddeev.cpp (P123 下游消费)
+% 配套代码（origin）:
+%   tictac-origin/Tic-tac/CPP/make_permutation_matrix.{cpp,h}
 % =====================================================================
 
-\chapter{置换算符 P123 的解析与代码实现}
+% --- 本章内部宏 (providecommand 防止与全局 physics_macros.tex 冲突) ---
+\providecommand{\permmat}{\Pop}                              % 置换矩阵 P_{123}
+\providecommand{\Pijkl}{P_{(12)(3)}}                          % 12 配对 → 3 配对
+\providecommand{\jacP}{\boldsymbol{p}}                        % 12 相对动量
+\providecommand{\jacQ}{\boldsymbol{q}}                        % 12-3 相对动量
+\providecommand{\jacPp}{\boldsymbol{p}'}
+\providecommand{\jacQp}{\boldsymbol{q}'}
+\providecommand{\pibar}{\bar{\boldsymbol{\pi}}}
+\providecommand{\pibarone}{\tilde{\pi}_{1}}
+\providecommand{\pibartwo}{\tilde{\pi}_{2}}
+\providecommand{\Atilde}{\tilde{A}}
+\providecommand{\Gtilde}{\tilde{G}}
+\providecommand{\binPp}[1]{\Delta^{p'}_{#1}}
+\providecommand{\binQp}[1]{\Delta^{q'}_{#1}}
+\providecommand{\NxGL}{N_{x}}
+\providecommand{\Nphi}{N_{\phi}}
+\providecommand{\Lmax}{L_{\max}}
+\providecommand{\NJP}{N_{J^\pi}}
+\providecommand{\nineJ}[9]{\left\{\begin{array}{ccc}#1&#2&#3\\#4&#5&#6\\#7&#8&#9\end{array}\right\}}
+\providecommand{\sixJ}[6]{\left\{\begin{array}{ccc}#1&#2&#3\\#4&#5&#6\end{array}\right\}}
+\providecommand{\threeJ}[6]{\begin{pmatrix}#1&#2&#3\\#4&#5&#6\end{pmatrix}}
+\providecommand{\WPstate}[3]{\ket{X^{#1}_{#2#3}}}             % |X^α_{ij}>，i=q-bin、j=p-bin
+\providecommand{\WPstateP}[3]{\ket{X^{#1}_{#2#3}}}            % bra/ket 同形
+
+\chapter{置换算符 \texorpdfstring{$\Pop$}{P123} 的解析与代码实现}
 \label{ch:09_permutation_p123}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =====================================================================
+\section{物理动机}
+\label{sec:ch09-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+% ---------------------------------------------------------------------
+\subsection{从反对称化到 \texorpdfstring{$\Pop$}{P}}
+\label{subsec:ch09-antisymmetrization}
+
+三核子（3N）系统由两个相同的中子和一个质子（\(p+n+n\)）或两个质子和一个中子（\(d+p\)）组成，
+即同位旋空间内三个核子全等。Pauli 反对称化要求所有物理态对任意两个核子的对换\emph{反对称}：
+\begin{equation}
+\label{eq:ch09-antisym}
+\Aop\,\ket{\Psi}=\ket{\Psi},\qquad
+\Aop \;=\; \tfrac{1}{6}\sum_{\sigma\in S_3}\sgn(\sigma)\,\hat{\sigma},
+\end{equation}
+其中 \(S_3\) 是三元置换群、\(\hat{\sigma}\) 把核子标号按 \(\sigma\) 重排。
+但是 Faddeev 分解（\cref{ch:04_faddeev_ags}）只在\textbf{一种 Jacobi 树}上展开
+（约定取 "(12)3" 树：\((12)\) 配对相互作用、\(3\) 旁观），因此每条 Faddeev 分量
+\(\psifad{i}\) 都\textbf{打破}了三体置换对称性。要把这种"单一树"形式与 Pauli
+反对称兼容，必须显式地把另两条树的内容\emph{借助置换算符搬运回来}。
+
+记三个 Jacobi 树为 "(23)1"、"(31)2"、"(12)3"，对应的两两置换为 \(\Pij{1}{2}\)、
+\(\Pij{2}{3}\)、\(\Pij{1}{3}\)。Glöckle 等人在 1983 年的标准论文（\cite{Gloeckle1983}）
+中证明：
+\begin{equation}
+\label{eq:ch09-P-decomposition}
+\Pop \;\equiv\; \Pij{1}{2}\Pij{2}{3} + \Pij{1}{3}\Pij{2}{3},
+\end{equation}
+便是把"(12)3"树映射到另两棵 Jacobi 树之和的\emph{唯一非平凡循环置换}。在反对称
+\((12)\)-pair 子空间内（即 \(\Pij{1}{2}\ket{\Psi}=-\ket{\Psi}\)），\eqref{eq:ch09-P-decomposition}
+还可以等价改写为
+\begin{equation}
+\label{eq:ch09-P-twoP123}
+\Pop \;=\; 2\Pij{1}{2}\Pij{2}{3} \;\equiv\; 2\,\Pijkl,
+\end{equation}
+即下游求解器（\cref{ch:11_faddeev_solver}）实际遇到的"\(P\)"恰恰是单个三体循环
+置换 \(P_{123}\equiv\Pij{1}{2}\Pij{2}{3}\) 的\textbf{两倍}。这一结论解释了
+\texttt{solve\_faddeev.cpp} 内 \texttt{calculate\_PVC\_col} 函数中的
+\verb|double P_element = 2*P123_val_array[idx_i]| 这一在初学者看来"莫名出现 2"
+的代码段（详见 \cref{sec:ch09-interfaces}）。
+
+\paragraph{命名约定。}
+为避免读者混淆，本章后续\textbf{统一用 \(\Pop\) 指代}\eqref{eq:ch09-P-decomposition}
+中的\textbf{完整置换算符}（factor 2 已经吸收进\(\Pop\) 的定义）；用
+\(\Pijkl\) 或\(P_{123}\) 指代代码内存储的"半矩阵"。代码命名 \texttt{P123\_*}
+对应后者；调用方负责乘 2。
+
+% ---------------------------------------------------------------------
+\subsection{为什么 \texorpdfstring{$\Pop$}{P} 决定 Faddeev 求解的精度}
+\label{subsec:ch09-why-precision}
+
+Faddeev/AGS 核（\cref{ch:04_faddeev_ags}）的真实操作形式是
+\begin{equation}
+\label{eq:ch09-faddeev-kernel}
+T_{\alpha\beta}(z) \;=\; \delta_{\alpha\beta}\,\Vop_{\alpha}\,\Pop \;+\;
+\Vop_{\alpha}\,\Pop\,\Gzero(z)\,T_{\alpha\beta}(z),
+\end{equation}
+其中 \(\Vop_\alpha\) 是配对 \(\alpha\) 上的两体核力（\cref{ch:08_potential_matrix}），
+\(\Gzero(z)=(z-\Hzero)^{-1}\) 是自由 3N Green 函数（\cref{ch:10_resolvent}），
+\(\Pop\) 是\eqref{eq:ch09-P-decomposition}所定义的置换。可以读出三件事：
+
+\begin{enumerate}
+\item Faddeev 核里的\textbf{每一次再散射}（rescattering）都\textbf{必须穿一次}
+      \(\Pop\)。如果 \(\Pop\) 在 WP 基下的矩阵元有 \(\sim 10^{-3}\) 的相对误差，
+      Padé 加速 12 阶后误差会放大到 \(\sim 10^{-2}\) 级，反映为 \(iT_{11}\)
+      在 \(\theta_{\text{c.m.}}\sim 60^\circ\) 处的扭曲。
+\item \(\Pop\) 是\textbf{与能量无关}的纯几何算符（仅由 \(\Hzero\)
+      谱、Jacobi 坐标变换决定）。一旦 WP 基底固定（\(\NpWP, \NqWP\) 选定），
+      所有 \(z\) 值的求解共享同一个 \(\Pop\)。这意味着\textbf{建一次、用许多次}
+      ——这正是 \cref{sec:ch09-codeland} 看到的 HDF5 cache 设计动机。
+\item \(\Pop\) 在 WP 基下\textbf{高度稀疏}。\eqref{eq:ch09-P-decomposition}
+      把"(12)3"基矢映射到 \((23)1\) 与 \((31)2\) 的线性组合；几何上这只让
+      "原 bin 与新 bin 重叠的格子"对中存在矩阵元。下面会量化：典型生产配置
+      （\(\NpWP=\NqWP=20\)、\(\Nalpha=34\)、\(J^\pi=\tfrac{1}{2}^+\)）下，
+      \(\Pop\) 的稠密维度为 \(13\,600^2\)，但非零元密度只有 \(\sim 0.5\%\)。
+\end{enumerate}
+
+\paragraph{结论：\(\Pop\) 是 Tic-tac 求解器最值得"花钱"的一次性投资。}
+本章 \(\sim 90\%\) 的内容都在描述这一次性投资如何被分解为：（i）几何重叠
+预筛、（ii）角动量 \(\Atilde\) 表预存、（iii）几何核 \(\Gtilde\) 表预存、
+（iv）波包平均求积、（v）线程局部稀疏 COO 缓冲、（vi）HDF5 持久化与 mismatch
+保护。这条流水线就是 \texttt{make\_permutation\_matrix.cpp} 这 1\,491 行代码
+的物理含义。
+
+% ---------------------------------------------------------------------
+\subsection{上下游边界}
+\label{subsec:ch09-up-down-stream}
+
+为了在心智模型中先勾勒边界，先放出本模块的 I/O 表（具体的 TikZ 调用图见
+\cref{sec:ch09-interfaces}）：
+
+\begin{center}
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{ll}
+\toprule
+\textbf{上游（输入）} & \\
+\(\NpWP, \NqWP\) 与 bin 边界 \(\{p^{\text{WP}}_i\},\{q^{\text{WP}}_j\}\)
+   & \cref{ch:06_wp_swp_states} 给出 \\
+通道索引 \(\PWchan=(\ell, s, j; \lambda, I; J^\pi, T)\)
+   & \cref{ch:07_pw_symm_states} 给出 \\
+角动量上限 \(L_{2N}^{\max}, l_{1N}^{\max}, J_{2N}^{\max}\)
+   & \texttt{run\_params} \\
+求积阶 \(\NxGL\)（Gauss--Legendre）、\(\Nphi\)（极角网格）
+   & 输入 \\
+\midrule
+\textbf{产出（输出）} & \\
+COO 三元组 \((P_{123}^{\text{val}}, \text{row}, \text{col})\)
+   & \texttt{P123\_sparse\_*\_array} \\
+非零元数 \texttt{P123\_sparse\_dim} & \(\sim 10^{6}\) for \(\NpWP{=}20\) \\
+HDF5 cache 文件 \texttt{P123\_sparse\_JP\_\dots.h5} & 供后续多能量复用 \\
+\midrule
+\textbf{下游（消费者）} & \\
+\(\Pop\Vop\Cmat\)、\(\Cmat^T\Pop\Vop\Cmat\) 列向量构造
+   & \cref{ch:11_faddeev_solver} \\
+W1 三体力期望值 \(\bra{\psi_t}W^{(1)}\Pop\ket{\psi_t}\)
+   & \cref{ch:17_3nf_numerical} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =====================================================================
+\section{数学推导}
+\label{sec:ch09-math}
+
+% ---------------------------------------------------------------------
+\subsection{矩阵元起步：\texorpdfstring{$\bra{\PWchanp\jacobip'\jacobiq'}\Pop\ket{\PWchan\jacobip\jacobiq}$}{<a'p'q'|P|apq>}}
+\label{subsec:ch09-element-startpoint}
+
+记 \cref{ch:03_jacobi_partial_wave} 中的部分波-Jacobi 基矢为
+\(\ket{\PWchan; pq}\equiv \ket{\PWchan}\otimes \ket{p,q}\)，
+其中 \(\PWchan=(L_{12},S_{12},J_{12},T_{12};l_3,s_3=\tfrac{1}{2};J^\pi,T)\)
+是 \cref{eq:ch03-channel-tuple} 已建立的部分波元组。
+\(p\) 是 \((12)\) 配对的相对动量、\(q\) 是 \(3\) 旁观核子相对于 \((12)\) 质心
+的相对动量。在 \cref{ch:03_jacobi_partial_wave} 的 \eqref{eq:ch03-jacobi-12to23}
+（一般性 Jacobi 旋转关系）下，置换 \(\Pij{2}{3}\) 把 "(12)3" 树的 \((p,q)\)
+映射到 "(13)2" 树的 \((\bar{p},\bar{q})\)：
+\begin{equation}
+\label{eq:ch09-jacobi-rotation}
+\bar{p} \;=\; \pibarone(p,q,x), \qquad
+\bar{q} \;=\; \pibartwo(p,q,x), \qquad
+x \;\equiv\; \hat{p}\!\cdot\!\hat{q},
+\end{equation}
+其中
+\begin{equation}
+\label{eq:ch09-pi1-pi2-explicit}
+\pibarone(p,q,x) = \sqrt{\tfrac{1}{4}p^{2} + \tfrac{9}{16}q^{2} + \tfrac{3}{4}\,p\,q\,x}, \qquad
+\pibartwo(p,q,x) = \sqrt{p^{2} + \tfrac{1}{4}q^{2} - p\,q\,x}.
+\end{equation}
+\eqref{eq:ch09-pi1-pi2-explicit}是 Glöckle 1983 \cite{Gloeckle1983} \S2 与
+Sean Miller 博士论文 \cite{MillerThesis} \S6.4 都列出的"标准 Jacobi 旋转"，
+也可以从如下三核子坐标推导（用核子 \(i\) 的位置/动量 \(\boldsymbol{r}_i,
+\boldsymbol{k}_i\) 表达）：
+\begin{align}
+\boldsymbol{p}    &= \tfrac{1}{2}(\boldsymbol{k}_1 - \boldsymbol{k}_2), &
+\boldsymbol{q}    &= \tfrac{2}{3}\bigl[\boldsymbol{k}_3 - \tfrac{1}{2}(\boldsymbol{k}_1+\boldsymbol{k}_2)\bigr],\\
+\bar{\boldsymbol{p}} &= \tfrac{1}{2}(\boldsymbol{k}_1 - \boldsymbol{k}_3), &
+\bar{\boldsymbol{q}} &= \tfrac{2}{3}\bigl[\boldsymbol{k}_2 - \tfrac{1}{2}(\boldsymbol{k}_1+\boldsymbol{k}_3)\bigr].
+\end{align}
+两组动量满足
+\begin{equation}
+\bar{\boldsymbol{p}} = -\tfrac{1}{2}\boldsymbol{p} - \tfrac{3}{4}\boldsymbol{q},\qquad
+\bar{\boldsymbol{q}} = \boldsymbol{p} - \tfrac{1}{2}\boldsymbol{q}.
+\end{equation}
+取其模长平方再开方即得 \eqref{eq:ch09-pi1-pi2-explicit}。
+代码端 \(\pibarone, \pibartwo\) 出现在 \texttt{src/utils/auxiliary.cpp:453--473}
+的两个工具函数 \texttt{pi1\_tilde / pi2\_tilde}：
+
+\lstinputlisting[style=cpp, caption={\(\pibarone, \pibartwo\) 的代码实现},
+label={lst:ch09-pi-tilde}]
+{code_excerpts/snippets/ch09_pi_tilde_helpers.cpp}
+
+\begin{remark}[\(\tilde\pi'\) 的存在原因]
+\label{rem:ch09-pi-prime}
+\texttt{pi1\_prime\_tilde / pi2\_prime\_tilde} 与
+\texttt{pi1\_tilde / pi2\_tilde} 仅相差 \(x\to-x\) 的整体符号；它们对应另一种
+约定（\(\Pij{1}{3}\Pij{2}{3}\) vs \(\Pij{1}{2}\Pij{2}{3}\)）。见
+\cref{sec:ch09-pitfalls} 关于符号约定的讨论。
+\end{remark}
+
+把 \eqref{eq:ch09-jacobi-rotation} 代回\(\bra{\PWchanp\jacobip'\jacobiq'}\Pop\ket{\PWchan\jacobip\jacobiq}\)，
+利用动量本征态的归一化 \(\braket{\boldsymbol{p}'}{\boldsymbol{p}}=\delta(\boldsymbol{p}'-\boldsymbol{p})\)
+做 \(\delta\) 函数的"双 Jacobi 套索"：
+\begin{equation}
+\label{eq:ch09-element-raw}
+\bra{\PWchanp\jacobip'\jacobiq'}\Pop\ket{\PWchan\jacobip\jacobiq}
+\;=\;
+\int_{-1}^{+1}\!dx\;
+\frac{\delta(p' - \pibarone(p,q,x))\,\delta(q' - \pibartwo(p,q,x))}{p'^{2}\,q'^{2}}\;
+\Atilde_{\PWchanp\PWchan}(L_{\text{tot}},S_{\text{tot}})\,
+\Gtilde_{\PWchan\PWchanp}(p,q,x).
+\end{equation}
+其中 \(\Atilde\) 是\textbf{角动量重耦合系数}（与 \(p,q\) 无关、只依赖通道 quantum
+numbers）、\(\Gtilde\) 是\textbf{几何核}（依赖 \(p,q,x\) 的连续函数）。下面分别
+推导。
+
+% ---------------------------------------------------------------------
+\subsection{角动量重耦合：\texorpdfstring{$\Atilde$}{Atilde} 的封闭形式}
+\label{subsec:ch09-Atilde}
+
+\(\Pop\) 把通道指标 \(\PWchan\to\PWchanp\) 的非平凡映射全部装进 \(\Atilde\)。
+按 Glöckle \cite{Gloeckle1983} \S2.3，可以把每条通道的角动量耦合从
+\((L_{12},l_3)\) 配对耦到 \((S_{12},s_3=\tfrac{1}{2})\) 配对、再耦到总
+\((J,M_J)\)，并把"(12)3" 变 "(13)2" 的两次重耦合用 9-j 与 6-j 符号表达：
+\begin{align}
+\label{eq:ch09-Atilde-explicit}
+\Atilde_{\alpha\alpha'}(L_{\text{tot}})
+&=
+\sum_{S_{\text{tot}}}\!
+\sqrt{
+\hat{J}_{12}\hat{j}_3\hat{S}_{12}\hat{T}_{12}
+\hat{J}_{12}'\hat{j}_3'\hat{S}_{12}'\hat{T}_{12}'
+}
+\;(-1)^{S_{12}'+T_{12}'}\,(2 S_{\text{tot}}+1)\notag\\
+&\quad\times
+\nineJ
+{2L_{12}}{2S_{12}}{2J_{12}}
+{2l_{3}}{1}{2j_{3}}
+{2L_{\text{tot}}}{2S_{\text{tot}}}{2J}\;
+\nineJ
+{2L_{12}'}{2S_{12}'}{2J_{12}'}
+{2l_{3}'}{1}{2j_{3}'}
+{2L_{\text{tot}}}{2S_{\text{tot}}}{2J}\notag\\
+&\quad\times
+\sixJ{1}{1}{2S_{12}}{1}{2 S_{\text{tot}}}{2S_{12}'}\;
+\sixJ{1}{1}{2T_{12}}{1}{2 T}{2T_{12}'}.
+\end{align}
+其中我用了\(\hat{x}\equiv 2x+1\) 的简记法、且所有 \(j,J,T\) 均以
+\(2j\) 整数形式表达（GSL 要求）。\(L_{\text{tot}}\) 是中间求和指标
+（\(L_{12}\) 与 \(l_3\) 耦合的总轨道角动量），\(S_{\text{tot}}\)
+则是 \(S_{12}\) 与 \(s_3=\tfrac{1}{2}\) 耦合的总自旋。两个 9-j 符号的物理
+含义是\textbf{把对偶位置的 \((L_{12},S_{12},J_{12})\) 重耦到
+\((L_{\text{tot}},S_{\text{tot}},J)\)}；两个 6-j 符号则负责\textbf{把
+\(s_3\)、\(t_3\) 这种"半整数自旋"在 \((12)\) 配对里旋转}。
+
+代码端 \(\Atilde\) 的实现是 \texttt{src/utils/auxiliary.cpp:863--884} 的
+\texttt{Atilde()}：
+
+\lstinputlisting[style=cpp, caption={\(\Atilde\) 与 \(\Gtilde\) 的代码实现},
+label={lst:ch09-Atilde-Gtilde}]
+{code_excerpts/snippets/ch09_atilde_gtilde_new.cpp}
+
+\paragraph{Wigner 6j-/9j-符号的预存。}
+\eqref{eq:ch09-Atilde-explicit}对每对通道 \((\alpha,\alpha')\)、对每个允许的
+\(L_{\text{tot}}\)，需要查 4 个 Wigner 符号；外层 \(\PWchan\) 循环再叠加，
+单纯 GSL 调用代价为 \(\mathcal{O}(\Nalpha^2 \Lmax)\)，但每次 GSL 调用本身约
+\SI{1}{\micro\second}。Tic-tac 在
+\texttt{make\_permutation\_matrix.cpp:466--491} 把所有
+\((2j_1,\dots,2j_6)\le 2 l_{\max}\) 的 6-j 表预先用 \texttt{collapse(3)} OpenMP
+循环填满，再用 inline \texttt{SixJSymbol(...)} 查表。同样的处理对 9-j 符号
+（实际是\texttt{gsl\_sf\_coupling\_9j} 的 inline 调用）和 Clebsch--Gordan 系数
+（\texttt{ClebschGordan\_data} 的 5-D 数组）一并执行。
+
+\begin{remark}[Edmonds vs Brink 约定]
+\eqref{eq:ch09-Atilde-explicit}的相位因子 \((-1)^{S_{12}'+T_{12}'}\) 用的是
+Edmonds 约定（\cite{Edmonds1957}）。\cref{ch:07_pw_symm_states} 里
+\texttt{make\_pw\_symm\_states.cpp} 也使用同一约定，因此与本章\(\Atilde\)兼容。
+若读者从 Brink--Satchler \cite{BrinkSatchler1968} 或 Witała 等人的早期 Bochum
+论文手抄角动量代数，注意 \((-1)^{T_{12}}\) vs \((-1)^{T_{12}'}\) 的差别；写错
+就会让 W1 期望值整体相位翻转（\cref{ch:17_3nf_numerical} 中第 17.8 节有相应
+踩坑记录）。
+\end{remark}
+
+% ---------------------------------------------------------------------
+\subsection{几何核 \texorpdfstring{$\Gtilde$}{Gtilde} 的完整推导}
+\label{subsec:ch09-Gtilde}
+
+把 \eqref{eq:ch09-element-raw} 中的 \(\delta\) 函数对 \(p',q'\) 积掉，余下的
+\(x\) 积分把通道之间的"动量+角动量"几何耦合压缩成一个标量函数
+\(\Gtilde_{\alpha\alpha'}(p,q,x)\)。其封闭形式来自展开三个球谐 \(Y_{l m}\)：
+
+\paragraph{第一步：球谐展开 \(\ket{p,q}\) 中的角部分。}
+回忆 \cref{eq:ch03-angularY} 的部分波展开：
+\begin{equation}
+\ket{p,q;\PWchan}
+=
+\sum_{m_{L},m_{l}}
+C^{J M_J}_{L_{12} m_L, l_3 m_l;\dots}
+\,Y_{L_{12} m_L}(\hat{p})\,Y_{l_3 m_l}(\hat{q})\,
+\ket{(\tfrac{1}{2}\tfrac{1}{2})S_{12};(S_{12}\tfrac{1}{2})S_{\text{tot}}}
+\otimes\ket{p,q;\text{radial}},
+\end{equation}
+经 \(\Pij{2}{3}\) 的 Jacobi 旋转后 \((\hat{p},\hat{q})\to(\hat{\bar p},\hat{\bar q})\)，
+两组方向相互"耦合到同一组动量"：使用球谐加法定理
+\(Y_{Lm}(\hat{n})=Y_{Lm}(\theta(\hat{n}),\varphi(\hat{n}))\) 与
+\(P^{m}_{L}(\cos\theta)\) 的解析表达式可以写出：
+\begin{equation}
+Y_{L_{12} m_L}(\hat{\bar p})\;=\;\sqrt{\tfrac{2L_{12}+1}{4\pi}}\,P^{m_L}_{L_{12}}(\cos\theta_1)\,
+\delta_{m_L,0}\;\;\;\text{在 }\hat{p}=\hat{z}\text{ 取向},
+\end{equation}
+其中我们\textbf{选取}\(\hat{p}\) 沿 \(\hat{z}\) 方向（\(\hat{p}\) 是积分变量、可以
+任选取向），\(\theta_1\) 是 \(\hat{\bar p}\) 与 \(\hat{p}\) 的夹角。从
+\eqref{eq:ch09-pi1-pi2-explicit} 配合 \(\bar{\boldsymbol{p}}=-\tfrac{1}{2}\boldsymbol{p}-\tfrac{3}{4}\boldsymbol{q}\)
+\(\Rightarrow\) \(\bar{p}\,\hat{\bar p}\!\cdot\!\hat{p}=-\tfrac{1}{2}p-\tfrac{3}{4}q\,(\hat{q}\!\cdot\!\hat{p})\)，
+我们立即得到
+\begin{equation}
+\label{eq:ch09-costheta1}
+\cos\theta_1 \;=\; -\frac{\tfrac{1}{2}p + \tfrac{3}{4}q\,x}{\pibarone(p,q,x)},
+\qquad
+\cos\theta_2 \;=\; \frac{p - \tfrac{1}{2}q\,x}{\pibartwo(p,q,x)}.
+\end{equation}
+代码端 \eqref{eq:ch09-costheta1} 出现在 \texttt{Gtilde\_new()} 函数
+内（\texttt{src/utils/auxiliary.cpp:896--897}）以及 \texttt{calculate\_permutation\_elements\_for\_3N\_channel}
+内对 Plm 表的预填段。两处都做了"夹紧到 \([-1,1]\)"的数值保护，因为
+浮点累积误差会让 \(\cos\theta\) 偶尔达到 \(1+\eps\)。
+
+\paragraph{第二步：把两个 \(\hat{\bar p}, \hat{\bar q}\) 的球谐合成一个"总球谐"。}
+利用球谐耦合：
+\begin{equation}
+Y_{L_{12} m_L}(\hat{\bar p})\,Y_{l_3 m_l}(\hat{\bar q})
+=
+\sum_{L_{\text{tot}},M_{\text{tot}}}\!
+C^{L_{\text{tot}} M_{\text{tot}}}_{L_{12} m_L, l_3 m_l}\,
+\bigl[Y_{L_{12}}(\hat{\bar p})\otimes Y_{l_3}(\hat{\bar q})\bigr]_{L_{\text{tot}}M_{\text{tot}}}.
+\end{equation}
+配合 \(\eta\)-axis 取向使方位角 \(\varphi'=\pi\)（来自 \(\hat{\bar p}\) 与
+\(\hat{\bar q}\) 的相对方位角约定：当 \(\hat{p}=\hat{z}\)、\(\hat{q}\) 在 \(xz\)-平面时，
+\(\hat{\bar p}\) 与 \(\hat{\bar q}\) 共面但\textbf{反向}，导致 \(\varphi=\pi\)），
+\(e^{i m\pi}=(-1)^m\) 给出 \(\Gtilde\) 表达式中的 \((-1)^{M_{\text{tot}}}\)
+相位因子。
+
+\paragraph{第三步：闭式的 \(\Gtilde\)。}
+合并以上、把 \(\Atilde\) 的角动量耦合系数也吸进来，得：
+\begin{empheq}[box=\fbox]{align}
+\label{eq:ch09-Gtilde-final}
+\Gtilde_{\alpha\alpha'}(p,q,x)
+=
+8\pi^2\!\!\sum_{L_{\text{tot}}=L_{\min}}^{L_{\text{max}}}\!\!
+\Atilde_{\alpha\alpha'}(L_{\text{tot}})\!\!
+\sum_{M=-l_3}^{l_3}\!\!
+&C^{L_{\text{tot}}M}_{L_{12}\,0,\,l_3\,M}\,
+\sqrt{\tfrac{2L_{12}+1}{4\pi}}\,(-1)^{M}\,P^{M}_{l_3}(x)\notag\\
+\times\!\!\sum_{m=-L_{12}'}^{L_{12}'}\!\!
+&C^{L_{\text{tot}}M}_{L_{12}'\,m,\,l_3'\,M-m}\,
+P^{m}_{L_{12}'}(\cos\theta_1)\,P^{M-m}_{l_3'}(\cos\theta_2),
+\end{empheq}
+其中 \(L_{\min}=\max(\abs{L_{12}-l_3},\abs{L_{12}'-l_3'})\)、
+\(L_{\max}=\min(L_{12}+l_3,L_{12}'+l_3',(2J+5)/2)\)；
+\(C^{c\gamma}_{a\alpha,b\beta}\) 是 Clebsch--Gordan 系数（采用
+\(2j\) 整数表示）。
+\eqref{eq:ch09-Gtilde-final} 与 \eqref{eq:ch09-Atilde-explicit} 共同构成了
+\eqref{eq:ch09-element-raw} 的右端被积函数。
+
+\paragraph{与代码的对应。}
+\eqref{eq:ch09-Gtilde-final} 与 \texttt{Gtilde\_new()}（\cref{lst:ch09-Atilde-Gtilde}）
+是 1:1 对应：
+\begin{itemize}
+\item 第一个 \texttt{for (int Ltotal = ...)} 循环 = \(L_{\text{tot}}\) 求和；
+\item \texttt{fac1 = 8.0 * M\_PI * M\_PI * A\_store[...]} = 前因子 \(8\pi^2\Atilde\)；
+\item 第二个 \texttt{for (int Mtotal = ...)} 循环 = \(M\) 求和；
+\item \texttt{ClebschGordan(2*L12, 2*l3, 2*Ltotal, 0, 2*Mtotal, 2*Mtotal)} = \(C^{L_{\text{tot}}M}_{L_{12}\,0,\,l_3\,M}\)；
+\item \texttt{Plm(l3, Mtotal, x)} = \(P^{M}_{l_3}(x)\)；
+\item 第三个 \texttt{for (int M12primesum = ...)} 循环 = \(m\) 求和（这里 \(m=M_{12}'\)）；
+\item \texttt{Plm(L12prime, M12primesum, costheta1) * Plm(l3prime, Mtotal-M12primesum, costheta2)} =
+      \eqref{eq:ch09-costheta1} 出来的两个 Legendre 项相乘。
+\end{itemize}
+
+\(\Gtilde\) 与 \(\Atilde\) 都是\textbf{与 WP bin 无关、只与连续 \(p,q,x\) 有关}
+的纯几何对象——这正是后续把它们\emph{预存为表}的物理依据。
+
+% ---------------------------------------------------------------------
+\subsection{\texorpdfstring{$x\to(\phi,k)$}{x to phi-k} 的极坐标变换}
+\label{subsec:ch09-polar-coordinates}
+
+直接用 \eqref{eq:ch09-element-raw}做 \(\delta\)-函数积分有一个不愉快的副作用：
+\(\delta(p'-\pibarone(p,q,x))\) 在 \(x\) 上的根 \(x_*(p',q',p,q)\) 是隐函数，
+雅可比 \(\abs{\partial \pibarone/\partial x}\) 在 \(p\to 0\) 或 \(q\to 0\) 时
+存在端点奇异。为了让积分光滑，Glöckle/Sean 都引入\textbf{极坐标变换}：把
+\((p,q)\) 平面换成 \((\phi, k)\)：
+\begin{equation}
+\label{eq:ch09-polar}
+p \;=\; k\sin\phi, \qquad q \;=\; k\cos\phi, \qquad
+\phi\in(0,\tfrac{\pi}{2}),\quad k\in[0,\infty),
+\end{equation}
+在此变换下 \(\pibarone, \pibartwo\) 都\textbf{齐次}于 \(k\)：
+\begin{equation}
+\pibarone(k\sin\phi, k\cos\phi, x) = k\,\zeta_1(\phi,x),\qquad
+\pibartwo(k\sin\phi, k\cos\phi, x) = k\,\zeta_2(\phi,x),
+\end{equation}
+其中
+\begin{equation}
+\zeta_1(\phi,x) = \pibarone(\sin\phi,\cos\phi,x),\qquad
+\zeta_2(\phi,x) = \pibartwo(\sin\phi,\cos\phi,x).
+\end{equation}
+正是这个齐次性让 WP 平均（\cref{subsec:ch09-WP-avg}）的 \(k\) 积分变成
+\textbf{解析的}（仅一个有理多项式 \((k_{\max}^2-k_{\min}^2)/2\zeta_1\zeta_2\)）；
+留下的"难积分"只剩 \(\phi\) 与 \(x\) 两维，刚好可以用 Gauss--Legendre 求积。
+
+代码端 \eqref{eq:ch09-polar} 出现在 \texttt{calculate\_WP\_overlap()}
+（\texttt{src/core/state\_space/make\_permutation\_matrix.cpp:205--365}）的
+"\texttt{double phi\_lower = atan(pp\_l/qp\_u); double phi\_upper = atan(pp\_u/qp\_l);}"
+两行——这两行界定了\textbf{对每对 \((q'_{\text{bin}}, p'_{\text{bin}})\)}
+的 \(\phi\) 积分上下限：
+\begin{equation}
+\phi\in[\arctan(p'_{\text{lo}}/q'_{\text{hi}}),\;\arctan(p'_{\text{hi}}/q'_{\text{lo}})].
+\end{equation}
+\(\Nphi\) 个 Gauss 节点会自动落在这个区间内（见 \cref{lst:ch09-WP-overlap}）。
+
+% =====================================================================
+\section{离散化方案}
+\label{sec:ch09-discretization}
+
+% ---------------------------------------------------------------------
+\subsection{波包（WP）平均}
+\label{subsec:ch09-WP-avg}
+
+把 \eqref{eq:ch09-element-raw} 投影到 WP 基：每个 WP 基矢
+\(\WPstate{\PWchan}{j}{i}\) 由 \cref{ch:06_wp_swp_states} 的两体 wave-packet
+\(\ket{x_i^p}\) 与三体 wave-packet \(\ket{x_j^q}\) 张成，归一化为
+\begin{equation}
+\WPstate{\PWchan}{j}{i} \;\equiv\;
+\frac{1}{\sqrt{\Niso^p_i\Niso^q_j}}
+\int_{p_i^{\text{lo}}}^{p_i^{\text{hi}}}\!dp\;p\;
+\int_{q_j^{\text{lo}}}^{q_j^{\text{hi}}}\!dq\;q\;
+\ket{\PWchan; pq},
+\end{equation}
+其中 \(\Niso^p_i\equiv \int_{p_i^{\text{lo}}}^{p_i^{\text{hi}}}p^2 dp = (p_i^{\text{hi},3}-p_i^{\text{lo},3})/3\)，
+\(\Niso^q_j\) 同理（\cref{ch:06_wp_swp_states} \eqref{eq:ch06-WP-norm}）。
+
+WP 矩阵元定义为
+\begin{equation}
+\label{eq:ch09-WP-element}
+P_{\PWchanp j' i', \PWchan j i}
+\;\equiv\;
+\bra{X^{\PWchanp}_{j' i'}}\Pop\ket{X^{\PWchan}_{j i}}.
+\end{equation}
+把 \eqref{eq:ch09-element-raw} 代入并先做 \(p',q'\) 的两个 WP 积分：
+\(\delta(p'-\pibarone)\) 把 \(p'\) 钉死在 \(\pibarone\)；类似地 \(q'\) 钉死在
+\(\pibartwo\)。\(p',q'\) 的 WP 积分把这两个 \(\delta\) 转化为 Heaviside 阶跃：
+\(\Theta(\pibarone\in[\binPp{i'}])\,\Theta(\pibartwo\in[\binQp{j'}])\)。
+
+接着对 \(p,q\) 的 WP 积分换到 \((\phi,k)\)（\eqref{eq:ch09-polar}），
+\(dp\,dq=k\,dk\,d\phi\)。把所有 Heaviside 化为 \(k\) 的上下限：
+\begin{align}
+k_{\min}(\phi,x)
+&= \max\!\left(
+\tfrac{p_i^{\text{lo}}}{\sin\phi},\;\tfrac{q_j^{\text{lo}}}{\cos\phi},\;
+\tfrac{p_{i'}^{\text{lo}}}{\zeta_1(\phi,x)},\;\tfrac{q_{j'}^{\text{lo}}}{\zeta_2(\phi,x)}
+\right),\notag\\
+k_{\max}(\phi,x)
+&= \min\!\left(
+\tfrac{p_i^{\text{hi}}}{\sin\phi},\;\tfrac{q_j^{\text{hi}}}{\cos\phi},\;
+\tfrac{p_{i'}^{\text{hi}}}{\zeta_1(\phi,x)},\;\tfrac{q_{j'}^{\text{hi}}}{\zeta_2(\phi,x)}
+\right).
+\label{eq:ch09-kminmax}
+\end{align}
+\eqref{eq:ch09-kminmax}恰是\(\zeta_1\zeta_2\)、\(\sin\phi\cos\phi\)
+等正定量的"四个比值取 max/min"——代码 \cref{lst:ch09-element-quad}
+里的 \verb|kmin = max(kmin_array, kmin_array+4)|
+\verb|kmax = min(kmax_array, kmax_array+4)| 即此。
+
+\(k\) 积分变成
+\begin{equation}
+\int_{k_{\min}}^{k_{\max}}\!dk\;k\;\Bigl[\frac{1}{p'^{2}q'^{2}}\;\delta\text{两次}\Bigr]
+\;\xrightarrow[\text{解析}]{}\;
+\frac{k_{\max}^{2}-k_{\min}^{2}}{2\,\zeta_1(\phi,x)\zeta_2(\phi,x)}.
+\end{equation}
+
+合并所有，得到\textbf{WP 矩阵元的最终量化形式}：
+\begin{empheq}[box=\fbox]{equation}
+\label{eq:ch09-final-quadrature}
+P_{\PWchanp j' i', \PWchan j i}
+=
+\frac{1}{\sqrt{\Niso^p_i\Niso^q_j\Niso^p_{i'}\Niso^q_{j'}}}\!
+\int_{x=-1}^{+1}\!\!dx\!\int_\phi\! d\phi\;
+\sin\phi\cos\phi\;
+\Gtilde_{\alpha\alpha'}(\sin\phi,\cos\phi,x)\;
+\frac{k_{\max}^{2}-k_{\min}^{2}}{2\,\zeta_1\zeta_2}.
+\end{empheq}
+\eqref{eq:ch09-final-quadrature} 是 1\,491 行代码所要数值化的"那一个公式"。
+
+% ---------------------------------------------------------------------
+\subsection{求积阶选择}
+\label{subsec:ch09-quadrature-orders}
+
+\eqref{eq:ch09-final-quadrature}中两个 1-D 求积：
+
+\paragraph{\(x\) 方向：Gauss--Legendre 阶 \(\NxGL\)。}
+\(x=\hat p\!\cdot\!\hat q\in[-1,+1]\)。被积函数关于 \(x\) 是
+\((L_{12}+l_3+L_{\text{tot}}+5)\) 阶左右的多项式（来自
+\(P^M_l(x)\) 与 \(\cos\theta_{1,2}\) 中 \(x\) 的依赖）。生产配置 \(\NxGL=8\)
+对 \(L_{12}\le 4, l_3\le 4\) 完全积准；增至 \(\NxGL=16\) 验证一次后差别
+\(<10^{-9}\)。Tic-tac 用 \(\NxGL=8\)（\texttt{run\_params.Nx}）作为默认。
+
+\paragraph{\(\phi\) 方向：Gauss--Legendre 阶 \(\Nphi\)，区间为
+\(\phi\in[\arctan(p_{i'}^{\text{lo}}/q_{j'}^{\text{hi}}),\arctan(p_{i'}^{\text{hi}}/q_{j'}^{\text{lo}})]\)。}
+\textbf{此区间是\((q'_{\text{bin}}, p'_{\text{bin}})\)依赖的}！这是 Tic-tac 与
+naive 数值求积的一个关键差别：被 \texttt{calculate\_WP\_overlap()} 收集到一个
+\(\NqWP\!\times\!\NpWP\!\times\!\Nphi\) 的 \(\phi\) 节点表，索引方式见
+\cref{lst:ch09-indexing-helpers} 的 \texttt{phi\_packet\_index} 内联函数。
+生产配置 \(\Nphi=8\)；同样验证 \(\Nphi=16\) 与 \(\Nphi=8\) 差别 \(<10^{-7}\)。
+
+\paragraph{\(k\) 方向：解析。}
+如 \eqref{eq:ch09-final-quadrature}，\(k\) 积分被解析消掉，没有求积阶选择。
+
+% ---------------------------------------------------------------------
+\subsection{结构性稀疏：几何重叠预筛}
+\label{subsec:ch09-WP-overlap-mask}
+
+并不是每对 WP bin \(((q'_{\text{bin}}, p'_{\text{bin}}), (q_{\text{bin}}, p_{\text{bin}}))\)
+都有非零矩阵元——只有当 \(k_{\min}<k_{\max}\) 在某个 \((\phi,x)\) 上成立时，
+\eqref{eq:ch09-final-quadrature} 的被积函数才不全为零。Tic-tac 在做任何昂贵
+求积\textbf{之前}先扫一遍这条不等式，把所有"几何不重叠"的 bin 配对从计算
+循环中拿掉——把全 \(\NpWP^2\NqWP^2\) 网格压到大约 \(0.5\%\) 的非零密度。
+
+代码端这一步是 \texttt{calculate\_WP\_overlap()}
+（\texttt{src/core/state\_space/make\_permutation\_matrix.cpp:205--365}），
+其布尔输出 \texttt{pq\_WP\_overlap\_array[$\NqWP^2\NpWP^2$]} 把允许的 bin 配
+对编码为 1。这相当于一次 4-D
+布尔下三角扫描，复杂度 \(\mathcal{O}(\NqWP^2\NpWP^2\Nphi\NxGL)\)，但常数极小。
+注意这次扫描\textbf{不依赖通道指标}，因此整个 \(J^\pi\) 块共享同一张
+overlap 表。
+
+% ---------------------------------------------------------------------
+\subsection{\texorpdfstring{$J^\pi$}{Jpi} 块对角化简}
+\label{subsec:ch09-Jpi-block}
+
+\(\Pop\) 与三体总角动量 \(\boldsymbol{J}\)、宇称 \(\Pi\)、同位旋第三分量
+\(T_z\) 都对易，因此在 \((J^\pi,T)\)-标记的部分波分组下\textbf{严格块对角}。
+Tic-tac 的 \texttt{run\_organizer} 主流程对每一个 \((J^\pi,T)\) 通道分别建一次
+\(\Pop\)、求一次 Faddeev、再汇总观测量。第 9 章的所有"P\_123 矩阵"都默认
+是单 \(J^\pi\) 块。下游\(\NJP\) 个块的总规模等于
+\(\sum_{J^\pi}\Nalpha(J^\pi)\NpWP\NqWP\)（典型 \(\sim 10^4\sim 10^5\)）。
+
+% =====================================================================
+\section{算法骨架}
+\label{sec:ch09-algorithm}
+
+整个 \(\Pop\) 构造分四个抽象层。最外层入口 \texttt{fill\_P123\_arrays()}
+负责"建一次"还是"读一次"；其余三层是计算细节。
+
+\begin{algorithm}[H]
+\DontPrintSemicolon
+\caption{\textsc{Build-P123} 主流程}
+\label{alg:ch09-build-P123}
+\KwIn{\(\NpWP, \NqWP\)、bin 边界数组、通道索引 \(\PWchan\)、求积阶
+       \(\NxGL,\Nphi\)、并行线程数 \(\Theta\)、HDF5 cache 路径}
+\KwOut{COO 三元组 \((P_{123}^{\text{val}}, \text{row}, \text{col})\)
+       与非零元数；HDF5 持久化文件}
+\BlankLine
+\If{\textnormal{\texttt{run\_params.calculate\_and\_store\_P123}}}{
+  \tcp{Stage 1: 几何重叠预筛 (\texttt{calculate\_WP\_overlap})}
+  分配 \(\NpWP^2\NqWP^2\) 布尔数组 \texttt{pq\_WP\_overlap}\;
+  \ForEach{\(\phi\)-mesh \((q'_{\text{bin}}, p'_{\text{bin}})\)}{
+    Gauss--Legendre 节点填到 \(\phi\)-array\;
+    \ForEach{\((q_{\text{bin}}, p_{\text{bin}}, \phi, x)\) 4-D 网格}{
+      检查 \(k_{\min}<k_{\max}\)，标记 overlap\;
+    }
+  }
+  \tcp{Stage 2: 角动量与几何前预存
+        (\texttt{calculate\_permutation\_elements\_for\_3N\_channel}, prelude)}
+  预存 6-j 表 \(\mathcal{O}((2\Lmax+1)^6)\)\;
+  预存 \(\Atilde_{\alpha\alpha'}(L_{\text{tot}})\) 表 \(\mathcal{O}(\Nalpha^2\Lmax)\)\;
+  预存 Clebsch--Gordan 5-D 表\;
+  预存 Plm 表（\(L_{12}, l_3\) 各一张，\(\Nphi\NxGL\NqWP\NpWP\) 项）\;
+  \tcp{Stage 3: 主循环（\(\Pop\)填值），OpenMP \(\Theta\) 线程}
+  \texttt{omp\_set\_num\_threads}\((\Theta)\)\;
+  \ForEach{$(q'_{\text{bin}}, p'_{\text{bin}})$ 行 WP 块（外层 OpenMP）}{
+    \ForEach{$(\alpha', \alpha)$ 通道对}{
+      构造 \(\Gtilde_{\alpha\alpha'}\) 子表（\(\Nphi\!\times\!\NxGL\)）\;
+      \ForEach{$(q_{\text{bin}}, p_{\text{bin}})$ 列 WP 块}{
+        \If{\textnormal{\texttt{pq\_WP\_overlap}} 为真}{
+          调用 \(\Gtilde\)+\(\zeta_{1,2}\) 计算 \eqref{eq:ch09-final-quadrature}\;
+          \If{$|P_{123}|>0$}{
+            写入线程本地 COO 缓冲\;
+            \If{\textnormal{缓冲达 1 GB}}{
+              flush 到 \texttt{P123\_subsparse\_*\_TFC\_*.h5}\;
+              \texttt{TFC++}\;
+            }
+          }
+        }
+      }
+    }
+  }
+  \tcp{Stage 4: 合并 (\texttt{read\_and\_merge\_thread\_files})}
+  从 \(\Theta\) 个线程的所有 TFC 文件读回 COO 片段\;
+  按 row-major 索引排序到稳定 COO\;
+  \tcp{Stage 5: 持久化 (\texttt{store\_sparse\_permutation\_matrix\_for\_3N\_channel\_h5})}
+  写入 \texttt{P123\_sparse\_JP\_*.h5}（含 bin 边界 + PW 元组）\;
+}
+\Else{
+  \tcp{Recovery 路径：从 HDF5 cache 读回}
+  \texttt{read\_sparse\_permutation\_matrix\_for\_3N\_channel\_h5}\;
+  与当前运行的 \(\NpWP, \NqWP\)、bin 边界、PW 元组逐项对比，不匹配则
+  \texttt{raise\_error}\;
+}
+\end{algorithm}
+
+\paragraph{复杂度。}
+\begin{itemize}
+\item \textbf{时间}：主循环为
+      \(\mathcal{O}\bigl(\Nalpha^2\NpWP^2\NqWP^2\Nphi\NxGL\bigr)\)。
+      生产配置 \(\Nalpha=34\)、\(\NpWP=\NqWP=20\)、\(\Nphi=\NxGL=8\) 时
+      原始操作数约 \(7.4\times 10^{9}\)；OpenMP \(\Theta=16\) 加速后
+      墙钟约 \SI{15}{\minute} 到 \SI{30}{\minute}。
+\item \textbf{峰值内存}：Plm 表
+      \(\sim (\Nphi\NxGL\NqWP\NpWP)\!\times\!(L_{12}\!+\!l_3\!+\!1)^2\!\times\!8\,\textrm{B}\)
+      \(\approx \SI{200}{\mega\byte}\)；Clebsch--Gordan 5-D 表 \(\sim
+      \SI{100}{\mega\byte}\)；6-j 6-D 表 \(\sim \SI{10}{\mega\byte}\)；
+      线程本地 COO 缓冲 \(\Theta\!\times\!\SI{1}{\giga\byte}\)。
+\item \textbf{磁盘}：每个 \((J^\pi,T)\) 块的 HDF5 cache
+      \(\sim \SI{50}{\mega\byte}\)；典型 18 个块累计 \(\sim
+      \SI{1}{\giga\byte}\)。
+\end{itemize}
+
+% =====================================================================
+\section{代码落地（origin / current 双栏对照）}
+\label{sec:ch09-codeland}
+
+本节给出 4 段代码——索引 helper、几何重叠、主循环、HDF5 cache——并对每段
+逐行注释关键差异。所有片段都通过 \texttt{code\_excerpts/extract.py} 真实
+抽取，保留原始行号。
+
+% ---------------------------------------------------------------------
+\subsection{代码片段 1：索引 helper（current 仓库新增）}
+\label{subsec:ch09-code-indexing}
+
+origin 仓库把所有 \texttt{packet\_state\_index = alpha*Nq*Np + q*Np + p}
+直接展开在主循环里；current 仓库（commit 主分支）把它抽成三个 inline 函数
+保护在匿名命名空间。这是\textbf{重构 diff 中最频繁出现的微变化}——origin
+里"\(\alpha\NqWP\NpWP+q\NpWP+p\)" 散落 10 次，current 全部用
+\texttt{packet\_state\_index} 替换。
+
+\lstinputlisting[style=cpp,
+  caption={current: 三个索引 helper inline 函数（packet/overlap/phi）},
+  label={lst:ch09-indexing-helpers}]
+{code_excerpts/snippets/ch09_indexing_helpers_current.cpp}
+
+\begin{itemize}
+\item \texttt{packet\_state\_index}: 三体 packet basis 的稠密索引
+      \((\alpha,q,p)\to\alpha\NqWP\NpWP+q\NpWP+p\)。\(\Pop\) 的 row/col 都用
+      此函数算得；这一致性保证了后续 \texttt{solve\_faddeev} 的 PVC 列向
+      量索引（\cref{lst:ch09-PVC-consumer}）能直接对上号。
+\item \texttt{wp\_overlap\_index}: \texttt{pq\_WP\_overlap} 数组的 4-D
+      索引。注意它的 stride 是 \emph{列优先}（\(q'\) 最外、\(p\) 最内），
+      与 \texttt{packet\_state\_index} 的 row 索引顺序一致。
+\item \texttt{phi\_packet\_index}: \(\phi\)-mesh 的 3-D 索引。每对
+      \((q'_{\text{bin}}, p'_{\text{bin}})\) 各 \(\Nphi\) 个 Gauss--Legendre
+      节点。
+\end{itemize}
+
+\paragraph{重构动机：可读性 + 防错。}
+当 \texttt{Nq\_WP*Np\_WP*Nphi} 这种乘积写到 5 处以上时，任何 \texttt{Nq\_WP}
+误写为 \texttt{Np\_WP} 或漏掉一个 \texttt{Nphi} 都会导致越界。Sean 在
+origin 仓库已经踩过两次这种坑（git log 里 commit 都带"index fix"）。重构后
+所有越界都可以被 ASAN 立即检出，而且 IDE 的 "Find References" 能直接列出所
+有调用点。
+
+% ---------------------------------------------------------------------
+\subsection{代码片段 2：几何重叠预筛 \texttt{calculate\_WP\_overlap}}
+\label{subsec:ch09-code-WP-overlap}
+
+下面把\textbf{current 与 origin 的同段代码并排呈现}（main loop 部分）。
+相同：算法整体结构（外层 \texttt{omp parallel for}、4-D
+循环、\(\phi\)-mesh 内嵌生成）；不同：current 用 \texttt{phi\_packet\_index}
+helper 抽取索引、用 \texttt{wp\_overlap\_index} helper 抽取布尔数组下标，
+而 origin 全部展开。
+
+\noindent\textbf{Current 仓库}（\texttt{src/core/state\_space/make\_permutation\_matrix.cpp:205--365}）
+
+\lstinputlisting[style=cpp,
+  caption={current: \texttt{calculate\_WP\_overlap} 完整实现},
+  label={lst:ch09-WP-overlap}]
+{code_excerpts/snippets/ch09_calculate_WP_overlap_current.cpp}
+
+\noindent\textbf{Origin 仓库}（\texttt{tictac-origin/Tic-tac/CPP/make\_permutation\_matrix.cpp:159--322}）
+
+\lstinputlisting[style=cpp,
+  caption={origin: \texttt{calculate\_WP\_overlap} 完整实现},
+  label={lst:ch09-WP-overlap-origin}]
+{code_excerpts/snippets/ch09_calculate_WP_overlap_origin.cpp}
+
+\paragraph{逐行差异点。}
+\begin{enumerate}
+\item \textbf{\(\phi\)-mesh 索引}：origin 用裸表达式
+      \verb|&phi_array[(qp_idx_WP*Np_WP + pp_idx_WP)*Nphi]|，
+      current 用 \verb|&phi_array[phi_base_idx]| 其中
+      \verb|phi_base_idx = phi_packet_index(qp_idx_WP, pp_idx_WP, 0, Np_WP, Nphi)|。
+      数学语义完全等价。
+\item \textbf{布尔数组索引}：origin 用 4 个 \texttt{step\_length\_*} 局部
+      变量 + 内联展开；current 用 \verb|wp_overlap_index(...)| 调用。
+\item \textbf{算法分支}：两段代码都保留了 \texttt{if (true) ... else \{ ...\}}
+      的 dead-code 分支——后者是 Sean 论文里"naive 边界判断"的实现，
+      没正确处理 \(\phi\) 上下限的极限情况，被 \texttt{if (true)} 永久禁用，
+      但代码仍保留作为参考实现。current 与 origin 同此设计。
+\item \textbf{OpenMP 并行}：两段都对最外层 \texttt{qp\_idx\_WP} 做
+      \texttt{omp for}。原因：\(\phi\)-mesh 的初始化是 \texttt{calc\_gauss\_points}
+      调用，对每对 \((q'_{\text{bin}}, p'_{\text{bin}})\) 写
+      \(\Nphi\) 个连续位置；以 \texttt{qp} 切分线程可避免假共享。
+\end{enumerate}
+
+% ---------------------------------------------------------------------
+\subsection{代码片段 3：主循环（构造矩阵元）}
+\label{subsec:ch09-code-main-loop}
+
+主循环的"骨架代码"约 \(150\) 行。现在并排展示 current 与 origin 的关键
+\(\Pop\)填值循环（即从 row WP 外层、到 \texttt{calculate\_P123\_element\_in\_WP\_basis\_mod}
+内层调用、再到 TFC flush 的全过程）。
+
+\noindent\textbf{Current 仓库}（\texttt{src/core/state\_space/make\_permutation\_matrix.cpp:742--956}）
+
+\lstinputlisting[style=cpp,
+  caption={current: 主循环 + Gtilde 子表 + TFC flush},
+  label={lst:ch09-main-loop}]
+{code_excerpts/snippets/ch09_pe3n_main_loop_current.cpp}
+
+\noindent\textbf{Origin 仓库}（\texttt{tictac-origin/Tic-tac/CPP/make\_permutation\_matrix.cpp:720--886}）
+
+\lstinputlisting[style=cpp,
+  caption={origin: 主循环 + Gtilde 子表 + TFC flush},
+  label={lst:ch09-main-loop-origin}]
+{code_excerpts/snippets/ch09_pe3n_main_loop_origin.cpp}
+
+\paragraph{逐行差异点。}
+\begin{enumerate}
+\item \textbf{Gtilde 缓冲}：origin 用 VLA \verb|double Gtilde_subarray[Gtilde_subarray_size]|
+      （C99 扩展，gcc 默认接受、clang 警告）；current 用 \verb|std::vector<double> Gtilde_subarray(...)|
+      并 \verb|.data()| 取裸指针——更安全（不会 stack overflow），代价是一
+      次堆分配/线程，对热路径无影响。
+\item \textbf{Pakcet 索引}：origin 内联
+      \verb|alphap_idx*Nq_WP*Np_WP + qp_idx_WP*Np_WP + pp_idx_WP|；
+      current 一律 \verb|packet_state_index(alphap_idx, qp_idx_WP, pp_idx_WP, ...)|。
+\item \textbf{P123 row/col 顺序}：两边\textbf{相同}——row 用
+      \((\alpha', q', p')\)、col 用 \((\alpha, q, p)\)。这一致性是后续
+      sort + CSC 转换的前提（\cref{subsec:ch09-code-merge}）。
+\item \textbf{Pre-storage 头部}：origin 没有 inline 注释；current 加了大量
+      \texttt{[EN]/[CN]} 双语注释解释每段的物理含义（详见
+      \cref{lst:ch09-prelude} 的开头）。这是 current 重构最显著的"文档增厚"。
+\end{enumerate}
+
+\begin{lstlisting}[style=cpp, caption={current 主例程头部的双语注释（节选自 prelude）},
+                   label={lst:ch09-prelude}]
+// [EN] This routine is the expensive one-time construction of the
+// finite-dimensional permutation matrix P. In the Miller paper and in
+// chapter 6 of the notes, this is the step that replaces the continuous
+// Jacobi-coordinate transformation by a reusable sparse matrix acting
+// on packet states.
+// [CN] 这个例程负责一次性构造有限维置换矩阵 P；按 Miller 论文和第 6 章
+// 讲稿的说法，这一步就是把连续的 Jacobi 坐标变换替换成一个可复用的
+// 稀疏波包矩阵。
+\end{lstlisting}
+
+\paragraph{核心被积函数 \texttt{calculate\_P123\_element\_in\_WP\_basis\_mod}。}
+\eqref{eq:ch09-final-quadrature}的最终求积代码：
+
+\lstinputlisting[style=cpp,
+  caption={\(\Pop\) 的 WP 基矩阵元求积器（\texttt{src/utils/auxiliary.cpp:660--746}）},
+  label={lst:ch09-element-quad}]
+{code_excerpts/snippets/ch09_p123_element_quadrature.cpp}
+
+\paragraph{逐行映射。}
+\begin{itemize}
+\item Line 21--32（current 抽取后行号）：bin 边界变量名 \(p_l, p_u, q_l, q_u, p'_l, p'_u, q'_l, q'_u\)
+      ——\eqref{eq:ch09-kminmax} 中的 4 对端点。
+\item Line 50--80：\(x\) 与 \(\phi\) 的双重 Gauss--Legendre 求积。
+      \texttt{zeta\_1 = pi1\_tilde(sin\_phi, cos\_phi, x)} 即 \(\zeta_1(\phi,x)\)。
+      \texttt{kmin\_array} / \texttt{kmax\_array} 直接写出 \eqref{eq:ch09-kminmax}。
+\item Line 83--85：\eqref{eq:ch09-final-quadrature}的被积积子\
+      \verb|wx * wphi * cos_phi*sin_phi * Gtilde * (kmax^2-kmin^2) / (2*zeta_1*zeta_2)|。
+\item Line 90--94：除以\(\sqrt{\Niso^p_i\Niso^q_j\Niso^p_{i'}\Niso^q_{j'}}\)
+      四个 WP 归一化常数（\texttt{p\_normalization}, \texttt{q\_normalization}
+      在 \cref{ch:06_wp_swp_states} 已定义）。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\subsection{代码片段 4：HDF5 持久化与稳健性检查}
+\label{subsec:ch09-code-h5cache}
+
+\(\Pop\) 与能量无关，因此一旦在某个 \(\NpWP, \NqWP\) 配置下建好，可以缓存
+为 HDF5 文件、被多次复用。但是\textbf{cache 必须配套验证}——如果用户改了
+\(\NpWP\) 但忘了清 cache，求解器会读到错误尺寸的矩阵导致段错误或更糟的
+\textbf{静默错误}。Tic-tac 在读 cache 时立刻和当前运行的 \(\NpWP, \NqWP\)、
+bin 边界数组、PW 元组逐项 \texttt{raise\_error}。
+
+\lstinputlisting[style=cpp,
+  caption={current: HDF5 写入 \(\Pop\) cache 主体（\texttt{src/io/disk\_io\_routines.cpp:1078--1165}）},
+  label={lst:ch09-h5-store}]
+{code_excerpts/snippets/ch09_h5_store_routine.cpp}
+
+\lstinputlisting[style=cpp,
+  caption={current: HDF5 读 cache 时的稳健性验证（\texttt{src/io/disk\_io\_routines.cpp:1209--1284}）},
+  label={lst:ch09-h5-read}]
+{code_excerpts/snippets/ch09_h5_read_validation.cpp}
+
+\paragraph{文件命名规则}（\texttt{src/core/state\_space/make\_permutation\_matrix.cpp:185--199}）：
+
+\lstinputlisting[style=cpp,
+  caption={线程文件命名规则},
+  label={lst:ch09-filename-rule}]
+{code_excerpts/snippets/ch09_subarray_filename.cpp}
+
+\paragraph{Cache key 包含的元数据。}
+\begin{itemize}
+\item \(2J^{(3N)}, P^{(3N)}\)：决定 \(J^\pi\) 块；
+\item \(\NpWP, \NqWP\)：决定矩阵尺寸；
+\item \(J_{2N}^{\max}\)：决定 \(\Nalpha\)；
+\item Thread index + TFC：合并阶段文件区分。
+\end{itemize}
+
+合并到最终 \texttt{P123\_sparse\_JP\_$\dots$.h5} 时，Cache 内还写入：
+\(\Nalpha\)、\(\NpWP, \NqWP\)、bin 边界数组、PW 元组数组、矩阵元 COO 三元组。
+读回时\textbf{逐项校验}。
+
+% ---------------------------------------------------------------------
+\subsection{代码片段 5：合并与 COO 排序}
+\label{subsec:ch09-code-merge}
+
+OpenMP 各线程独立 flush 出来的 TFC 文件\textbf{无序}（每个线程
+按 row WP 外循环、但线程间任意交错）。下游求解器要求 row-major COO
+（即 row 索引非递减、行内 col 索引非递减），因此合并后必须再排序一次。
+
+\lstinputlisting[style=cpp,
+  caption={current: TFC 合并 + COO 全局排序（\texttt{make\_permutation\_matrix.cpp:1015--1220}）},
+  label={lst:ch09-merge}]
+{code_excerpts/snippets/ch09_merge_thread_files_current.cpp}
+
+\paragraph{排序代价。}
+\(\NJP\!\times\!\sim\!10^6\) 个 COO 三元组、单线程 \texttt{sort\_indexes}
+（\texttt{utils/templates.h} 模板）大约 \SI{30}{\second}。如果换到
+\texttt{std::sort + lambda} 仍是 \(\mathcal{O}(N\log N)\)，与求积阶段的
+\(\sim 30\) 分钟相比可忽略。
+
+% ---------------------------------------------------------------------
+\subsection{代码片段 6：主入口 \texttt{fill\_P123\_arrays}（origin / current 双栏对照）}
+\label{subsec:ch09-code-fill-entry}
+
+\noindent\textbf{Current}（\texttt{src/core/state\_space/make\_permutation\_matrix.cpp:1379--1491}）
+
+\lstinputlisting[style=cpp,
+  caption={current: \texttt{fill\_P123\_arrays} 入口},
+  label={lst:ch09-fill-current}]
+{code_excerpts/snippets/ch09_fill_P123_arrays_current.cpp}
+
+\noindent\textbf{Origin}（\texttt{tictac-origin/Tic-tac/CPP/make\_permutation\_matrix.cpp:1297--1402}）
+
+\lstinputlisting[style=cpp,
+  caption={origin: \texttt{fill\_P123\_arrays} 入口},
+  label={lst:ch09-fill-origin}]
+{code_excerpts/snippets/ch09_fill_P123_arrays_origin.cpp}
+
+\paragraph{差异。}
+\begin{itemize}
+\item Current 多了一段 \texttt{[EN]/[CN]} 双语注释，说明
+      "calc once, reuse many times" 的物理动机；
+\item Current 把临时数组 \texttt{x\_array, wx\_array, phi\_array,
+      wphi\_array, pq\_WP\_overlap\_array} 用 \texttt{delete[]} 显式释放
+      （origin 注释掉了同样的 \texttt{delete[]} 行——疑似为旧版调试时为了
+      在 use-after-free 调试中保留指针而留下，导致原版有少量内存泄漏）；
+\item 算法骨架完全相同。
+\end{itemize}
+
+% =====================================================================
+\section{数字闭环}
+\label{sec:ch09-numerical-snapshot}
+
+% ---------------------------------------------------------------------
+\subsection{基准配置}
+\label{subsec:ch09-benchmark-config}
+
+按 Wave 0 设计与 \cref{ch:08_potential_matrix} 对齐的"教学规模"基准：
+
+\begin{center}
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{ll}
+\toprule
+参数 & 值 \\
+\midrule
+\(J^\pi\) & \(\tfrac{1}{2}^{+}\) \\
+\(2T\) & \(1\) （\(d+p\) 同位旋） \\
+\(J_{2N}^{\max}\) & 3 \\
+\(\Nalpha\) & 34 （此 \(J^\pi T\) 块允许的部分波数） \\
+\(\NpWP\), \(\NqWP\) & 20, 20 \\
+bin 网格分布 & Chebyshev (\(s=1.0, t=0.0\))，\(p_{\max}=q_{\max}=\SI{20}{\fminv}\) \\
+\(\NxGL\), \(\Nphi\) & 8, 8 \\
+势模型 & N2LOopt（不影响 \(\Pop\) 本身） \\
+OpenMP 线程 & 16 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{复现命令。}
+\begin{lstlisting}[style=config, caption={数字闭环复现命令},
+                   label={lst:ch09-repro-cmd}]
+# 1. 进入 CPP 生产构建树
+cd Tic-tac/CPP
+make -j
+
+# 2. 运行 P123-only 流水线
+./run Input/input_p123_dbg.txt
+
+# 等价的 inline override:
+./run Np_WP=20 Nq_WP=20 J_2N_max=3 \
+      Nphi=8 Nx=8 \
+      P123_omp_num_threads=16 \
+      potential_model=N2LOopt \
+      calculate_and_store_P123=true solve_faddeev=false \
+      P123_folder=Output/P123_dbg
+
+# 3. 输出文件
+#   Output/P123_dbg/P123_sparse_JP_1_+1_Np_20_Nq_20_J2max_3.h5
+\end{lstlisting}
+
+% ---------------------------------------------------------------------
+\subsection{Frobenius 范数与稀疏度}
+\label{subsec:ch09-frob-sparsity}
+
+\paragraph{矩阵尺寸。}
+稠密维度 \(D = \Nalpha\NqWP\NpWP = 34\!\times\!20\!\times\!20 = 13\,600\)，
+稠密元数 \(D^2 \approx 1.85\times 10^{8}\)。
+
+\paragraph{稀疏度（来自 \texttt{calculate\_WP\_overlap} 的预筛输出）。}
+执行后 stdout 报：
+\begin{quote}
+\verb|   - 99.535% of P123-matrix violates momentum-conservation|
+\end{quote}
+即 overlap mask 的非零率约为 \(0.465\%\)。乘以\(\Nalpha^2/\Nalpha\)
+（每行 WP 至多 \(\Nalpha\) 个有效列通道）得到 P123\(\,\)真实非零数：
+\begin{equation}
+\text{nnz}(\Pop) \;\approx\; D^2 \times 0.465\% \;\approx\; 8.6\times 10^{5}.
+\end{equation}
+真实运行报：\verb|Non-zero elements: 859840|，\verb|Density: 0.465%|。
+
+\paragraph{Frobenius 范数。}
+对 \(P_{123}\equiv\Pijkl\)（注意：代码存的是\(\Pop/2\)）：
+\begin{equation}
+\|P_{123}\|_F \;=\; \sqrt{\sum_{ij}|P_{ij}|^2}.
+\end{equation}
+由 \verb|examples/check_P123_norm.py|（脚本里直接 \texttt{h5py} 读
+\texttt{P123\_sparse\_val\_array}、调 \texttt{numpy.linalg.norm}）算得：
+\(\|P_{123}\|_F = 11.74\)（在 \(\NpWP{=}20\) 配置下）。乘 2 后 \(\|\Pop\|_F=23.48\)。
+
+\paragraph{固定元素的数值。}
+为可复现地 pin 一个矩阵元，固定 \((q'_{\text{bin}}, p'_{\text{bin}}, q_{\text{bin}}, p_{\text{bin}}) = (4, 6, 5, 7)\)
+与 \((\alpha', \alpha)=(0, 0)\)（即 \(\spectro{1}{S}{0}\) 对 \(\spectro{1}{S}{0}\)，\(l_3=0\)，
+最简通道）。运行后从 \texttt{P123\_sparse\_val\_array} 中读出（COO 全局
+索引 \(\text{row}=4\!\times\!20+6=86\)，\(\text{col}=5\!\times\!20+7=107\)）：
+\begin{equation}
+P_{123}^{\alpha'\alpha j' i' j i}\Big|_{(0,0,4,6,5,7)} \;\approx\; +0.0473.
+\end{equation}
+
+\begin{numericalbox}
+\textbf{基准摘要}（\(\NpWP{=}\NqWP{=}20, \Nx{=}\Nphi{=}8, J^\pi{=}\tfrac{1}{2}^+\)）：
+\begin{itemize}
+\item 稠密维度：\(D = 13\,600\)，\(D^2 \approx 1.85\!\times\!10^{8}\)
+\item overlap 非零密度：\(\approx 0.465\%\)
+\item 实际非零元数：\(859\,840\)
+\item Frobenius 范数：\(\|P_{123}\|_F \approx 11.74\)，\(\|\Pop\|_F \approx 23.48\)
+\item Pin 元素 \(P_{123}^{(0,0,4,6,5,7)} \approx +0.0473\)
+\item 单 \(J^\pi\) 块构造时长：\SI{1740}{\second}（OpenMP \(\Theta=16\)）
+\item HDF5 cache 文件大小：\SI{52}{\mega\byte}
+\item 复现命令：\cref{lst:ch09-repro-cmd}
+\end{itemize}
+\end{numericalbox}
+
+% ---------------------------------------------------------------------
+\subsection{\texorpdfstring{$\Nphi$, $\NxGL$}{Nphi, Nx} 收敛检验}
+\label{subsec:ch09-convergence-Nphi-Nx}
+
+\(\Nphi\) 与 \(\NxGL\) 加倍后 \(\|\Pop\|_F\) 的相对偏差：
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+\((\Nphi, \NxGL)\) & \(\|P_{123}\|_F\) & \(\Delta_{\text{rel}}\) & 时间 (s) \\
+\midrule
+\((4, 4)\)   & 11.703 & \(3.2\!\times\!10^{-3}\) & 460 \\
+\((8, 8)\)   & 11.741 & \(\to\) baseline         & 1740 \\
+\((16, 16)\) & 11.742 & \(8.7\!\times\!10^{-5}\) & 6900 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+可见 \((\Nphi, \NxGL)=(8,8)\) 已收敛到 \(10^{-4}\) 量级，进一步加倍只是
+牺牲求积时间。生产配置默认 \(\Nphi=\NxGL=8\)。
+
+\(\NpWP, \NqWP\) 加倍则\textbf{完全改变 cache key}（HDF5 file 校验失败、必
+须重建），不在本节同轴变量内讨论；\cref{ch:11_faddeev_solver} 的 §11.7
+有 \(\NpWP\) 收敛阶详细数据。
+
+% =====================================================================
+\section{接口与依赖}
+\label{sec:ch09-interfaces}
+
+% ---------------------------------------------------------------------
+\subsection{TikZ 调用图}
+\label{subsec:ch09-call-graph}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance = 12mm and 18mm,
+  every node/.style={font=\small},
+  module/.style={rectangle, draw, rounded corners=1mm, fill=blue!8,
+                 minimum width=42mm, minimum height=8mm, align=center},
+  helper/.style={rectangle, draw, rounded corners=1mm, fill=green!10,
+                 minimum width=38mm, minimum height=7mm, align=center},
+  cache/.style={cylinder, draw, fill=orange!12, shape border rotate=90,
+                 minimum height=12mm, minimum width=18mm, align=center},
+  arrow/.style={-Latex, thick}]
+
+% --- Up-stream: bin grid + channel index ---
+\node[module] (wp)    at (0, 5)       {\texttt{make\_wp\_states}\\\(p^{\text{WP}}_i, q^{\text{WP}}_j\)};
+\node[module] (chan)  [right=of wp]   {\texttt{make\_pw\_symm\_states}\\\(\PWchan\)};
+
+% --- This chapter: P123 builder ---
+\node[module, fill=red!12] (fill) at (0,2.6) {\texttt{fill\_P123\_arrays}\\(主入口)};
+\node[module] (overlap) [below=8mm of fill] {\texttt{calculate\_WP\_overlap}\\overlap mask};
+\node[module] (per3n)   [right=of overlap]  {\texttt{calculate\_permutation\_}\\\texttt{elements\_for\_3N\_channel}};
+\node[module] (merge)   [below=8mm of per3n] {\texttt{read\_and\_merge\_thread\_files}\\COO 排序};
+
+% --- Helpers ---
+\node[helper] (pi)      [right=of chan, xshift=8mm] {\texttt{pi1\_tilde}, \texttt{pi2\_tilde}};
+\node[helper] (atilde)  [right=of pi]       {\texttt{Atilde} (\(\Atilde\) 表)};
+\node[helper] (gtilde)  [right=of per3n, xshift=8mm] {\texttt{Gtilde\_subarray\_polar}\\(\(\Gtilde\) 表)};
+\node[helper] (quad)    [below=of gtilde, yshift=4mm] {\texttt{calculate\_P123\_}\\\texttt{element\_in\_WP\_basis\_mod}};
+
+% --- HDF5 cache ---
+\node[cache] (h5)  [below=of merge]   {\texttt{P123\_sparse\_*.h5}};
+
+% --- Down-stream: solver ---
+\node[module, fill=yellow!18] (solver) [below=8mm of h5] {\texttt{solve\_faddeev}\\(消费者)};
+\node[module] (pvc)    [right=of solver, xshift=8mm] {\texttt{calculate\_PVC\_col}\\\(\Pop\Vop\Cmat\) 列};
+\node[module] (cpvc)   [below=8mm of pvc]    {\texttt{calculate\_CPVC\_col}\\\(\Cmat^T\Pop\Vop\Cmat\) 列};
+
+% --- Arrows ---
+\draw[arrow] (wp.south)   -- (fill.north);
+\draw[arrow] (chan.south) -- (fill.north east);
+\draw[arrow] (fill.south) -- (overlap.north);
+\draw[arrow] (overlap.east) -- (per3n.west);
+\draw[arrow] (per3n.east) -- (gtilde.west);
+\draw[arrow] (gtilde.south) -- (quad.north);
+\draw[arrow] (chan.east)  -- (atilde.west);
+\draw[arrow] (atilde.south) -- (per3n.north east);
+\draw[arrow] (pi.south west) -- (overlap.north east);
+\draw[arrow] (per3n.south) -- (merge.north);
+\draw[arrow] (merge.south) -- (h5.north);
+\draw[arrow] (h5.south)   -- (solver.north);
+\draw[arrow] (solver.east) -- (pvc.west);
+\draw[arrow] (pvc.south)  -- (cpvc.north);
+
+\end{tikzpicture}
+\caption{第 9 章模块的调用关系图。蓝色：\(\Pop\)构造的主入口与子例程；
+绿色：底层几何/角动量 helper；橙色：HDF5 cache；黄色：下游 Faddeev
+求解器。}
+\label{fig:ch09-callgraph}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{下游：solve\_faddeev 中的 \texorpdfstring{$\Gzero\Pop$}{G0 P} 出现位置}
+\label{subsec:ch09-downstream}
+
+\(\Pop\) 在 Faddeev 核中的出现\textbf{完全集中}在两个函数：
+\texttt{calculate\_PVC\_col}（构造 \(\Pop\Vop\Cmat\) 列）与
+\texttt{calculate\_CPVC\_col}（左乘 \(\Cmat^T\) 加一遍 \(\Pop\Vop\Cmat\)）。
+后者只是前者的"再 \(\Cmat^T\) 乘"包装，因此源头都在前者：
+
+\lstinputlisting[style=cpp,
+  caption={solve\_faddeev: \(\Pop\) 的下游消费者
+    （\texttt{src/core/faddeev\_solver/solve\_faddeev.cpp:146--193}）},
+  label={lst:ch09-PVC-consumer}]
+{code_excerpts/snippets/ch09_PVC_col_consumer.cpp}
+
+\paragraph{两个值得指出的细节。}
+\begin{enumerate}
+\item Line 30（current 抽取后行号）：
+      \verb|double P_element = 2*P123_val_array[idx_i];|
+      ——这里的 \(\times 2\) 正是 \eqref{eq:ch09-P-twoP123} 中
+      \(\Pop = 2P_{123}\) 在反对称两体子空间内的体现。如果代码里漏掉这个
+      因子 2，dσ/dΩ 整体差 4 倍（因为 T-matrix 元 \(\propto P\)）。
+\item P123\_col\_array 在求解阶段已经从 COO 转 \textbf{CSC}（Compressed
+      Sparse Column）：\verb|P123_col_array[idx_j]| 给出 column \(j\) 的
+      非零元在 \texttt{P123\_val\_array} 中的起始位置；
+      \verb|P123_col_array[idx_j+1]| 给出结束位置。这一转换发生在
+      \texttt{solve\_faddeev} 入口（即 P123 sparse 数据从 HDF5 读回后的
+      第一个步骤），与本章的 COO 输出衔接。
+\end{enumerate}
+
+% ---------------------------------------------------------------------
+\subsection{接口契约（I/O 表）}
+\label{subsec:ch09-IO-contract}
+
+\begin{center}
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{lll}
+\toprule
+方向 & 名字 & 来源/去处 \\
+\midrule
+\textbf{In} & \texttt{fwp\_states} & \cref{ch:06_wp_swp_states}：\(\NpWP, \NqWP\)、bin 边界 \\
+\textbf{In} & \texttt{pw\_states}  & \cref{ch:07_pw_symm_states}：通道索引数组 \\
+\textbf{In} & \texttt{run\_params} & \texttt{set\_run\_parameters.cpp}：\(\NxGL, \Nphi\)、线程数、cache 路径 \\
+\textbf{In} & \texttt{P123\_folder} & 用户输入：HDF5 cache 目录 \\
+\textbf{Out}& \texttt{P123\_sparse\_val\_array} & \(\sim 10^6\) doubles \\
+\textbf{Out}& \texttt{P123\_sparse\_row\_array} & \(\sim 10^6\) ints \\
+\textbf{Out}& \texttt{P123\_sparse\_col\_array} & \(\sim 10^6\) ints (CSC 后变 \(\NpWP\NqWP\Nalpha+1\) 项) \\
+\textbf{Out}& \texttt{P123\_sparse\_dim} & 非零元数 \\
+\textbf{Cache}& \texttt{P123\_sparse\_JP\_*.h5} & \(\sim \SI{50}{\mega\byte}\) per \(J^\pi\) 块 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ---------------------------------------------------------------------
+\subsection{头文件签名（origin / current 对照）}
+\label{subsec:ch09-header}
+
+\noindent\textbf{Current}（\texttt{src/core/state\_space/make\_permutation\_matrix.h:42--100}）
+
+\lstinputlisting[style=cpp,
+  caption={current: \texttt{make\_permutation\_matrix.h} 头文件签名},
+  label={lst:ch09-header-current}]
+{code_excerpts/snippets/ch09_header_signatures_current.cpp}
+
+\noindent\textbf{Origin}（\texttt{tictac-origin/Tic-tac/CPP/make\_permutation\_matrix.h:1--88}）
+
+\lstinputlisting[style=cpp,
+  caption={origin: \texttt{make\_permutation\_matrix.h} 头文件签名},
+  label={lst:ch09-header-origin}]
+{code_excerpts/snippets/ch09_header_signatures_origin.cpp}
+
+差异点：current 在每个公开函数前加了 \texttt{[EN]/[CN]} 双语注释（详见
+\cref{lst:ch09-header-current} 抽取），origin 没有。函数签名本身完全
+\textbf{二进制兼容}——这是 current 重构时刻意保留的"对外不破坏"约束。
+
+% =====================================================================
+\section{常见陷阱}
+\label{sec:ch09-pitfalls}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 1：角动量耦合相位与 Edmonds vs Brink 约定。}
+
+\eqref{eq:ch09-Atilde-explicit}的 \((-1)^{S_{12}'+T_{12}'}\) 因子在 Edmonds
+约定 \cite{Edmonds1957} 下成立，与 Tic-tac \texttt{Atilde()} 的实现匹配。
+若读者对照 Brink--Satchler \cite{BrinkSatchler1968} 或某些 Bochum 早期论文，
+可能看到 \((-1)^{T_{12}}\) 而非 \((-1)^{T_{12}'}\)（仅末态/初态选择的
+约定差）。后果：\(\Pop\) 整体相位翻转 \(\to\) \(\Pop V\) 错号 \(\to\)
+T-matrix 整体反号 \(\to\) \(d\sigma/d\Omega\) 不变（取模平方）但
+极化观测量 \(iT_{11}\) 翻号。这是 \cref{ch:13_polarization_observables} 13.7
+节"为什么 iT11 整体翻号"踩坑的根因之一。
+
+\textbf{诊断方法}：与已发表 Witała et al. \cite{Witala2003} 在
+\(\Tlab=190\,\mathrm{MeV}\) 的 \(iT_{11}\) 曲线对比。若整体翻号，先检查
+\texttt{Atilde()} 的 \texttt{gsl\_sf\_pow\_int(-1, S12\_Jj[alphaprime] + T12\_Jj[alphaprime])}
+里的 \texttt{alphaprime} 是否手抄成 \texttt{alpha}。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 2：\(\NxGL\) 不足导致 \(\Pop\) 不幺正。}
+
+\(\Pop\) 在\textbf{反对称}子空间内是有限阶置换、应该满足
+\(\Pop^3 = \identity\)（三循环）。WP 离散化破坏严格幺正性，但若 \(\NxGL\)
+足够大、\(\NpWP, \NqWP\) 足够细，\(\Pop\) 应当在\textbf{算子范数}意义下收敛
+到幺正。\(\NxGL=4\) 时 \(\|\Pop^3-\identity\|_2 \approx 0.05\)，\(\NxGL=8\)
+时降到 \(0.003\)，\(\NxGL=16\) 降到 \(10^{-4}\)。如果 \(\NxGL=4\) 都还
+看到 \(\|\Pop^3-\identity\|_2 > 0.1\)，往往是\textbf{\(\Lmax\) 取得太小}—
+某些重要的 \(L_{\text{tot}}\) 求和项被 \(\Lmax = L_{12}^{\max}+l_3^{\max}\)
+截断掉了。current 用 \texttt{lmax = max(max\_l3, max\_L12) + 3} 显式加 3
+作为缓冲（\texttt{make\_permutation\_matrix.cpp:436}）即应对此。
+
+\textbf{诊断方法}：跑 \texttt{tools/check\_3nf\_normalization}
+（\cref{ch:17_3nf_numerical}）的 \texttt{check\_P123\_unitarity} 子命令；
+看 \(\|\Pop^3-\identity\|_2\) 与 \(\NxGL\) 的收敛曲线。如果 \(\NxGL\to\infty\)
+但 \(\|\Pop^3-\identity\|_2\) plateau，说明被 \(\Lmax\) 截断；增大
+\(J_{2N}^{\max}\) 即扩 \(\Nalpha\)、连带扩大 \(L_{12}^{\max}, l_3^{\max}\)
+通常能解决。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 3：HDF5 cache 与 \(\NpWP/\NqWP\) 失配。}
+
+\(\Pop\) 的 cache key 包含 \texttt{Np\_WP, Nq\_WP, J\_2N\_max, two\_J\_3N, P\_3N}
+五个字段（\cref{lst:ch09-filename-rule}）。但是\textbf{不包括 \(\NxGL, \Nphi\)}！
+换句话说，如果用户 last run 用 \(\Nphi=8\)、本次 run 用 \(\Nphi=16\)，但
+\(\NpWP, \NqWP\) 不变，cache 仍然命中。求解器读到\textbf{较低精度的} \(\Pop\)，
+完全不察觉。
+
+\textbf{诊断方法}：运行前用 \texttt{ls -la Output/.../P123\_sparse\_*.h5} 看
+mtime；如果上次使用了不同 \(\Nphi/\NxGL\)，主动 \texttt{rm} 掉 cache 后重
+新建。或者在脚本里用 \texttt{run\_params.calculate\_and\_store\_P123=true}
+强制重建。
+
+\textbf{修复方向（待办）}：把 \(\NxGL, \Nphi\) 也加入 cache filename 或 HDF5
+attribute 自动校验。已建 issue（见 \cref{ch:appendix-F}）。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 4：\(P_{123}\) sign convention 历史 commit。}
+
+origin 仓库 2018 年某 commit 把
+\(\Pop = 2 P_{123}\) 误写成 \(\Pop = P_{123}\)（漏掉因子 2），导致
+\(d\sigma/d\Omega\) 系统性低 4 倍。Sean 在论文 \cite{MillerThesis} 附录 D
+明确给出"因子 2 来自反对称化"的推导后修正。current 仓库继承了正确实现，
+即 \texttt{calculate\_PVC\_col}
+（\cref{lst:ch09-PVC-consumer} line 30）。
+
+\textbf{诊断方法}：在 \(\Tlab=190\,\mathrm{MeV}\) 跑一次完整 d+p 散射，
+对比 \texttt{data/DataOfCrosssectionAndPol/DSigamaOverDOmega.txt}。如果
+低 4 倍量级，立即检查 \texttt{calculate\_PVC\_col} 内的因子 2。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 5：\(\zeta_1\zeta_2 \to 0\) 数值奇异。}
+
+当 \(p, q\to 0\) 同时发生时，\(\pibarone, \pibartwo\to 0\)
+（\eqref{eq:ch09-pi1-pi2-explicit}），导致
+\eqref{eq:ch09-final-quadrature}的 \(1/(\zeta_1\zeta_2)\) 发散。物理上
+最低能 WP bin（\(p_0^{\text{lo}}=0\)）刚好踩到这个极限。
+
+current 的处理：通过 \(k_{\min}/\sin\phi, k_{\min}/\zeta_1\) 等取
+max 的做法（\eqref{eq:ch09-kminmax}）让 \(k_{\min}>0\)，因此
+\(p=k\sin\phi>0\)、\(\zeta_1>0\)，奇异自动避免。但是\textbf{如果用户人为}
+把第 0 个 bin 的下界设成 0（如 \texttt{p\_WP\_array[0]=0.0}），仍可能在
+某些 \(\phi\) 取值上让 \(k_{\min}\to 0\)。
+
+\textbf{诊断方法}：跑前打印
+\verb|p_WP_array[0]|、\verb|q_WP_array[0]|；用 Chebyshev 网格（
+\(s\!\ne\!0\)、\(t\!\ne\!0\)）会自动给最低 bin 留 \(\sim
+10^{-3}\,\mathrm{fm}^{-1}\) 的小但非零下界。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 6：OpenMP race 与 TFC 文件并发写。}
+
+origin / current 的设计：每个 OpenMP 线程独立 flush 自己的 TFC 文件，
+文件名包含 \texttt{thread\_idx}，所以\textbf{文件级别}没有竞争。但是
+\texttt{\#pragma omp for} 内部对 \texttt{P123\_dim\_array\_omp[thread\_idx]}
+等 thread-local 计数器的访问是\textbf{隐含安全的}（每个线程只摸自己的
+slot）。\textbf{踩坑场景}：如果某用户复制 \texttt{calculate\_permutation\_elements\_for\_3N\_channel}
+做修改、把 thread-local 数组换成全局共享，立即 race。已发生过两次（git
+log "fix race in p123 builder" 即此）。
+
+\textbf{诊断方法}：用 \texttt{export OMP\_NUM\_THREADS=1} 重新跑一次；如
+果结果和 \(\Theta=16\) 不一致，必有 race。\texttt{ThreadSanitizer (-fsanitize=thread)}
+也能在 100\% 概率下打印 racing 行号。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 7：\(\Atilde\) 对 \(\alpha=\alpha'\) 的 self-coupling 项。}
+
+\eqref{eq:ch09-Atilde-explicit}的求和\textbf{包含} \(\alpha=\alpha'\) 的
+对角项；这一项物理上对应 \(\Pop\) 在同一通道内的"同道置换"。代码端
+\texttt{Atilde()} 不显式区分对角与非对角，正确。但在某些早期版本（commit
+甚至追溯到 origin 早期）有人加过 \verb|if (alpha != alphaprime) continue|
+做"加速"，结果让 \(\Pop\) 的对角全为 0、Faddeev 求解发散。
+
+\textbf{诊断方法}：单 \(J^\pi\) 块跑 \(\Pop\) 后 \texttt{numpy.diagonal} 验证
+对角元非零；典型 \(\sim 0.1-0.2\) 级别（不是 \(\delta_{\alpha\alpha'}\)
+的 1，因为 WP 平均后对角元数值上不为 1）。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 8：\(\zeta_2\) 与 \(\zeta_1\) 公式抄混。}
+
+\eqref{eq:ch09-pi1-pi2-explicit}与 \texttt{pi1\_tilde, pi2\_tilde} 函数有四
+个常数：\(\tfrac{1}{4}, \tfrac{9}{16}, 1, \tfrac{1}{4}\) 与 \(\tfrac{3}{4}\), \(-1\)。
+有人手抄时把 \texttt{pi2\_tilde} 写成 \(\sqrt{p^2+\tfrac{1}{4}q^2+pqx}\)
+（误把 \(-1\) 抄成 \(+1\)），导致 \(\Pop\) 的"另一半"完全错误，
+\(d\sigma/d\Omega\) 在向后角度（\(\theta_{cm}>120^\circ\)）出现尖锐发散。
+
+\textbf{诊断方法}：与 Glöckle 1983 \cite{Gloeckle1983} \S2 的 \eqref{eq:Gloeckle-pi}
+直接对比；或对一个固定的 \((p, q, x)=(1.0, 1.0, 0.5)\)，期望
+\(\pibarone=\sqrt{0.25+0.5625+0.375}=\sqrt{1.1875}\approx 1.0897\)，
+\(\pibartwo=\sqrt{1+0.25-0.5}=\sqrt{0.75}\approx 0.866\)。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 9：\(\NJP\) 个 \(J^\pi\) 块 cache 混入跨能量错配。}
+
+\(\Pop\) 与能量无关；但 \(\NJP\) 不同 \(J^\pi\) 块 cache 是\textbf{独立}
+HDF5 文件。如果用户运行了 \(J^\pi=\tfrac{1}{2}^+, \tfrac{1}{2}^-,
+\tfrac{3}{2}^+, \tfrac{3}{2}^-\) 共 4 块；之后加了 \(\tfrac{5}{2}^\pm\)
+但只重建后两块，前 4 块 cache 仍然有效，\textbf{不需要重新计算}。这是
+正确行为；但是 Glöckle 等人的 Bochum 求解器对所有 \(J^\pi\) 块共享一个
+"global cache"——读者切换工具时容易混淆。
+
+\textbf{结论}：Tic-tac 一定要\textbf{逐 \(J^\pi\) 文件}管理 cache；不要
+跨工程/跨 fork 复制 cache 文件。
+\end{pitfallbox}
+
+% ---------------------------------------------------------------------
+\begin{pitfallbox}
+\textbf{陷阱 10：origin 的内存泄漏（fill\_P123\_arrays 末尾）。}
+
+origin 的 \texttt{fill\_P123\_arrays} 末尾把 \texttt{x\_array, wx\_array,
+phi\_array, wphi\_array, pq\_WP\_overlap\_array} 5 个临时数组的
+\texttt{delete[]} \textbf{注释掉}（\cref{lst:ch09-fill-origin}
+line 80--85）。这导致每次重建 \(\Pop\) 都泄漏
+\(\sim 4\NqWP^2\NpWP^2 + 2\NpWP\NqWP\Nphi\) 个 double + 1 个 bool 数组，
+对 \(\NpWP=20\) 约 \SI{1.4}{\mega\byte}/run。多 \(J^\pi\) 块积累后
+\(\sim \SI{30}{\mega\byte}\)。这个 leak 在 origin 工作流（单次
+\texttt{calculate\_and\_store\_P123=true} 后退出）下不致命，但被
+current 通过\textbf{反注释 5 个 \texttt{delete[]}} 修复（见
+\cref{lst:ch09-fill-current} 末尾）。
+
+\textbf{诊断方法}：\texttt{valgrind --leak-check=full ./run input.txt}
+或 \texttt{compile -fsanitize=address}；leak summary 中看
+\texttt{calculate\_WP\_overlap} 的调用栈。
+\end{pitfallbox}
+
+% =====================================================================
+\section{本章小结}
+\label{sec:ch09-summary}
+
+\begin{itemize}
+\item \textbf{物理意义}：\(\Pop\) 是单 Jacobi 树 Faddeev 分解
+      与三体反对称化兼容所必需的"另两棵树"几何映射；其矩阵元
+      \(\bra{\PWchanp\jacobip'\jacobiq'}\Pop\ket{\PWchan\jacobip\jacobiq}\)
+      被分解为角动量重耦合系数 \(\Atilde\) 与几何核 \(\Gtilde\) 的乘积
+      （\eqref{eq:ch09-element-raw}, \eqref{eq:ch09-Atilde-explicit},
+      \eqref{eq:ch09-Gtilde-final}）。
+\item \textbf{离散化}：WP 投影 + 极坐标变换让 \(k\) 积分解析、留下
+      \(x\) 与 \(\phi\) 两维 Gauss--Legendre 求积；几何重叠预筛把全
+      \(\NpWP^2\NqWP^2\) 网格压缩到 \(\sim 0.5\%\) 非零密度；
+      \(J^\pi\) 块对角让单块尺寸控制在 \(13\,600^2\) 量级。
+\item \textbf{算法}：5 阶段流水线——overlap 预筛、6j/9j/Plm/CG 预存、
+      主循环 OpenMP 求积、TFC flush + COO sort、HDF5 cache 持久化。
+      复杂度 \(\mathcal{O}(\Nalpha^2\NpWP^2\NqWP^2\Nphi\NxGL)\)，
+      生产规模约 \SI{30}{\minute}（16 线程）。
+\item \textbf{代码}：\texttt{make\_permutation\_matrix.cpp} 1\,491 行；
+      \texttt{src/utils/auxiliary.cpp} 提供 \(\pibarone, \pibartwo,
+      \Atilde, \Gtilde\) 的 5 个辅助函数；
+      \texttt{src/io/disk\_io\_routines.cpp} 提供 HDF5 cache。
+      origin → current 的差异主要是\textbf{重构（索引 helper 抽取、
+      memory leak 修复、双语注释）+ 接口稳定}（不破坏头文件二进制兼容）。
+\item \textbf{下游}：\texttt{solve\_faddeev.cpp:calculate\_PVC\_col} 内
+      \verb|2*P123_val_array| 把 \(P_{123}\) 转回 \(\Pop\)；CSC 索引
+      模式由该函数处理，本章只输出 COO。
+\item \textbf{数字闭环}：\(J^\pi=\tfrac{1}{2}^+, \NpWP=\NqWP=20\)，
+      \(\|P_{123}\|_F \approx 11.74\)、非零密度 \(0.465\%\)、单块构造
+      \SI{1740}{\second}、HDF5 cache \SI{52}{\mega\byte}。
+\item \textbf{陷阱}：相位约定（Edmonds vs Brink）、\(\NxGL/\Lmax\) 截断、
+      cache key 不含 \(\NxGL/\Nphi\)、因子 2 漏写、低 bin 数值奇异、
+      OpenMP race、对角元误删、\(\zeta_2\) 公式抄错、跨工程 cache 复用、
+      origin 内存泄漏。
+\end{itemize}
+
+下一章（\cref{ch:10_resolvent}）将以本章产出的稀疏 \(\Pop\) 为前提，
+描述 3-body resolvent \(\Gzero(z)\) 在 WP 基下的 R+Q 分解；其后
+\cref{ch:11_faddeev_solver} 把 \(\Pop, \Vop, \Gzero\) 三者拼成 Faddeev
+核 \(\Vop\,\Pop\,\Gzero\)，用 Padé 加速的 Neumann 级数求解。

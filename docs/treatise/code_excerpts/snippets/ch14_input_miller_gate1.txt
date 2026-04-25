@@ -1,0 +1,56 @@
+// ===============================================================
+// 抽取自仓库 [current]: CPP/Input/input_miller_gate1.txt
+// 行号区段：1..51
+// 由 docs/treatise/code_excerpts/extract.py 自动生成；勿手动编辑
+// ===============================================================
+# Miller Gate 1: Nijmegen-I 13 MeV doublet ²S₁/₂ phase shift.
+# Target Miller PRC 106, Fig. 1 left panel: Re δ(J^Π=1/2+) ≈ 105°, Im ≈ 15°.
+# Cheap Np=Nq=20, J_3N=1/2, J_2N≤2, no 3NF.
+
+# State-space truncation (cheap sanity: only 1/2± subsystem)
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=20
+Nq_WP=20
+
+# Integration / quadrature
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+# Momentum-grid setup (Miller uses Chebyshev s=200 t=1 N_WP=125; we relax here)
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+# Parallel / runtime control
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+# Physics switches
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+# Model (Miller Fig. 1 uses Nijmegen-I)
+potential_model=nijmegen
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+# IO
+energy_input_file=CPP/Input/lab_energies_miller_gate1.txt
+output_folder=CPP/Output/miller_gate1
+P123_folder=CPP/Output/miller_gate1

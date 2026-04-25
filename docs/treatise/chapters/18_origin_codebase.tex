@@ -1,13 +1,976 @@
 % =====================================================================
 % 18_origin_codebase.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 18 章 tictac-origin 代码骨架解读
+% Wave 6 / Agent — 这是一章 META 章，不遵守 8 段式模板
 % =====================================================================
 
 \chapter{tictac-origin 代码骨架解读}
 \label{ch:18_origin_codebase}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+\textbf{本章定位。}\;前 17 章按物理推导的逻辑顺序——从 Lippmann--Schwinger
+方程到三体 AGS 方程，再到 WPCD 离散化、置换算符、Faddeev 求解器，最后到
+观测量与三核子力（3NF）——构建了一套\emph{自上而下}的理论框架。这一切的
+源头是 Sean B.~S.\ Miller 在 2020--2023 年间于隆德/哥德堡完成的博士工作
+（见 \texttt{docs/seanBSMiller/}）：他独立编写了一套名为
+\texttt{Tic-tac}\footnote{Sean 在 README 中给出全称：\textit{“Tic-tac: Two
+is company, three's a crowd.”} ——这是一个 \emph{wordplay}，三体散射对“两体客
+人”过分热闹。}的 C++/Fortran 代码，把上述全部理论一次性\textbf{自下而上}
+地实现出来。本工作组的 \texttt{Tic-tac} 仓库正是\textbf{从 Sean 的代码 fork
+而来}，并在保留物理内核的前提下做了大幅工程化重构（\cref{ch:19_refactor_evolution}
+专门讨论重构）。
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+为方便读者把第 1--17 章的公式与一个真实可运行的最小代码库一一对应，本
+章把 \textbf{tictac-origin}（即未经重构、原始 \texttt{seanbsm/Tic-tac}）
+作为\emph{自包含}的基线代码予以解读。本章\textbf{不}遵守全书其它章的
+8 段式模板（§物理动机/数学推导/离散化/算法骨架/代码落地/数字闭环/接口
+依赖/常见陷阱），而是采用\textbf{仓库导览}型结构：
+\begin{itemize}
+  \item §\ref{sec:ch18-positioning}\;给出 origin 仓库的时间线与定位；
+  \item §\ref{sec:ch18-toplevel}\;画出 \texttt{CPP/} 顶层目录树；
+  \item §\ref{sec:ch18-mainflow}\;按 \texttt{main.cpp} 的 10 步执行流逐
+        段翻译为 origin 视角的代码导引；
+  \item §\ref{sec:ch18-modules}\;给出 17 个 \texttt{.cpp} 主文件 +
+        头文件的速查表；
+  \item §\ref{sec:ch18-paper-source}\;构造 \emph{Sean 论文 $\leftrightarrow$
+        代码段}对照表（≥15 条映射）；
+  \item §\ref{sec:ch18-input}, §\ref{sec:ch18-output}\;讲输入与输出的具
+        体格式；
+  \item §\ref{sec:ch18-limitations}\;指出 origin 留给重构版的若干\emph{结构性}
+        缺口（无 CMake、无 Python 工作流、无 3NF 等），为
+        \cref{ch:19_refactor_evolution} 的主线铺垫；
+  \item §\ref{sec:ch18-reproduce}\;给出一次最小可复现编译/运行命令。
+\end{itemize}
+
+\section{origin 仓库定位}
+\label{sec:ch18-positioning}
+
+\subsection{Sean Miller 的论文链}
+\label{subsec:ch18-paper-chain}
+
+Sean 关于 WPCD 三体散射的产出主要由\textbf{五份}文件构成
+（全部存于 \texttt{Tic-tac/docs/seanBSMiller/}）：
+\begin{enumerate}
+  \item \texttt{SeanBSMiller\_Thesis2020\_*.pdf} —— 隆德大学硕士工作
+        《Wave-Packet Treatment of NN Scattering》。这部分内容只覆盖
+        \textbf{两体}波包散射，是本章涉及的\emph{前史}。它直接对应
+        origin 仓库 2020-08--2020-09 的最早提交（参见
+        \cref{tab:ch18-timeline}）。
+  \item \texttt{SeanBSMiller\_DoctorThesis2022\_*.pdf} —— 哥德堡大学博士
+        论文《Approximating the Three-Nucleon $T$-matrix》。这是 origin
+        所有物理与数学的\textbf{第一手参考}：第 3 章 WPCD 数学推导对应
+        本治理书 \cref{ch:05_wpcd_math}，第 4 章 SWP 构造对应
+        \cref{ch:06_wp_swp_states}，第 5 章 Faddeev 数值实现对应
+        \cref{ch:11_faddeev_solver}。
+  \item \texttt{SeanBSMiller\_JPG2022\_*.pdf} —— J.~Phys.~G 上对 WPCD 方法
+        本身的方法学论文，重点讨论收敛性与基函数选择。
+  \item \texttt{SeanBSMiller\_PRC2022\_*.pdf} —— Phys.~Rev.~C 106, 024001。
+        这是 origin 的\textbf{“cite-this paper”}，README 中明确指引
+        “请使用本文引用 Tic-tac”。
+  \item \texttt{SeanBSMMiller\_PRC2023\_*.pdf} —— Phys.~Rev.~C 上接续 PRC2022
+        的 nd 截面计算工作。
+\end{enumerate}
+
+origin 仓库的主分支只跟踪到 2023-01-31（最后一次 commit \texttt{30338ac}）。
+此后 Sean 没有继续维护，也未把 PRC2023 中的若干新思路（如 3NF 嵌入与 nd
+极化扫描）回填到代码。本治理书 \cref{ch:15_3nf_physics}--\cref{ch:17_3nf_numerical}
+讲到的 3NF 部分波投影、c$_1$/c$_3$/c$_D$/c$_E$ 接口都是\textbf{重构后}才补上的。
+
+\subsection{从 \texttt{seanbsm/Tic-tac} 到本仓库的 fork 谱系}
+
+origin 上游：\href{https://github.com/seanbsm/Tic-tac}{\texttt{github.com/seanbsm/Tic-tac}}。
+本仓库（\texttt{Tic-tac}）的根目录下保留了一份\textbf{未修改}的 origin
+快照：\texttt{tictac-origin/Tic-tac/}。本章所有代码引用的行号都基于
+这份快照——即使后续主开发分支已经把它们移到了 \texttt{src/} 与
+\texttt{include/} 等更分层的位置，origin 视角下行号仍然对得上。
+
+\subsection{时间线}
+
+\begin{table}[ht]
+\centering
+\caption{tictac-origin 主要提交里程碑}
+\label{tab:ch18-timeline}
+\small
+\begin{tabular}{p{2.0cm}p{1.6cm}p{9cm}}
+\toprule
+\textbf{时间} & \textbf{commit} & \textbf{里程碑} \\
+\midrule
+2020-08-26 & \texttt{6701104} & Initial commit。\textbf{两体散射}原型代码。\\
+2020-08-28 & \texttt{c83fc28} & 内积 $\bra{\psi}{\psi}$ 在反对称态上验证通过。\\
+2020-09-01 & \texttt{2c6a74e} & 实现 NN 势接口（chiral N3LO/Idaho）。\\
+2020-09-07 & \texttt{a6f1fa2} & 三体氚束缚态 ground state energy benchmark 通过。\\
+2022-02-23 & \texttt{5c704ed} & 引入 \texttt{pw\_3N\_statespace} 等结构体，main 大幅缩短。\\
+2022-03-03 & \texttt{6a71d1f} & on-shell index 查询拆出独立文件 \texttt{run\_organizer.cpp}。\\
+2022-03-09 & \texttt{e594fac} & 修复大尺寸 P123 排序中的整数溢出 bug。\\
+2022-03-10 & \texttt{74776db} & 接入 IS\_N3LO（同位旋破缺 1S0）。\\
+2022-04-08 & \texttt{8e26f14} & 加入 \texttt{PSI\_start}/\texttt{PSI\_end}：\\
+                                & & 支持参数采样/MAP 计算多机分布运行。\\
+2022-09-22 & \texttt{3802cab} & PRC2022 论文配套 README 定稿。\\
+2022-11-07 & \texttt{1522649} & \textbf{移除 obsolete MKL-sparse 依赖}（重要构建演化里程碑）。\\
+2022-11-23 & \texttt{f381cd1} & 加入 breakup 通道搜索功能（PRC2023 准备工作）。\\
+2022-11-30 & \texttt{964037e} & 写完 breakup 振幅存盘函数。\\
+2023-01-13 & \texttt{f6d5149} & 输入参数支持\textbf{可叠加}（命令行 + 输入文件叠加）。\\
+2023-01-27 & \texttt{4d120d5} & 加入 \texttt{solve\_dense}（LAPACK 直接求解，调试用）。\\
+2023-01-31 & \texttt{30338ac} & origin 最后一次 commit，改进 Neumann 收敛打印。\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+时间线的一个注脚：从 2020-08 到 2022-02，origin 仓库的 \texttt{main.cpp}
+经历了至少三次重写（参见 commit \texttt{5c704ed} 与 \texttt{6a71d1f}），
+每次都把若干“裸数组指针”聚合为结构体。最终结果就是
+\cref{lst:ch18-main-snippet} 看到的形态——\texttt{run\_params}、
+\texttt{pw\_3N\_statespace}、\texttt{fwp\_statespace}、\texttt{swp\_statespace}、
+\texttt{solution\_configuration}、\texttt{channel\_os\_indexing} 六大
+结构体，\texttt{main.cpp} 才得以缩成 506 行。这套结构体设计被本仓库的
+重构版完整继承（\cref{ch:19_refactor_evolution} §3）。
+
+\section{顶层目录地图}
+\label{sec:ch18-toplevel}
+
+origin 的全部源码集中在单一目录 \texttt{tictac-origin/Tic-tac/CPP/} 下，
+\textbf{没有}分层。\cref{fig:ch18-tree} 用 TikZ 树画出该目录的实际结构。
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+  every node/.style={font=\ttfamily\small},
+  grow via three points={one child at (0.6,-0.6) and
+                                two children at (0.6,-0.6) and (0.6,-1.4)},
+  edge from parent path={(\tikzparentnode.south west) ++(0.4em,0pt)
+                          |- (\tikzchildnode.west)}
+]
+\node {Tic-tac/}
+  child {node {LICENSE}}
+  child {node {README.md}}
+  child {node {CPP/}
+    child {node {main.cpp \scriptsize\textit{(506 lines)}}}
+    child {node {makefile}}
+    child {node {set\_run\_parameters.\{cpp,h\} \scriptsize\textit{(687)}}}
+    child {node {run\_organizer.\{cpp,h\} \scriptsize\textit{(377)}}}
+    child {node {make\_pw\_symm\_states.\{cpp,h\} \scriptsize\textit{(284)}}}
+    child {node {make\_wp\_states.\{cpp,h\} \scriptsize\textit{(211)}}}
+    child {node {make\_swp\_states.\{cpp,h\} \scriptsize\textit{(471)}}}
+    child {node {make\_potential\_matrix.\{cpp,h\} \scriptsize\textit{(429)}}}
+    child {node {make\_permutation\_matrix.\{cpp,h\} \scriptsize\textit{(1402)}}}
+    child {node {make\_resolvent.\{cpp,h\} \scriptsize\textit{(210)}}}
+    child {node {solve\_faddeev.\{cpp,h\} \scriptsize\textit{(2229)}}}
+    child {node {auxiliary.\{cpp,h\} \scriptsize\textit{(1067)}}}
+    child {node {disk\_io\_routines.\{cpp,h\} \scriptsize\textit{(1803)}}}
+    child {node {error\_management.\{cpp,h\}}}
+    child {node {constants.h, type\_defs.h}}
+    child {node {General\_functions/}
+      child {node {coupling\_coefficients, gauss\_legendre,}}
+      child {node {kinetic\_conversion, legendre,}}
+      child {node {matrix\_routines, templates.h}}
+    }
+    child [missing] {}
+    child [missing] {}
+    child [missing] {}
+    child {node {Interactions/}
+      child {node {chiral\_LO\_internal, chiral\_N2LOopt,}}
+      child {node {chiral\_Idaho\_N3LO, chiral\_twobody,}}
+      child {node {nijmegen, malfliet\_tjon, OPEP,}}
+      child {node {potential\_model.\{cpp,h\}}}
+      child {node {chp/}
+        child {node {chiral-twobody-potentials.f90}}
+        child {node {chp-set.f90}}
+      }
+      child [missing] {}
+      child {node {nijmegen/}
+        child {node {nijmegen\_interface.f90, pnijm.f}}
+      }
+    }
+    child [missing] {}
+    child [missing] {}
+    child [missing] {}
+    child [missing] {}
+    child [missing] {}
+    child [missing] {}
+    child [missing] {}
+    child {node {Input/ \scriptsize\textit{(input.txt, lab\_energies.txt)}}}
+    child {node {Output/ \scriptsize\textit{(空——运行时填充)}}}
+  }
+  child [missing] {}
+  child {node {Test/}
+    child {node {Cont\_Faddeev/}}
+    child {node {Free\_energy/}}
+  };
+\end{tikzpicture}
+\caption{tictac-origin 的目录树。除三处子目录
+(\texttt{General\_functions}, \texttt{Interactions}, \texttt{Input/Output})
+外，全部 17 个 \texttt{.cpp} 主文件都直接铺在 \texttt{CPP/} 一级，没有
+\texttt{src/core}、\texttt{src/utils} 等分层。}
+\label{fig:ch18-tree}
+\end{figure}
+
+\paragraph{各子目录的角色。}
+\begin{description}
+\item[\texttt{CPP/}] 全部 C++ 源码与 Makefile，是\textbf{唯一}的构建入口。
+        没有 \texttt{src/}/\texttt{include/}/\texttt{tests/} 这样的分层。
+\item[\texttt{CPP/General\_functions/}] 数学工具：耦合系数（CG、6j、9j）、
+        Gauss--Legendre 求积、Legendre 多项式、动能-动量转换、矩阵例程封装、
+        模板算法。\textbf{不含}物理。
+\item[\texttt{CPP/Interactions/}] 两体核势接口。下面再分两个 Fortran 子目
+        录 \texttt{chp/}（手征 EFT，F90 模块化代码）和 \texttt{nijmegen/}
+        （Nijmegen/Bonn 库，F77 老代码 \texttt{pnijm.f}）。
+        \texttt{potential\_model.cpp} 是 C++ 抽象基类入口，根据
+        \texttt{run\_parameters.potential\_model} 字符串分发到具体子类。
+\item[\texttt{CPP/Input/}] 默认参数模板 \texttt{input.txt}（\cref{lst:ch18-input}）
+        与一组测试用 lab energies 列表 \texttt{lab\_energies.txt}（13 个能
+        量点：$\Tlab \in \{1, 2, \ldots, 53\}$ MeV）。\textbf{所有}物理参数（基函数
+        大小、势模型选择、是否包括 breakup、是否做参数行走）都通过该格
+        式注入。
+\item[\texttt{CPP/Output/}] 运行时填充。每个 J/π 通道得到三类文件：
+        \texttt{U\_PW\_elements\_*}、\texttt{U\_PW\_breakup\_elements\_*}、
+        以及 Padé/Neumann 收敛诊断（\texttt{neumann\_terms\_*}）。
+\item[\texttt{Test/}] 两套\textbf{独立}的小型验证项目：
+        \texttt{Cont\_Faddeev/}（连续 Faddeev 不变量的检查）与
+        \texttt{Free\_energy/}（自由资格检查）。这些 Test 与 \texttt{CPP/}
+        没有共享 Makefile，是一次性测试，不被 CI 调用。
+\end{description}
+
+\paragraph{为什么单层目录是\emph{合理的研究代码风格}？}
+origin 的代码量在 12k 行 C++ 加上若干 Fortran，规模仍在“一人维护”范围内。
+单层 \texttt{CPP/} 的好处是：（a）所有源文件 1 秒钟扫完；（b）grep/sed
+不必跨目录；（c）单一 Makefile（一行 \texttt{find}）就能扫到全部源码。
+代价是 \cref{ch:19_refactor_evolution} §1.3 详述的：物理/数值/IO/配置混
+在同一目录，外人很难快速建立心智地图。
+
+\section{\texttt{main.cpp} 执行流（10 步）}
+\label{sec:ch18-mainflow}
+
+origin 的 \texttt{main.cpp} 共 506 行，整段流程被嵌套在一个对 3N 通道的
+外循环 \texttt{for (int chn\_3N=0; chn\_3N<pw\_states.N\_chn\_3N; chn\_3N++)} 内
+（行 166--492）。本节按 \texttt{docs/algorithm\_flow\_and\_logic.md}（重
+构版的算法描述文档，但与 origin 一致）的“10 步划分”逐段对应到 origin
+的代码段。
+
+\begin{lstlisting}[style=cpp, caption={\texttt{main.cpp} 顶层 10 步骨架（节
+选 origin 行 83--505）。},
+                   label={lst:ch18-main-snippet}]
+int main(int argc, char* argv[]){
+    // [1] 读取输入与命令行
+    run_params run_parameters;
+    set_run_parameters(argc, argv, run_parameters);
+
+    // [2] 申请结构体容器
+    fwp_statespace   fwp_states;
+    pw_3N_statespace pw_states;
+    potential_model* pot_ptr = potential_model::fetch_potential_ptr(run_parameters);
+
+    // [3] （可选）读模型参数采样列表（PSI 范围内）
+    if (run_parameters.parameter_walk==true){ /* read_parameter_sample_list */ }
+
+    // [4] 构造 3N 部分波态空间 & 自由 WP 网格
+    construct_symmetric_pw_states(pw_states, run_parameters);   // 行 145
+    make_fwp_statespace(fwp_states, run_parameters);            // 行 153
+
+    // [5] 主循环：对所有 3N (J3, P3) 通道
+    for (int chn_3N=0; chn_3N<pw_states.N_chn_3N; chn_3N++){
+        // [5.1] 抽取本通道子状态空间 (pw_substates)
+        // [5.2] 构造或读取 P123 (sparse, COO->CSC 转格式)
+        fill_P123_arrays(...);                                  // 行 210
+
+        if (run_parameters.solve_faddeev){
+            // [5.3] 对每一组采样参数 (PSI loop)
+            for (int idx_param_set=...){
+                // [6] 构造两体势矩阵 V (uncoupled / coupled)
+                calculate_potential_matrices_array_in_WP_basis(...); // 行 308
+                // [7] 由 V 对角化构造 SWP（Sturmian WP 基）
+                make_swp_states(...);                                // 行 333
+                // [8] 在 q-WP 网格上定位输入 lab energy 的 on-shell bin
+                find_on_shell_bins(...);                             // 行 360
+                find_deuteron_channels(...);                         // 行 368
+                // [9] 构造 3N 解析子 G(z) 在 SWP 基下的对角数组
+                calculate_resolvent_array_in_SWP_basis(...);         // 行 392
+                // [10] Padé/Neumann 求解 Faddeev (核心)
+                solve_faddeev_equations(U_array, U_BU_array, ...);   // 行 422
+                // [11] 存盘 U-matrix 元素
+                store_U_matrix_elements_txt(...);                    // 行 449
+                if (run_parameters.include_breakup_channels){
+                    store_U_BU_matrix_elements_txt(...);             // 行 463
+                }
+                // 释放本 PSI/通道局部数组
+            }
+        }
+    }
+    return 0;
+}
+\end{lstlisting}
+
+\subsection*{逐步详解}
+
+\paragraph{Step 1 — 命令行解析（行 97--99）。}
+\texttt{set\_run\_parameters} 接受三种输入混合形式：纯命令行
+（\texttt{Np\_WP=30}）、\texttt{*.txt} 文件路径（行 1 = 文件名）、以及
+两者叠加（commit \texttt{f6d5149} 后\textbf{后写优先}）。函数体在
+\texttt{set\_run\_parameters.cpp} 行 76--250 段，是一个长 if-else 链
+（\cref{lst:ch18-set-runparams}）。
+
+\begin{lstlisting}[style=cpp, caption={\texttt{set\_run\_parameters.cpp} 行
+76--110 节选——参数 setter 的 “if-else 链”模式。},
+                   label={lst:ch18-set-runparams}]
+bool read_and_set_parameter(run_params& run_parameters,
+                            std::string option,
+                            std::string input){
+    bool valid_option_found = true;
+    if (option == "two_J_3N_max"){
+        run_parameters.two_J_3N_max = std::stoi(input);
+    }
+    else if (option == "Np_WP"){
+        run_parameters.Np_WP = std::stoi(input);
+    }
+    else if (option == "Nq_WP"){
+        run_parameters.Nq_WP = std::stoi(input);
+    }
+    /* ... 共约 35 个 option ... */
+    return valid_option_found;
+}
+\end{lstlisting}
+
+\paragraph{Step 2 — 结构体初始化（行 110--118）。}
+\texttt{fwp\_statespace}（自由 WP 基）和 \texttt{pw\_3N\_statespace}
+（部分波态空间）此时是\textbf{空壳}，只在 Step 4 被填充。
+\texttt{potential\_model::fetch\_potential\_ptr} 是 origin 实现的简单工
+厂模式：根据字符串返回 \texttt{chiral\_LO\_internal*} / \texttt{nijmegen*}
+等子类指针。这套设计在重构版被替换成
+\texttt{src/interactions/} 下的多态接口（\cref{ch:08_potential_matrix} §5）。
+
+\paragraph{Step 3 — 参数采样（可选，行 130--136）。}
+当 \texttt{parameter\_walk=true}，origin 从 \texttt{parameter\_file}（典型
+为采样后的 MAP/MCMC 输出）读入一组势模型参数向量，循环替换接口里的
+contact terms 等。这一段为 PRC2022 论文的\textbf{贝叶斯不确定性传播}\
+工作而设计：同一套基函数与 P123 矩阵，对成百上千组势参数重跑求解器。
+\texttt{PSI\_start} 与 \texttt{PSI\_end} 让用户切片采样空间，分配到不同
+机器并行（commit \texttt{8e26f14}）。
+
+\paragraph{Step 4 — 部分波 + 自由 WP 网格（行 145--153）。}
+\texttt{construct\_symmetric\_pw\_states}\;遍历所有满足
+$|J_2 - L_1| \le J_3 \le J_2 + L_1$ 且 $0 \le J_3 \le \tt{two\_J\_3N\_max}$
+的反对称三体部分波；它的输出是把 9 个量子数（$L_2, S_2, J_2, T_2, L_1,
+2J_1, 2J_3, 2T_3, P_3$）每个铺成长度为 \texttt{Nalpha} 的整型数组（参见
+\texttt{type\_defs.h::pw\_3N\_statespace}）。本治理书 \cref{ch:07_pw_symm_states}
+对此段做了完整公式推导。
+
+\texttt{make\_fwp\_statespace}\;同时构造 $\jacobip$- 与 $\jacobiq$-
+方向的网格。默认网格类型是 \texttt{chebyshev}，由
+\texttt{make\_chebyshev\_distribution}（\texttt{make\_wp\_states.cpp} 行
+26--44）实现：
+\begin{equation}
+p_i \;=\; s\,\bigl[\tan( (2i-1)\pi/(4N) )\bigr]^{t},
+\quad i = 1, \ldots, N,
+\label{eq:ch18-chebyshev-grid}
+\end{equation}
+其中 \texttt{chebyshev\_s} 控制\textbf{尺度}（典型 $s = 200$ MeV）、
+\texttt{chebyshev\_t} 控制\textbf{稀疏度}（典型 $t = 1$）。在
+\cref{ch:06_wp_swp_states} 我们已经用 \cref{eq:ch18-chebyshev-grid} 推导过
+分布密度。
+
+\paragraph{Step 5.1 — 子状态空间剥离（行 177--195）。}
+对每个 3N 通道（即固定的 $(2J_3, P_3)$），origin 从全局
+\texttt{pw\_states} 中切出一段连续指标 $[\,$\texttt{idx\_alpha\_lower},
+\texttt{idx\_alpha\_upper})$\,$，把九个数组的指针赋给 \texttt{pw\_substates}。
+注意这里\textbf{是浅指针赋值}，不是拷贝，因此 \texttt{pw\_substates} 不
+独立持有内存——这是 origin 的一个\textbf{轻量子结构}模式。
+
+\paragraph{Step 5.2 — 置换矩阵 P123（行 205--218）。}
+这是\textbf{整个程序最贵}的一步。\texttt{fill\_P123\_arrays} 内部完成两
+件事：
+\begin{itemize}
+\item 当 \texttt{calculate\_and\_store\_P123=true} 时，调用
+      \texttt{make\_permutation\_matrix.cpp} 实际计算
+      $\bra{\alpha p q}P_{123}\ket{\alpha' p' q'}$，先以 COO 格式
+      存入内存，再按需转 CSC（行 230--243）；
+\item 当 P123 已经写入磁盘 HDF5 缓存时（\texttt{P123\_recovery=true}），
+      直接读盘恢复——\textbf{这是 origin 仓库唯一引入 HDF5 依赖的缘由}。
+\end{itemize}
+\texttt{make\_permutation\_matrix.cpp} 1402 行的核心循环
+（行 28--52，\texttt{calculate\_Gtilde\_array}）以 OpenMP 并行扫描
+$N_p \times N_q \times N_x \times \mathtt{Nalpha}^2$ 维度的 $\tilde G$ 张
+量；这正是 \cref{ch:09_permutation_p123} §4--6 推导的“几何因子”
+$\tilde G$ 的实现。
+
+\paragraph{Step 6 — 两体势矩阵（行 304--314）。}
+\texttt{calculate\_potential\_matrices\_array\_in\_WP\_basis} 的输出形状
+受 \texttt{tensor\_force} 与 \texttt{isospin\_breaking\_1S0} 双开关控制：
+\begin{itemize}
+\item \texttt{tensor\_force=true}：把所有 \emph{coupled} $(L=J\!\pm\!1)$
+      与 \emph{uncoupled} $(L=J)$ 通道分别铺入两个数组——uncoupled $2(J+1)$
+      项，coupled $J$ 项；如果 \texttt{isospin\_breaking\_1S0=true}，再
+      把 $^1S_0$ 从 uncoupled 移到 coupled，做 $T = 1/2 \leftrightarrow 3/2$
+      的 isospin 耦合（\texttt{make\_pw\_symm\_states.cpp::unique\_2N\_idx}
+      行 4--60 是该索引重排逻辑的中心）。
+\item \texttt{tensor\_force=false}：通道结构压平，但物理模型
+      此时已严重不足，仅作 toy 调试。
+\end{itemize}
+
+\paragraph{Step 7 — Sturmian WP（SWP）构造（行 332--347）。}
+\texttt{make\_swp\_states.cpp} 调 LAPACKE 的对称带矩阵特征值分解
+\texttt{LAPACKE\_dspevd}（行 21--26 的 \texttt{diagonalize\_real\_symm\_matrix}），
+对每个 NN 通道独立把哈密顿子块对角化：得到 $C$ 矩阵（行 fWP 列 SWP）和
+SWP 能量边界 \texttt{e\_SWP\_unco/coup\_array}。
+\cref{ch:06_wp_swp_states} §3 的“SWP 把 $G_0$ 对角化”定理就是这一步的
+\emph{动机}。
+
+\paragraph{Step 8 — on-shell bin 定位（行 360--370）。}
+这是 origin 与重构版\textbf{完全共用}的逻辑（重构版只把它移到了
+\texttt{src/config/run\_organizer.cpp}）。详细推导见
+\cref{ch:11_faddeev_solver} §3.1：
+\begin{enumerate}
+\item 对每个 q-bin 中点 $q_i = \tfrac{1}{2}(q_i^{lo} + q_i^{hi})$，
+      用 \texttt{com\_momentum\_to\_lab\_energy} 反算
+      $\Tlab^{\rm midpt}_i$；
+\item 扫描 \texttt{lab\_energies.txt} 里每个用户输入 $\Tlab$，找到落在
+      哪两个相邻 midpoint 之间，把对应 q-bin 设为 on-shell；
+\item \texttt{q\_com\_idx\_array} 给出全部 on-shell bin 的索引列表。
+\end{enumerate}
+\textbf{重要陷阱}：用户请求的 $\Tlab$ \emph{不会}被精确还原；实际求解能
+量是\textbf{最近的 q-bin midpoint}的 $\Tlab$，差值典型 $\pm 10$--40 MeV，
+取决于 \texttt{Nq\_WP} 与 chebyshev 网格的局部稀疏度。这一陷阱在
+本仓库的 \texttt{src/config/run\_organizer.cpp::find\_on\_shell\_bins}
+里被显式记录到 \texttt{solver\_validation\_tlab\_*.json}（重构改进，详见
+\cref{ch:19_refactor_evolution} §6）。
+
+\paragraph{Step 9 — 解析子 G 数组（行 386--398）。}
+\texttt{make\_resolvent.cpp} 实现两类解析子矩阵元（参见
+\cref{ch:10_resolvent} §2--3）：
+\begin{itemize}
+\item \textbf{Bound-continuum (BC)}：\texttt{resolvent\_bound\_continuum}
+      （行 14--36），实部为 $\log$ 商，虚部为 Heaviside 阶跃；
+\item \textbf{Continuum-continuum (CC)}：\texttt{resolvent\_continuum\_continuum}
+      （行 39--?）。
+\end{itemize}
+
+\paragraph{Step 10 — Faddeev 方程求解（行 421--436）。}
+\texttt{solve\_faddeev.cpp}\;2229 行，是 origin 最大、最复杂的单一
+源文件，承载整本治理书 \cref{ch:11_faddeev_solver} 全部内容。它的核心
+入口 \texttt{solve\_faddeev\_equations} 内部分支：
+\begin{itemize}
+\item 默认 \texttt{solve\_dense=false}：调
+      \texttt{pade\_method\_solve}（行 440），用
+      \textbf{Padé 加速 Neumann 级数}求解
+      $U = A + AGU$，其中 $A = C^T PVC$。Padé 阶 $[N,M]$ 在收敛前自适应
+      增加，每步把 Neumann 项追加进 \texttt{a\_coeff\_array}（行 488）。
+\item 若 \texttt{solve\_dense=true}（commit \texttt{4d120d5} 加入）：直
+      接 LAPACK 求解稠密线性系统 $(1 - AG) U = A_c$。慢、但作为基准；
+      origin 只在调试模式开启。
+\end{itemize}
+Padé 子例程 \texttt{pade\_approximant}（行 271--296）实现\emph{标准}的
+$P_N^M(z) = \det P / \det Q$ 公式，行列式调
+\texttt{determinant} 函数（来自 \texttt{General\_functions/matrix\_routines.cpp}）。
+
+\paragraph{Step 11 — 存盘（行 444--471）。}
+\texttt{disk\_io\_routines.cpp::store\_U\_matrix\_elements\_txt}\;（行
+759--?）把 elastic on-shell U 元素存为 \texttt{U\_PW\_elements\_*.txt}；
+若 breakup 开启，再调
+\texttt{store\_U\_BU\_matrix\_elements\_txt}（行 91--?）存 breakup 元素。
+两者都遵守同一文件名约定（详见 §\ref{sec:ch18-output}）。
+
+\section{模块清单}
+\label{sec:ch18-modules}
+
+\cref{tab:ch18-modules} 给出 origin 全部 17 个 \texttt{.cpp} 主文件加配套
+头文件的速查表。每行：作用、行数（基于 \texttt{wc -l}）、Sean 论文章节
+定位。
+
+\begin{longtable}{p{3.6cm}p{1.0cm}p{2.4cm}p{6cm}}
+\caption{tictac-origin 模块速查表（17 个 \texttt{.cpp} + 关键 \texttt{.h}）。}
+\label{tab:ch18-modules}\\
+\toprule
+\textbf{文件} & \textbf{行数} & \textbf{Sean 章节} & \textbf{作用} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{文件} & \textbf{行数} & \textbf{Sean 章节} & \textbf{作用} \\
+\midrule
+\endhead
+main.cpp                       & 506  & DT2022 §5    & 顶层 10 步执行流（\cref{lst:ch18-main-snippet}）。\\
+set\_run\_parameters.cpp       & 687  & DT2022 §5.1  & 输入解析、默认值、\texttt{--help}。 \\
+set\_run\_parameters.h         & 35   &              & 函数原型 + \texttt{run\_params} 字段。 \\
+run\_organizer.cpp             & 377  & DT2022 §5.4  & on-shell q-bin 定位、\\
+                               &      &              & deuteron 通道索引。 \\
+make\_pw\_symm\_states.cpp     & 284  & DT2022 §3.2  & 9 量子数生成、unique\_2N\_idx 重排。\\
+make\_wp\_states.cpp           & 211  & DT2022 §3.3  & 自由 WP（fWP）网格构造、\\
+                               &      &              & chebyshev 分布。 \\
+make\_swp\_states.cpp          & 471  & DT2022 §3.4  & V 对角化生成 SWP、 \\
+                               &      &              & 调 LAPACKE\_dspevd。 \\
+make\_potential\_matrix.cpp    & 429  & DT2022 §3.5  & 两体 V 矩阵在 WP 基下，\\
+                               &      &              & 含 coupled/uncoupled 分支。 \\
+make\_permutation\_matrix.cpp  & 1402 & DT2022 §4    & P123 几何因子计算 + COO 输出。 \\
+make\_resolvent.cpp            & 210  & DT2022 §3.6  & 3N G(z) 的 BC、CC 矩阵元。\\
+solve\_faddeev.cpp             & 2229 & DT2022 §5    & Padé/Neumann 主求解器、\\
+                               &      &              & solve\_dense LAPACK 备份。 \\
+solve\_faddeev.h               & 103  &              & PVC, CPVC 列计算的全部原型。 \\
+auxiliary.cpp                  & 1067 & ——           & 杂项：观测量提取、能量转换、印刷。\\
+disk\_io\_routines.cpp         & 1803 & ——           & 全部文本+HDF5 IO；P123 缓存、\\
+                               &      &              & U-matrix 存盘、参数文件读写。 \\
+error\_management.cpp          & 37   & ——           & \texttt{raise\_error()} —— 印错+abort。 \\
+type\_defs.h                   & 169  & ——           & 6 个核心结构体定义（\texttt{run\_params} 等）。 \\
+constants.h                    & 111  & ——           & 物理常量 + 势模型 contact terms。 \\
+General\_functions/coupling\_coefficients.cpp & 31   & DT2022 §A.1 & CG, 6j, 9j 调 GSL。 \\
+General\_functions/gauss\_legendre.cpp        & 95   & ——          & GL 节点权重生成。 \\
+General\_functions/legendre.cpp               & 117  & ——          & 关联 Legendre $P_l^m$。 \\
+General\_functions/kinetic\_conversion.cpp    & 60   & ——          & $\Tlab \leftrightarrow q_{cm}$ 等。 \\
+General\_functions/matrix\_routines.cpp       & 379  & ——          & dot\_MV、determinant 等。 \\
+Interactions/potential\_model.cpp & 62  & ——          & 抽象基类 + factory。 \\
+Interactions/chiral\_LO\_internal.cpp & 67 & PRC2022 §II  & C1S0/C3S1 contact，$\Lambda=450$ MeV。 \\
+Interactions/chiral\_N2LOopt.cpp & 43 & PRC2022 §II   & N2LOopt 包装；调 \texttt{chp/}。 \\
+Interactions/chiral\_Idaho\_N3LO.cpp & 43 & PRC2022 §II & Entem-Machleidt N3LO。 \\
+Interactions/chiral\_twobody.cpp & 218 & PRC2022 §II.A & C++ $\rightarrow$ \texttt{chp/}\\
+                                  &     &               & Fortran 桥层。 \\
+Interactions/nijmegen.cpp        & 41 & ——          & 桥到 \texttt{nijmegen/pnijm.f}。 \\
+Interactions/malfliet\_tjon.cpp  & 66 & ——          & MT-I/III toy 势。 \\
+Interactions/OPEP.cpp            & 91 & DT2022 §A    & 单 $\pi$ 交换，仅诊断用。 \\
+Interactions/chp/*.f90           & ~3k & PRC2022     & EM Idaho 标准库。 \\
+Interactions/nijmegen/pnijm.f    & ~5k & ——          & 经典 Nijmegen Bonn 库。\\
+\bottomrule
+\end{longtable}
+
+\paragraph{规模分布观察。}
+\texttt{solve\_faddeev.cpp}（2229 行）+ \texttt{disk\_io\_routines.cpp}
+（1803 行）+ \texttt{make\_permutation\_matrix.cpp}（1402 行）三者占总量
+\textbf{约 45\%}。其余源文件平均 200--500 行。这反映了三体散射代码的固
+有偏态：\textbf{求解器内核、IO、几何因子}吃掉绝大多数代码体积，物理建
+模本身（势模型）只占很小一部分。
+
+\section{Sean 论文 $\leftrightarrow$ 代码段对照表}
+\label{sec:ch18-paper-source}
+
+\cref{tab:ch18-paper-source-mapping} 给出至少 15 条由 Sean 论文中具体方
+程/算法指向 origin 代码行号区段的映射。所有论文引用都基于
+\texttt{Tic-tac/docs/seanBSMiller/} 中存档的 PDF 文件，
+\texttt{DT2022} 指博士论文，\texttt{PRC2022} 指 Phys.~Rev.~C 106 论文。
+
+\begin{longtable}{p{1.7cm}p{4.6cm}p{1.4cm}p{4.4cm}}
+\caption{Sean 论文 $\leftrightarrow$ origin 代码段对照表。}
+\label{tab:ch18-paper-source-mapping}\\
+\toprule
+\textbf{论文} & \textbf{方程/算法} & \textbf{文件} & \textbf{行号 / 说明} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{论文} & \textbf{方程/算法} & \textbf{文件} & \textbf{行号 / 说明} \\
+\midrule
+\endhead
+DT2022 §3.3 & fWP 定义 \(\WPbin{i} = \mathcal{N}_i^{-1} \int f_i(p)\ket{p}dp\) & make\_wp\_states.cpp & 行 3--14: \texttt{p\_normalization, q\_normalization} 实现 \(\mathcal{N}_i = \sqrt{p_i - p_{i-1}}\)。\\
+DT2022 §3.3 & Chebyshev bin 边界 \cref{eq:ch18-chebyshev-grid} & make\_wp\_states.cpp & 行 26--44: \texttt{make\_chebyshev\_distribution}。\\
+DT2022 §3.4 & SWP 本征值问题 \(H_n \ket{\swpket{n,k}} = E_{n,k}\ket{\swpket{n,k}}\) & make\_swp\_states.cpp & 行 21--26 调 \texttt{LAPACKE\_dspevd}；行 44--65 构造 H = H0 + V。\\
+DT2022 §3.5 & 两体 V 在部分波基的分类 (uncoupled, coupled, $1S_0$ 同位旋破缺) & make\_pw\_symm\_states.cpp & 行 4--60: \texttt{unique\_2N\_idx}。\\
+DT2022 §3.5 & 耦合通道 V 矩阵元六分量 & make\_potential\_matrix.cpp & 行 4--48: \texttt{extract\_potential\_element\_from\_array}（六个 if-else 分支：(--), (++), (-+), (+-), S=0, S=1, L=J）。\\
+DT2022 §3.6 & BC 解析子矩阵元 (\(\log\) + Heaviside) & make\_resolvent.cpp & 行 14--36: \texttt{resolvent\_bound\_continuum}。\\
+DT2022 §3.6 & CC 解析子矩阵元 (双 bin energy 平均) & make\_resolvent.cpp & 行 39--80: \texttt{resolvent\_continuum\_continuum}。\\
+DT2022 §4   & P123 几何因子 \(\tilde G\) 的角度积分 & make\_permutation\_matrix.cpp & 行 11--52: \texttt{calculate\_Gtilde\_array}, OpenMP。\\
+DT2022 §4   & 因子 \(\tilde A\) 含 9j 系数 & make\_permutation\_matrix.cpp & 行 ~600--800（\texttt{calculate\_Atilde\_array}），调 \texttt{General\_functions/coupling\_coefficients.cpp}。\\
+DT2022 §5   & Faddeev: \(U = A + AG U\), \(A = C^T PVC\) & solve\_faddeev.cpp & 行 4--48: \texttt{calculate\_PVC\_col}; 行 50--181: \texttt{calculate\_CPVC\_col}。\\
+DT2022 §5.2 & Padé 近似 \(P_N^M(z) = \det P / \det Q\) & solve\_faddeev.cpp & 行 271--296: \texttt{pade\_approximant}。\\
+DT2022 §5.2 & Padé 加速 Neumann 级数主驱动 & solve\_faddeev.cpp & 行 440--550: \texttt{pade\_method\_solve}（设置 NM\_max, neumann\_store\_array）。\\
+DT2022 §5.3 & on-shell bin 查询 (q-WP midpoint 法) & run\_organizer.cpp & 行 4--124: \texttt{find\_on\_shell\_bins}。\\
+DT2022 §A.1 & CG / 6j / 9j 系数 & General\_functions/coupling\_coefficients.cpp & 调 GSL 内置函数。\\
+PRC2022 §II   & N2LOopt 势接口 & Interactions/chiral\_N2LOopt.cpp + chp/ & 整个 chp/ 子目录是接口实现。\\
+PRC2022 §II.A & LO contact term \(C_{1S0}, C_{3S1}\) & constants.h & 行 39--40: \texttt{C1S0, C3S1}（$\Lambda = 450$ MeV）。\\
+PRC2022 §III  & elastic U-matrix 输出格式 & disk\_io\_routines.cpp & 行 759--915: \texttt{store\_U\_matrix\_elements\_txt} / \texttt{\_csv}。\\
+PRC2023 §II   & breakup 通道索引搜索 & run\_organizer.cpp & \texttt{find\_BU\_channels}（commit \texttt{f381cd1}）。\\
+PRC2023 §II   & breakup U 元素存盘 & disk\_io\_routines.cpp & 行 341--676: \texttt{restructure\_breakup\_data}, \texttt{store\_U\_BU\_matrix\_elements\_txt}。\\
+JPG2022       & WP 收敛分析 (Padé 阶 vs.~$N_p, N_q$) & solve\_faddeev.cpp & 行 458--463 的 \texttt{print\_neumann\_terms}, \texttt{store\_neumann\_terms} 输出 \texttt{neumann\_terms\_*.txt}。\\
+\bottomrule
+\end{longtable}
+
+\paragraph{使用建议。}
+当读者在阅读 Sean 博士论文时遇到一段算法描述，先查
+\cref{tab:ch18-paper-source-mapping} 找到对应代码段，再回到 origin 仓库
+\texttt{tictac-origin/Tic-tac/CPP/} 直接打开行号阅读源码。这样可以避免
+论文中的“数学语言 vs.\ 代码实际行为”之间的常见误解（典型如：论文里
+$\Vop$ 写成 \(\bra{p}V\ket{p'}\) 是连续动量本征态矩阵元，而代码里
+\texttt{V\_WP\_array} 已经是 \emph{bin 平均} 矩阵元——两者差一个
+$\mathcal{N}_i \mathcal{N}_j$ 因子）。
+
+\section{输入文件格式}
+\label{sec:ch18-input}
+
+origin 默认输入模板见 \cref{lst:ch18-input}。
+
+\begin{lstlisting}[style=config, caption={\texttt{CPP/Input/input.txt} 默认
+模板（origin 35 行）。},
+                   label={lst:ch18-input}]
+# Run "-h" or "--help" to see meaning of arguments
+two_J_3N_max=1
+Np_WP=50
+Nq_WP=50
+J_2N_max=1
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+chebyshev_s=200
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=Input/NWP-100-splitnorm.txt
+q_grid_type=chebyshev
+q_grid_filename=Input/NWP-100-splitnorm.txt
+P123_omp_num_threads=4
+parallel_run=true
+P123_recovery=false
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+potential_model=LO_internal
+parameter_walk=false
+parameter_file=
+PSI_start=-1
+PSI_end=-1
+energy_input_file=Input/lab_energies.txt
+output_folder=Output
+P123_folder=../../Data/permutation_matrices
+\end{lstlisting}
+
+\subsection{字段语义}
+
+\paragraph{基函数大小（控制内存与运行时）。}
+\texttt{Np\_WP}/\texttt{Nq\_WP}：fWP 与 SWP 在 $p$/$q$ 方向的 bin 数。
+矩阵规模 $\sim N_p^2 N_q$；P123 稀疏元素数 $\sim N_p^2 N_q^2 \mathrm{Nalpha}^2$，
+是\textbf{运行时与磁盘占用}的主要决定参数。生产值典型为 $N_p = N_q = 30$
+（基线）或 $50$（高精度）。
+
+\paragraph{部分波截断。}
+\texttt{two\_J\_3N\_max}：3N 总角动量 $2J_3$ 上限；\texttt{J\_2N\_max}：
+两体 $J_2$ 上限。低能 dp 散射 \texttt{two\_J\_3N\_max=1}（即
+$J_3 \le 1/2$）已足够；高能则需 \texttt{two\_J\_3N\_max=5} 或更高。
+
+\paragraph{角度求积。}
+\texttt{Nphi}, \texttt{Nx}：P123 几何因子 $\tilde G$ 的方位角与
+$\cos\theta$ 求积点数（\cref{ch:09_permutation_p123} §5）。生产值
+$48 \times 48$。
+
+\paragraph{物理开关。}
+\texttt{tensor\_force}：是否包含张量力（耦合通道 $L = J \pm 1$）。
+\texttt{isospin\_breaking\_1S0}：在 $^1S_0$ 引入 $T = 1/2 \leftrightarrow 3/2$ 同
+位旋耦合（commit \texttt{74776db}）。\texttt{midpoint\_approx}：用 bin
+中点替代积分平均，加速但牺牲精度。
+
+\paragraph{运行模式。}
+\texttt{calculate\_and\_store\_P123}/\texttt{P123\_recovery}：生成或读盘
+P123（HDF5）。\texttt{solve\_faddeev}：是否真正求解 Faddeev（关闭则只生
+成 P123 缓存）。\texttt{solve\_dense}：调试用 LAPACK 路径
+（commit \texttt{4d120d5}）。
+\texttt{include\_breakup\_channels}：开启 breakup 通道（PRC2023 工作）。
+
+\paragraph{并行/采样。}
+\texttt{parallel\_run} 与 \texttt{channel\_idx}：跑\textbf{单一}通道，用于
+机群分布。\texttt{P123\_omp\_num\_threads}：OpenMP 线程数。
+\texttt{parameter\_walk}/\texttt{PSI\_start}/\texttt{PSI\_end}：参数采样
+（commit \texttt{8e26f14}）。
+
+\paragraph{IO 路径。}
+\texttt{energy\_input\_file}：lab energies 列表（默认
+\texttt{Input/lab\_energies.txt}，13 个能量点）；
+\texttt{output\_folder}, \texttt{P123\_folder}：输出与缓存路径。
+
+\subsection{Sean 用的典型 input}
+
+DT2022 §6 中报道的 \emph{convergence study} 用一组扫描：
+$N_p = N_q \in \{15, 20, 25, 30, 40, 50\}$，固定 \texttt{J\_2N\_max=2}、
+\texttt{two\_J\_3N\_max=3}、\texttt{tensor\_force=true}、
+\texttt{isospin\_breaking\_1S0=false}（早期未实现）。
+PRC2022 §III 的 nd 散射 production run 则切到
+\texttt{J\_2N\_max=3}, \texttt{two\_J\_3N\_max=5}，
+\texttt{N\_p = N\_q = 50}。
+本治理书的“190 MeV 基准”使用与 PRC2022 同一组配置（参见
+\texttt{docs/dpol\_p\_190MeV\_validation.md}）。
+
+\paragraph{“可叠加输入”机制（commit \texttt{f6d5149}）。}
+2023-01 之后，origin 允许同时给出输入文件\textbf{和}命令行覆盖，写在更
+后面的覆盖更前面的：
+\begin{lstlisting}[style=config]
+./run Input/input.txt Np_WP=30 potential_model=N2LOopt
+\end{lstlisting}
+解析流程是：先读 \texttt{Input/input.txt} 全部 35 行，再依次扫描后续命
+令行字段，每命中一个就重写对应 \texttt{run\_params} 字段。这一“后写优
+先”规则是 origin 与重构版仍然兼容的接口（参见
+\texttt{src/config/set\_run\_parameters.cpp}）。
+
+\section{输出文件格式}
+\label{sec:ch18-output}
+
+origin 把 \texttt{output\_folder}（默认 \texttt{Output/}）下的文件按
+\textbf{每个 J/π 通道一组} 组织。
+
+\subsection{弹性 U-matrix 元素：\texttt{U\_PW\_elements\_*.txt}}
+
+文件命名约定（来自 \texttt{main.cpp} 行 406--410）：
+\begin{lstlisting}[style=config]
+U_PW_elements_Np_<Np>_Nq_<Nq>_JP_<2J3>_<P3>_Jmax_<J2max>_PSI_<idx>.txt
+\end{lstlisting}
+其中 \texttt{<2J3>=2J\_3N}（整数），\texttt{<P3>=0 (+) | 1 (-)}，
+\texttt{<idx>=PSI\_start..PSI\_end-1}（参数采样索引）。
+
+文件内每一行存一个 on-shell U-matrix 元素：
+\begin{lstlisting}[style=config]
+# T_lab[MeV] q_com[MeV] alpha_p alpha_pp Re(U) Im(U)
+1.000000   42.123     0       0       1.234e-2   -3.456e-3
+1.000000   42.123     0       1       2.222e-3    1.111e-4
+...
+\end{lstlisting}
+即对每个 on-shell 能量 $\Tlab$，遍历当前 J/π 通道内所有 deuteron 通道
+对 $(\alpha, \alpha')$ 的 U 元素。原始函数：
+\texttt{disk\_io\_routines.cpp::store\_U\_matrix\_elements\_txt}（行 759）。
+
+\subsection{Breakup U 元素：\texttt{U\_PW\_breakup\_elements\_*.txt}}
+
+仅当 \texttt{include\_breakup\_channels=true} 才生成。命名同上，把
+\texttt{elements} 替换成 \texttt{breakup\_elements}。每行存
+$\bra{\alpha' p' q'}U\ket{\alpha\,d\,q_{\rm os}}$ 形式的元素，索引方式为
+unique \emph{breakup channel index}（即对所有 $(\alpha', p', q')$ 的合
+法组合编号），写入函数：
+\texttt{store\_U\_BU\_matrix\_elements\_txt}（行 91--?）。
+
+\subsection{Padé/Neumann 收敛诊断：\texttt{neumann\_terms\_*.txt}}
+
+文件名见 \texttt{solve\_faddeev.cpp::pade\_method\_solve} 行 528--529：
+\begin{lstlisting}[style=config]
+neumann_terms_Np_<Np>_Nq_<Nq>_JP_<2J3>_<P3>_Jmax_<J2max>.txt
+\end{lstlisting}
+内容是逐 Neumann 项 $a_n = A K^n A_c$ 的复数模 $|a_n|$ 与 Padé
+$P_N^M$ 在 $z=1$ 的值（即整个级数和的估计）。Sean 在 PRC2022 fig.~3 用
+此文件画收敛曲线。
+
+\subsection{P123 缓存：\texttt{P123\_folder/}}
+
+HDF5 文件，命名按 J/π 与基函数大小。包含：稀疏矩阵的 \texttt{val/row/col}
+三个数组、网格边界 \texttt{p\_WP\_array, q\_WP\_array}、部分波态空间元
+数据。读盘函数 \texttt{read\_sparse\_permutation\_matrix\_for\_3N\_channel\_h5}
+（disk\_io\_routines.h 行 141--?）。\textbf{大小警告}：
+$N_p = N_q = 50$、\texttt{J\_2N\_max=3}、\texttt{two\_J\_3N\_max=5} 时单
+个 J/π 通道的 P123 文件可达 5--20 GB。
+
+\section{origin 的局限性}
+\label{sec:ch18-limitations}
+
+origin 是\textbf{完美的研究代码}：它实现了一篇 PRC 论文需要的全部物理与
+数值，且性能足以处理大规模 production run。但作为\textbf{工程化基线}它
+留下了若干结构性缺口，本治理书的 \cref{ch:19_refactor_evolution} 将逐项
+填平。这里把缺口集中列出，方便读者对照：
+
+\subsection{单层 \texttt{CPP/} 树（无分层）}
+\label{subsec:ch18-flat-tree}
+
+如 \cref{fig:ch18-tree}，origin 把全部 17 个 \texttt{.cpp} 主文件直接铺
+在 \texttt{CPP/} 一级。后果：
+\begin{itemize}
+\item 物理（potential）/ 数值（state\_space, faddeev\_solver）/ IO /
+      配置混在同一目录；
+\item 没有 \texttt{include/} 层，public API 与内部 helper 没有边界；
+\item \texttt{disk\_io\_routines.cpp}（1803 行）实际上同时承担\textbf{文
+      本格式 IO} 与 \textbf{HDF5 缓存}两份正交职责，没有拆开；
+\item 跨平台移植困难——所有 include 都是相对路径，IDE 跳转不可靠。
+\end{itemize}
+重构后（\cref{ch:19_refactor_evolution} §1.3），\texttt{src/} 被切为
+\texttt{core/\{faddeev\_solver, state\_space, potential, resolvent\}},
+\texttt{config/}, \texttt{io/}, \texttt{interactions/}, \texttt{utils/}
+五大子树，每个有独立 \texttt{CMakeLists.txt}。
+
+\subsection{仅 Makefile，无 CMake}
+
+origin 的 \texttt{makefile}（\cref{lst:ch18-makefile-snippet}）使用
+\texttt{find -regex} 自动收集所有 \texttt{.cpp/.f90/.f}，靠
+\texttt{-MMD -MP} 自动生成依赖。这\textbf{在单平台上完全够用}——但：
+\begin{itemize}
+\item 写死 MKL 路径与 \texttt{-DMKL\_*}（行 28--29）；
+\item Fortran 模块编译顺序由 \texttt{find} 字典序碰巧决定，CHP 与 CHP-set
+      之间的模块依赖在并行 \texttt{make -j} 时会偶发 race condition；
+\item 没有 install/test/coverage 目标；
+\item 不能在 conda 多平台间自动适配（如 \texttt{hdf5\_serial} vs.\
+      \texttt{hdf5}）。
+\end{itemize}
+重构后的 \texttt{CMakeLists.txt} 显式声明 Fortran 依赖顺序，并通过
+\texttt{CONDA\_PREFIX} 自动选 HDF5 变体。
+
+\begin{lstlisting}[style=config, caption={\texttt{CPP/makefile} 关键片段
+（origin 行 8--36）。},
+                   label={lst:ch18-makefile-snippet}]
+TARGET    := run
+SRC_FILES := $(shell find ./ -regex [^\#]*\\.cpp$)
+OBJ_FILES := $(SRC_FILES:.cpp=.o)
+DEP_FILES := $(SRC_FILES:.cpp=.d)
+SRCFORT_90_FILES := $(shell find ./ -regex [^\#]*\\.f90$)
+SRCFORT_77_FILES := $(shell find ./ -regex [^\#]*\\.f$)
+OBJFORT_90_FILES := $(patsubst %.f90,%.o,$(SRCFORT_90_FILES))
+OBJFORT_77_FILES := $(patsubst %.f,%.o,$(SRCFORT_77_FILES))
+CPPFLAGS := -Wall -std=c++17 -O3 -ggdb -fopenmp \
+            -DMKL_ILP64 -m64 \
+            -DMKL_Complex16="std::complex<double>" \
+            -I$(MKLROOT)/include
+LDLIBS  := -lgomp -lgsl -lpthread -lm -ldl -lgfortran \
+           -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_serial_hl -lhdf5_serial \
+           -lstdc++fs \
+           -L$(MKLROOT)/lib/intel64 -lmkl_intel_ilp64 \
+           -lmkl_gnu_thread -lmkl_core
+\end{lstlisting}
+
+\subsection{无 Python 工作流}
+
+origin 完全无 Python 端：
+\begin{itemize}
+\item 没有 \texttt{examples/}：没有“一键扫描 $\Tlab$、跑求解器、提取
+      iT11/dσ”的脚本；
+\item 没有 \texttt{tests/}：除了 \texttt{Test/Cont\_Faddeev/} 与
+      \texttt{Test/Free\_energy/} 两个一次性 C++ 子项目，没有回归测试；
+\item 没有 plotting：实验数据对照与发表级图都靠 Sean 个人的本地 Python
+      notebooks（不在仓库内）。
+\end{itemize}
+\cref{ch:20_hands_on} 与本仓库的
+\texttt{examples/deuteron\_proton\_Ay.py},
+\texttt{examples/compare\_Ay\_experiment.py},
+\texttt{examples/plot\_validation\_curves.py} 与
+\texttt{tests/test\_190mev\_data\_pipeline.py} 系统地补上了这一层。
+
+\subsection{无三核子力（3NF）支持}
+
+origin 的 \texttt{Interactions/} 只实现\textbf{两体}核势：chiral N3LO/N2LOopt/LO\_internal
++ Nijmegen + Malfliet--Tjon。Sean 在 DT2022 §6 与 PRC2023 中讨论了 3NF
+（Tucson--Melbourne、$2\pi$-exchange）但\textbf{没有在 origin 仓库实现}。
+本仓库的 \cref{ch:15_3nf_physics}--\cref{ch:17_3nf_numerical} 在重构版
+中加入：
+\begin{itemize}
+\item \texttt{src/interactions/three\_nucleon/} 的 c$_1$, c$_3$ rank-2 部
+      分波投影（commit \texttt{1f05031}）；
+\item \texttt{c\_D} 1-pion-exchange 加 contact 项（commit \texttt{8db06bf}）；
+\item \texttt{c\_E} 6-quark contact 与 Navrátil/Witała 符号约定
+      （commit \texttt{f4df358}）；
+\item Fourier 归一化 $1/(2\pi)^3$（commit \texttt{bdb239d}）。
+\end{itemize}
+
+\subsection{无 multi-energy sweep / 多能量观测量比较}
+
+origin 的 main 循环天然支持\emph{多个 lab energies}（通过
+\texttt{lab\_energies.txt}），但在“批处理多个 J/π 通道、合并各通道 U-matrix、
+计算并存 dσ/dΩ, iT11, T20, T21, T22”\textbf{这一层完全空白}——这些操作
+原本也不属于 solver 内核，Sean 把它们留给本地 notebooks。
+重构版的
+\texttt{docs/dpol\_p\_multi\_energy\_observables.md},
+\texttt{examples/run\_3nf\_sweep.py},
+\texttt{examples/plot\_3nf\_effect.py} 把这部分流程标准化。
+
+\subsection{若干 commit 教训}
+
+从 origin 的 commit 历史可以提炼出对重构版有持续指导意义的若干教训。
+\cref{tab:ch18-commit-lessons} 摘录最重要的 5 条。
+
+\begin{table}[ht]
+\centering
+\caption{origin 的若干 commit 教训。}
+\label{tab:ch18-commit-lessons}
+\small
+\begin{tabular}{p{1.5cm}p{12cm}}
+\toprule
+\textbf{commit} & \textbf{教训} \\
+\midrule
+\texttt{1522649} & 移除 obsolete MKL-sparse。\textbf{结论}：早期对
+                   \texttt{mkl\_sparse\_*} 的依赖被自家 CSC 实现替代，省掉
+                   了一份 MKL ILP64 编译麻烦；重构版完全不引 MKL。\\
+\texttt{e594fac} & P123 整数溢出修复。\textbf{结论}：P123 的稀疏维度极
+                   易超过 \texttt{int} 范围（${>} 2^{31}$），所有索引必须
+                   显式使用 \texttt{size\_t}；这条经验被 \texttt{type\_defs.h}
+                   的 \texttt{ull\_int} typedef 永久编码。 \\
+\texttt{b2917e8} & Faddeev solver 内的 4 个小数组未释放导致内存泄漏。
+                   \textbf{结论}：origin 用裸 \texttt{new}/\texttt{delete}；
+                   重构版应迁移到 \texttt{std::vector} / 智能指针（部分迁
+                   移，见 \cref{ch:19_refactor_evolution} §4）。 \\
+\texttt{8e26f14} & 引入 \texttt{PSI\_start/PSI\_end} 跨机分布。
+                   \textbf{结论}：CPU 集群跑参数采样的现实需求，证明了
+                   solver 必须支持\textbf{断点续算}与\textbf{部分通道运
+                   行}。重构版 \texttt{parallel\_run + channel\_idx} 接
+                   口直接继承。 \\
+\texttt{4d120d5} & \texttt{solve\_dense} 备份解。\textbf{结论}：Padé/Neumann
+                   不收敛或精度可疑时，必须保留\textbf{独立第二种求解路
+                   径}做交叉校验。这条做法被 \cref{ch:11_faddeev_solver}
+                   §6 的“dense fallback”采纳。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{编译 origin 的复现命令}
+\label{sec:ch18-reproduce}
+
+本节给出在\textbf{当前主机}上从 origin 快照复现一次最小可运行例子的全
+部命令。前提：\texttt{gcc/g++ $\ge$ 9}, \texttt{gfortran}, \texttt{gsl},
+\texttt{hdf5} (with C++ 与 Fortran 接口), \texttt{blas/lapack},
+\texttt{openmp}; 如果使用 conda 环境，多数依赖可由
+\texttt{conda install -c conda-forge gxx\_linux-64 gfortran\_linux-64
+gsl hdf5 lapack openmp} 一次性获得。
+
+\subsection{原 Makefile 编译（要求 MKL）}
+\begin{lstlisting}[style=config]
+cd /home/tian/workspace/dpol/tictac-origin/Tic-tac/CPP
+export MKLROOT=/opt/intel/oneapi/mkl/latest    # 或 conda 提供的 mkl 路径
+make -j8
+# 输出：./run （约 3--6 MB ELF 二进制）
+\end{lstlisting}
+
+\paragraph{若没有 MKL（更常见）。}
+origin 的 Makefile 把 MKL 写死，但其实代码中 \emph{已经}通过
+\texttt{1522649} 移除了 mkl\_sparse 调用。最简单办法是把
+Makefile 里 \textbf{所有} \texttt{-DMKL\_*}, \texttt{-I\$(MKLROOT)/include}
+和 \texttt{-L\$(MKLROOT)/lib/intel64 -lmkl\_*} 行注释掉，并把
+\texttt{LDLIBS} 加上 \texttt{-lblas -llapack -llapacke}。然后直接：
+\begin{lstlisting}[style=config]
+make -j8
+\end{lstlisting}
+
+\subsection{最小运行示例}
+\begin{lstlisting}[style=config]
+mkdir -p Output
+mkdir -p ../../Data/permutation_matrices
+
+# 准备输入：默认 input.txt 已经存在；改 lab energies 为单点：
+echo "1" > Input/lab_energies.txt
+
+./run Input/input.txt Np_WP=15 Nq_WP=15 \
+                     two_J_3N_max=1 J_2N_max=1 \
+                     potential_model=malfliet_tjon \
+                     calculate_and_store_P123=true \
+                     solve_faddeev=true
+\end{lstlisting}
+此最小例选用 toy 势 \texttt{malfliet\_tjon}、\texttt{Np\_WP=Nq\_WP=15}、
+最低部分波截断，整段运行 1--3 分钟。输出：
+\begin{lstlisting}[style=config]
+Output/U_PW_elements_Np_15_Nq_15_JP_1_0_Jmax_1_PSI_0.txt
+Output/U_PW_elements_Np_15_Nq_15_JP_1_1_Jmax_1_PSI_0.txt
+Output/U_PW_elements_Np_15_Nq_15_JP_3_0_Jmax_1_PSI_0.txt
+Output/U_PW_elements_Np_15_Nq_15_JP_3_1_Jmax_1_PSI_0.txt
+Output/neumann_terms_Np_15_Nq_15_JP_1_0_Jmax_1.txt
+... （以及 P123 的 HDF5 缓存文件）
+\end{lstlisting}
+打开 \texttt{neumann\_terms\_Np\_15\_Nq\_15\_JP\_1\_0\_Jmax\_1.txt} 可以看
+到 Padé 收敛轨迹（每行一个 Neumann 项的复数值）。
+
+\subsection{从 origin 输出到 dp 观测量}
+
+origin 仓库内不能直接画 iT11；这一步需要把 \texttt{U\_PW\_elements\_*.txt}
+喂给本仓库（重构版）的
+\texttt{examples/compare\_Ay\_experiment.py}：
+\begin{lstlisting}[style=config]
+cd /home/tian/workspace/dpol/Tic-tac
+python3 examples/compare_Ay_experiment.py \
+        --solver-out-dir /home/tian/workspace/dpol/tictac-origin/Tic-tac/CPP/Output \
+        --target-tlab-mev 190
+\end{lstlisting}
+注意：原始 origin 的 \texttt{U\_PW\_elements\_*.txt} 与重构版完全兼容
+（命名约定与列顺序均未改），所以 origin 跑出的结果可以直接被本仓库的
+后处理工具消费。这一兼容性是\textbf{故意保持}的设计原则之一
+（参见 \cref{ch:19_refactor_evolution} §2.2）。
+
+\paragraph{本章小结。}
+本章把 \texttt{tictac-origin} 作为自包含基线代码做了完整导览：从仓库时
+间线（2020--2023）、目录树、\texttt{main.cpp} 的 10 步执行流、17 个模块
+的速查表、Sean 论文与代码的双向对照、输入输出文件格式，到 origin 留下
+的若干结构性缺口和一次最小复现命令。读到这里读者应当能：
+（i）独立打开任何一段 Sean 论文公式并跳到对应代码行号；
+（ii）自己跑一次 origin 求解器（用 toy 势）拿到 \texttt{U\_PW\_elements} 输出；
+（iii）理解为什么本仓库要在 origin 之上做重构，重构补足了哪些缺口。
+\cref{ch:19_refactor_evolution} 会沿着\textbf{同一组缺口}逐条讨论重构版
+做了什么、为什么、怎么做的。

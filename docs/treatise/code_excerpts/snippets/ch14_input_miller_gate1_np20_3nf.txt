@@ -1,0 +1,54 @@
+// ===============================================================
+// 抽取自仓库 [current]: CPP/Input/input_miller_gate1_np20_3nf.txt
+// 行号区段：1..49
+// 由 docs/treatise/code_excerpts/extract.py 自动生成；勿手动编辑
+// ===============================================================
+# Miller Gate 1 3NF sensitivity (fast): Np=Nq=20 Nijmegen-I + chiral N2LO 3NF.
+# Compare δ(²S₁/₂) vs 2NF-only Np=20 baseline (+96° at 12.1 MeV).
+# Witała/Navrátil convention LECs: c_D = -0.20, c_E = -0.205.
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=20
+Nq_WP=20
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=false
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=nijmegen
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=chiral_N2LO
+c_D=-0.20
+c_E=-0.205
+Lambda_3NF=500.0
+w1_scale=1.0
+
+energy_input_file=CPP/Input/lab_energies_miller_gate1.txt
+output_folder=CPP/Output/miller_gate1_np20_3nf
+P123_folder=CPP/Output/miller_gate1

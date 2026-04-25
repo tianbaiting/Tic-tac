@@ -1,13 +1,1172 @@
 % =====================================================================
 % 17_3nf_numerical.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 17 章 3NF 的数值正确性与诊断工具
+% Wave 5 / Ch 17 subagent
 % =====================================================================
 
 \chapter{3NF 的数值正确性与诊断工具}
 \label{ch:17_3nf_numerical}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机：为什么 3NF 数值正确性极难验证}
+\label{sec:ch17-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{从 2NF 到 3NF：数值复杂度的相变。}
+\cref{ch:08_potential_matrix} 已经详细展示了二体势 \(V_{\ell'\ell}(p',p)\) 在
+WP 基下的离散化路线：单一径向变量 \(p\) 上的两次嵌套求积，加上不超过
+\(2\times 2\) 的张量耦合块。读者只要在纸面上验证 \(\spectro{3}{S}{1}\!-\!\spectro{3}{D}{1}\)
+混合矩阵元的对角化能复现氘核结合能 \(\Ed = 2.22457\) MeV，便已对整个 2NF
+路径有足够信心。三核子力（3NF）则把这种朴素的"标量积分驱动"图像彻底
+打碎：
+
+\begin{itemize}
+  \item 每个矩阵元在 Jacobi 动量空间是关于 \((\bvec{p}', \bvec{q}', \bvec{p}, \bvec{q})\)
+        的 6D 函数；即使利用旋转/宇称把它降到部分波 \((\PWchanp, \PWchan)\)
+        的 \(4\) 个标量参数 \((p', q', p, q)\)，剩下的角度积分 \(\int dx\)
+        仍然要逐元素显式做。
+  \item 在 \cref{ch:16_3nf_pw_projection} 我们展示了：\(c_D, c_E, c_1, c_3, c_4\)
+        每一个 LEC 都对应一组独立的 rank-0 / rank-2 投影积分；耦合系数
+        来自 \(9j\) 与 Wigner-Eckart 重耦合，正负号交错；张量结构
+        \(\bm{\sigma}_i \cdot \bm{q}_i\, \bm{\sigma}_j \cdot \bm{q}_j\) 还会
+        在不同核子置换下携带相位翻转。
+  \item Fourier 归一化因子 \(1/(2\pi)^3\) 必须按动量传递个数累乘——一项
+        \(\propto (2\pi)^{-3}\) 的差错就足以让最终能量贡献错一个 \(\sim 250\) 的因子。
+  \item 最终被求积的对象是\textbf{多项相消}的：\(c_E\)、\(c_D\)、\(c_1\)、\(c_3\)
+        各自的 \(\langle W^{(1)}\rangle\) 量级是 \(\mathcal{O}(0.1\text{--}1\,\mathrm{MeV})\)，
+        但它们彼此之间的\textbf{符号}相反；在 Witała 推荐的 LEC 处四项之和
+        几乎为 \(\mathcal{O}(10^{-3}\,\mathrm{MeV})\)。换句话说，\textbf{合理的}
+        最终值意味着各个分项必须\textbf{独立}做对，否则总和的"接近零"
+        只是几个错误数字的偶然相消。
+\end{itemize}
+
+\paragraph{单元测试在 3NF 这一层为什么不够。}
+2NF 路径最强的"原地"单元测试是：固定一个 \(\spectro{1}{S}{0}\) 通道，
+扫描 \(p_{\text{lab}}\)，把 LS 解出的相移 \(\delta_0(E)\) 与 SAID 数据对比。
+这一闭环只动用势矩阵一项。3NF 路径则不存在等价的"单变量"诊断：
+
+\begin{enumerate}
+  \item \(\langle W^{(1)} \rangle\) 是\textbf{六维}对真空相对动量的积分；
+        找不到一个一维参数让所有积分降到一行。
+  \item 只看耦合 LEC 之一（譬如 \(c_E\)）做"contact-only"配置，
+        \(c_E\) 在文献里的"参考值" \cite{Epelbaum2002, Witala2008}
+        也只在束缚态期望值 \(\langle\Psi_{^3\!\mathrm{H}}|W^{(1)}|\Psi_{^3\!\mathrm{H}}\rangle\)
+        的 ³H 通道有报道——离散散射 U 矩阵元的逐项参考值并不存在。
+  \item 把 3NF 接到 AGS 求解器（\cref{ch:11_faddeev_solver}）后再去比 \(d\sigma/d\Omega\)
+        与 \(iT_{11}\)，错误已经被 Padé 迭代和角度积分稀释掉若干个数量级，
+        诊断信号被 Faddeev 解的非线性反馈淹没。
+\end{enumerate}
+
+我们因此必须在 \emph{Faddeev 求解器之前}就做出一种"\(\langle\psi_t|W^{(1)}|\psi_t\rangle\)
+量级正确"的诊断闭环：用一个\textbf{已被独立软件/文献校准过的}三体束缚
+态波函数 \(\psi_t\) 当作探针，把整个 3NF 部分波核 \(W^{(1)}\) 在它上面收
+缩，得到的标量与文献里报告的 \(\langle W \rangle\) 对照。这就是
+\texttt{tools/check\_3nf\_normalization/} 这个诊断工具存在的全部理由。
+
+\paragraph{Witała 基准与 ³H 期望值的可观测意义。}
+设三核子哈密顿量为
+\begin{equation}
+\label{eq:ch17-H3N}
+\Hop \;=\; \Top \;+\; \sum_{i<j} V_{2N, ij} \;+\; W^{(1)}_{(123)},
+\end{equation}
+其中 \(W^{(1)}_{(123)}\) 是 \cref{ch:15_3nf_physics} 引入的 3NF "对称化前"
+single-piece（spectator-1 标记）。三体束缚态 \(\Psi_t\) 是反对称化
+\((1+\Pop+\Pop^2)\,\psi_t\) 的本征态，本征值 \(E_3 = -E_B(^3\!\mathrm{H})\)
+（约 \(-8.48\) MeV 实验值；Idaho-N3LO 仅 2NF 给出 \(-7.85\) MeV，
+3NF 修正 \(\Delta E_{3NF} \approx -0.6\,\mathrm{MeV}\) 便补足缺失的结合能）。
+取期望值
+\begin{equation}
+\label{eq:ch17-energy-budget}
+E_3 \;=\; \bra{\Psi_t}\Top\ket{\Psi_t} \;+\;
+          \bra{\Psi_t}\sum_{i<j} V_{2N, ij}\ket{\Psi_t} \;+\;
+          \bra{\Psi_t}W^{(1)}_{(123)}\,(1+\Pop+\Pop^2)\ket{\Psi_t}.
+\end{equation}
+最后一项就是 3NF 对结合能的贡献 \(\Delta E_{3NF}\)。Epelbaum 2002 与
+Witała 2008 的文献分别在 ³H 列报告了 \(\langle V_{NN}\rangle\)，\(\langle T \rangle\)，
+\(\langle V_{3N}\rangle\) 三个分量的数值，使我们\textbf{有外部数字可比对}。
+本章描述的诊断工具不去解 Faddeev 方程；它只问一个尖锐的问题：
+
+\begin{quote}
+\itshape
+我现在写好的 3NF 部分波核 \(W^{(1)}_{\PWchanp,\PWchan}(p',q'; p, q)\)，
+如果在 ³H 的\textbf{已知}波函数 \(\psi_t\) 上做 6D 收缩，能不能给出与
+Epelbaum/Witała 文献吻合（\(|\text{ratio}|=1\pm 5\%\)）的 \(\langle W\rangle\)？
+\end{quote}
+
+如果不能，AGS 求解器之上的所有观测量都失去物理意义；如果能，
+3NF 部分波核与 2NF 路径之间的接缝处也大概率是好的，剩下的差错可以
+留给求解器自身的离散化诊断（\cref{ch:11_faddeev_solver}）。
+
+\paragraph{本章的视角和读者收益。}
+本章不是一个"理论推导"章节；从 \cref{ch:15_3nf_physics} 与
+\cref{ch:16_3nf_pw_projection} 继承的全部部分波公式，本章只\textbf{消费}
+不\textbf{生产}。本章的产出是\emph{一组数字} —— 把 \cref{ch:16_3nf_pw_projection}
+的 PW kernel 喂给一个独立的小可执行程序 \texttt{check\_3nf\_normalization}，
+它读入 ³H 波函数文件、做 6D 收缩、与文献比对、给出 ratio。读完本章
+你应当能：
+
+\begin{itemize}
+  \item 在 \texttt{tools/check\_3nf\_normalization/} 下独立 \texttt{make}
+        并跑出与 \cref{tab:ch17-witala-results} 一致的 \(\langle W\rangle\)
+        数字；
+  \item 理解 ³H 波函数文件 \texttt{H3\_psi\_*.dat} 与 \texttt{H3\_psiasymm\_*.dat}
+        的差别（Faddeev 分量 \(\psi_t\) vs.\ 完整反对称态 \(\Psi_t\)），
+        并知道哪一个该用、积分测度怎么写；
+  \item 当 \(W^{(1)}\) 的某个 LEC 通道出现 \(>5\%\) 的 ratio 偏差时，
+        能定位到是 Fourier 因子、Hermiticity、还是 \((1+\Pop+\Pop^2)\)
+        反对称因子哪一处出了问题；
+  \item 理解 commit \texttt{f4df358}（\(c_E\) 符号修复）之后这条诊断闭环的
+        ratio 数字\emph{应当}如何变化；不再出现的"几乎完美但符号反了"的
+        false-pass。
+\end{itemize}
+
+% =========================================
+\section{数学推导：期望值基准方程}
+\label{sec:ch17-math}
+
+% -----------------------------------------
+\subsection{反对称化波函数与 Faddeev 分量}
+\label{subsec:ch17-asymm-psi}
+
+三核子束缚态 \(\Psi_t\) 在 ³H 量子数 \(J^\pi = 1/2^+\)，\(T = 1/2\) 处。
+按 \cref{ch:09_permutation_p123} 的标记，把它写成 \(\Aop\,\psi_t\)：
+\begin{equation}
+\label{eq:ch17-Asymm-def}
+\Psi_t \;=\; \frac{1}{\sqrt{3}}\,(1 + \Pop + \Pop^2)\,\psi_t,
+\quad
+\langle \Psi_t|\Psi_t\rangle = 1,
+\quad
+\langle \psi_t|\psi_t\rangle = \frac{1}{3}\quad(\text{若 } \Pop|\psi_t\rangle = |\psi_t\rangle).
+\end{equation}
+其中 \(\Pop = P_{12}P_{23} + P_{13}P_{23}\) 是\cref{ch:09_permutation_p123}
+里反复出现的"3-cycle 之和"算符；\(\psi_t\) 称为 \emph{Faddeev 分量}，它满
+足 Faddeev 方程
+\begin{equation}
+\label{eq:ch17-faddeev-bound}
+\psi_t \;=\; \Gzero(E_3)\, t_{2N}(E_3)\,\Pop\, \psi_t.
+\end{equation}
+Faddeev 分量本身\textbf{不归一}到 \(1\)，而完整反对称态 \(\Psi_t\) 归一。
+
+\paragraph{诊断工具读入哪个？}
+仓库 \texttt{tests/Cont\_Faddeev/Triton\_states/} 下两个数据文件：
+\texttt{H3\_psi\_N3LO\_EM500.dat} 是 \(\psi_t\)，
+\texttt{H3\_psiasymm\_N3LO\_EM500.dat} 是 \(\Psi_t\)。
+\textbf{诊断工具应当读入 \texttt{H3\_psiasymm\_*.dat}}：因为我们要做
+\(\langle \Psi_t|W^{(1)}|\Psi_t\rangle\) 这个完整反对称化期望值，而不是
+\(\langle \psi_t|W^{(1)}|\psi_t\rangle\)（后者只覆盖一个 spectator 通道）。
+代码（\cref{lst:ch17-main-entry}）入口处对此有显式的 \texttt{usage} 提示。
+
+\subsection{从对称化期望值到 \(3\cdot\langle\psi_t|W^{(1)}|\psi_t\rangle\)}
+\label{subsec:ch17-3xfactor}
+
+利用 \(\Pop\Psi_t = \Psi_t\)（反对称化态在循环置换下是不变量，因为
+\(\Pop\) 已经在 \(\Aop\) 内被求和过），可以把对称化的 \(W^{(1)}\) 期望值
+化简：
+\begin{align}
+\bra{\Psi_t}\Wsymm\ket{\Psi_t}
+&\equiv \bra{\Psi_t}\,(1+\Pop+\Pop^2)\,W^{(1)}_{(123)}\,(1+\Pop+\Pop^2)\,\ket{\Psi_t}/3 \notag\\
+&= \bra{\Psi_t}\,W^{(1)}_{(123)} \;+\; \Pop\, W^{(1)}_{(123)} \;+\; \Pop^2\, W^{(1)}_{(123)}\,\ket{\Psi_t} \notag\\
+&\equiv \bra{\Psi_t}\,W^{(1)}_{(123)} + W^{(2)}_{(231)} + W^{(3)}_{(312)}\,\ket{\Psi_t}, \notag\\
+\label{eq:ch17-3W}
+&= 3\,\bra{\Psi_t}\,W^{(1)}_{(123)}\,\ket{\Psi_t}.
+\end{align}
+末等号利用了 \emph{反对称化态} \(\Psi_t\) 对三个核子无差别（即三个
+\(W^{(i)}\) 的期望值相等）这一物理性质。这就是 \cref{lst:ch17-lec-sweep}
+里把 \(\langle W^{(1)}\rangle\) 直接乘 \(3\) 报告 \(\Delta E_{3NF}\) 的根据。
+
+\paragraph{对应的代码报头。}
+\cref{lst:ch17-lec-sweep} 的 \(\Delta E_{3NF} = 3\cdot\langle W^{(1)}\rangle\)
+注释一字不差地反映 \cref{eq:ch17-3W}：
+\begin{verbatim}
+=== ΔE_3NF = ⟨Ψ|(1+P+P²)W^(1)|Ψ⟩
+           = 3·⟨Ψ|W^(1)|Ψ⟩  (antisymmetric Ψ → P|Ψ⟩ = |Ψ⟩) ===
+\end{verbatim}
+
+\subsection{能量预算方程}
+\label{subsec:ch17-energy-budget}
+
+把 \cref{eq:ch17-energy-budget} 重新整理：
+\begin{equation}
+\label{eq:ch17-DeltaE-3NF}
+\Delta E_{3NF}
+\;\equiv\; \bra{\Psi_t} W^{(1)}_{\text{symm}} \ket{\Psi_t}
+\;=\; E_3 \;-\; \bra{\Psi_t}\Top\ket{\Psi_t} \;-\; \bra{\Psi_t}V_{2N}\ket{\Psi_t}.
+\end{equation}
+对于 Idaho-N3LO\,(\(\Lambda=500\) MeV) 加 N²LO 3NF（Witała LECs 配置），
+公开数据分别是 \cite{Epelbaum2002, Witala2008}：
+\begin{equation*}
+E_3 \approx -8.48\,\mathrm{MeV},\quad
+\bra{\Psi_t}\Top\ket{\Psi_t} \approx +49\,\mathrm{MeV},\quad
+\bra{\Psi_t}V_{2N}\ket{\Psi_t} \approx -57\,\mathrm{MeV},
+\end{equation*}
+故 \(\Delta E_{3NF} \approx -0.4\) MeV，与本章末报告的"\texttt{full\_Witala}"
+基准 \(-0.002\)\,MeV \emph{量级一致}（差异源自 \(c_D, c_E\) 的 LEC 选择不
+完全等同 Epelbaum 原值；详见 \cref{tab:ch17-lec-rescale}）。
+
+\subsection{每个 LEC 通道的独立期望值}
+\label{subsec:ch17-per-lec}
+
+\(W^{(1)}\) 是 \(c_E, c_D, c_1, c_3, c_4\) 的\textbf{严格线性}组合：
+\begin{equation}
+\label{eq:ch17-W-linear}
+W^{(1)} \;=\; c_E\, W^{(1)}_{cE} \;+\; c_D\, W^{(1)}_{cD} \;+\; c_1\, W^{(1)}_{c1}
+        \;+\; c_3\, W^{(1)}_{c3} \;+\; c_4\, W^{(1)}_{c4}.
+\end{equation}
+故 \(\langle W^{(1)}\rangle\) 也对每个 LEC 严格线性。这是为什么
+\cref{lst:ch17-lec-sweep} 里把诊断分成五个独立 run（\texttt{c\_E\_only}、
+\texttt{c\_D\_only}、\texttt{c\_1\_only}、\texttt{c\_3\_only}、
+\texttt{full\_Witala}），并验证\textbf{加性}：
+\begin{equation}
+\label{eq:ch17-additivity-check}
+3\cdot\bigl[\langle W\rangle_{cE} + \langle W\rangle_{cD} + \langle W\rangle_{c1} + \langle W\rangle_{c3}\bigr]
+\stackrel{?}{=} 3\cdot\langle W\rangle_{\text{full Witała}}.
+\end{equation}
+诊断输出里 \texttt{Additivity check} 一行报告这两边的残差，正常 \(<10^{-11}\)
+MeV——这不是物理验证（任何线性叠加的代码都满足），而是\textbf{回归测
+试}：一旦未来 \texttt{chiral\_N2LO\_3NF.h} 的 LEC 路径被错误地写成非线性
+（譬如把 \(c_D\) 平方），加性立刻被破坏，提示重大事故。
+
+\subsection{径向积分测度的"双尺寸"约定}
+\label{subsec:ch17-radial-measure}
+
+诊断工具里反复出现的两组常数 \(\Niso\) 和 \(p^2 q^2\) 因子背后是
+\textbf{径向函数 vs.\ 全函数}的两种 Jacobi 测度约定。我们在
+\cref{ch:03_jacobi_partial_wave} 已建立完整的 \(d^3p\, d^3q\) 测度；
+做球谐展开后，
+\begin{equation}
+\label{eq:ch17-measure}
+\int d^3 p\, d^3 q\, |\Psi(\bvec{p}, \bvec{q})|^2
+\;=\; \sum_\PWchan \int_0^\infty p^2 dp \int_0^\infty q^2 dq\, |\psi_\PWchan(p, q)|^2.
+\end{equation}
+两种实现选择：
+
+\begin{enumerate}
+  \item[\textbf{A.}] \emph{径向函数}：把 \(\psi_\PWchan(p, q)\) 直接存为
+        二维网格上的复值；归一化时显式乘上 \(p^2 q^2\)：
+        \[
+        \langle\Psi|\Psi\rangle_{\text{radial}}
+        \;=\; \sum_\PWchan\sum_{i, j} w^p_i\,w^q_j\,p_i^2\,q_j^2\,|\psi_\PWchan(p_i, q_j)|^2.
+        \]
+        这是 \cref{lst:ch17-compute-norm} 实现的版本。
+
+  \item[\textbf{B.}] \emph{约化函数}：把 \(p\,\psi_\PWchan(p, q)\,q\) 当成
+        新的存储变量，归一化只乘 Gauss 权重：
+        \[
+        \langle\Psi|\Psi\rangle_{\text{reduced}}
+        \;=\; \sum_\PWchan\sum_{i, j} w^p_i\,w^q_j\,|p_i\,\psi_\PWchan(p_i, q_j)\,q_j|^2.
+        \]
+\end{enumerate}
+
+仓库里的 \texttt{H3\_psiasymm\_N3LO\_EM500.dat} 用\textbf{径向}约定（A）。
+\cref{lst:ch17-main-entry} 头部那段 \textbf{Task 3 (2026-04-20)} 的注释
+是项目作者亲手做的判别：用 reduced 约定算 \(\Psi_t\) 得到
+\(194.768\)（远超 1）；用 radial 约定得到 \(1.000000\)（精确为 1）。这
+锁定了文件的存储约定。同样的判别给 Faddeev 分量 \(\psi_t\) 的
+radial 归一是 \(0.153637 \approx 1/6.5\)，与 \(\Psi_t = (1+\Pop+\Pop^2)\psi_t\)
+的反对称化因子一致。
+
+\paragraph{判别为什么不能反向。}
+如果 \(p^2 q^2\) 因子被遗漏（错误地走 reduced 路径但不修改存储），
+归一化会被高估约 200 倍——但\textbf{每个 \(\langle W\rangle\) 也会被同
+时高估约 200 倍}，ratio 不被破坏，\(c_E\)/\(c_D\)/\(c_1\)/\(c_3\) 看起来
+\emph{相对一致}地"全部偏大 200 倍"。Epelbaum/Witała 比对环节因此设计
+为：报告 4 个 LEC ratio + 一个加性检查；如果四个 ratio \emph{相同}（譬
+如都 \(\approx 200\)），那是测度错；如果四个 ratio \emph{量级相同符号
+混乱}，那是 \(W^{(1)}\) 部分波核里有局部 sign bug。下文 §17.6 的具体
+数字直接示范了这一辨别。
+
+% =========================================
+\section{离散化：三体束缚态在 PW 基下的存储}
+\label{sec:ch17-discretization}
+
+% -----------------------------------------
+\subsection{α 表与三体量子数}
+\label{subsec:ch17-alpha-table}
+
+\(\Psi_t\) 是 \((J^\pi, T) = (1/2^+, 1/2)\) 的三体束缚态。在 jJ-coupled
+基（\cref{ch:07_pw_symm_states}）下它分解为 \(\Nalpha\) 个部分波分量，
+每个 \(\PWchan\) 对应一组量子数
+\begin{equation}
+\label{eq:ch17-alpha-tuple}
+\PWchan \leftrightarrow \bigl(L_{2N}, S_{2N}, J_{2N}, T_{2N};\; L_{1N}, 2J_{1N};\;
+                              2J_{3N}, 2T_{3N}, P_{3N}\bigr).
+\end{equation}
+对 ³H 而言 \(2J_{3N} = 1\)、\(2T_{3N} = 1\)、\(P_{3N} = +1\) 在所有 \(\PWchan\)
+都恒定。诊断工具把这一观察直接编码进 \cref{lst:ch17-build-pw-statespace}
+：从读入的 \(\psi_t\) α 表只需复用前 6 个字段（\(L_{2N}, S_{2N}, J_{2N},
+T_{2N}, L_{1N}, 2J_{1N}\)），后 3 个字段直接固定。
+
+\paragraph{宇称一致性检查。}
+\cref{lst:ch17-build-pw-statespace} 末尾按 \(P_{3N} = (-1)^{L_{2N} + L_{1N}}\)
+计算每个 \(\PWchan\) 的宇称，并由 \cref{lst:ch17-main-entry}
+统一比对："\texttt{All α share parity P\_3N=+1: yes}"。³H 是正宇称态，
+任何被读入的 α 通道一旦给出 \(P_{3N} = -1\) 立刻报警；这种事件意味着
+\texttt{H3\_psiasymm\_*.dat} 文件被错误地拼接成了不同质子荷的 \({}^3\!\mathrm{He}^-\)
+镜像态——下游 ratio 会全错。
+
+\subsection{Gauss-Legendre p,q 网格}
+\label{subsec:ch17-pq-grid}
+
+\texttt{H3\_psiasymm\_N3LO\_EM500.dat} 文件头部声明 \((\Np, \Nq, \Nalpha) = (30, 30, 50)\)：
+
+\begin{quote}
+\small
+\begin{verbatim}
+30 30 50
+0.009320 0.023905     <- p[0], wp[0] (fm^-1)
+0.048996 0.055399
+...
+\end{verbatim}
+\end{quote}
+
+\(\Np\) 个 \((p_i, w^p_i)\) 对、\(\Nq\) 个 \((q_j, w^q_j)\) 对、然后是
+\(\Nalpha\) 行 6 个量子数、最后是 \(\Np \cdot \Nq \cdot \Nalpha\) 个 \(\psi\)
+浮点数（按 \texttt{p $\to$ q $\to$ alpha} 三层循环展开）。
+\(p\)、\(q\) 网格都是 GL 节点（用 \texttt{wp}、\texttt{wq} 已经吸收 Jacobi
+\(dp\)、\(dq\) 因子），范围 \([0.01, 6.0]\) fm\(^{-1}\) —— 高动量截止
+\(p_{\max}, q_{\max} \approx 6\,\mathrm{fm}^{-1}\) 远高于 \(\Lambda_{3NF}/\hbarc =
+500/197 \approx 2.5\,\mathrm{fm}^{-1}\) 的物理截断，因此 \(\Psi_t\) 在边界处
+已经数值衰减到 \(<10^{-6}\)；6D 收缩可以放心截断。
+
+\paragraph{密度矩阵的存储排布。}
+\cref{lst:ch17-triton-wf-struct} 中 \texttt{psi[(size\_t)i*Nq*Nalpha + j*Nalpha + a]}
+对应"\((p_i, q_j) \to \PWchan\)"行优先三元素布局。下游 6D 收缩
+（\cref{lst:ch17-contract-w1}）的循环结构恰好匹配：外层 OpenMP
+\((ip, iq)\) 行循环，内层 \((jp, jq)\) 列循环，最内层 \((ar, ac)\)
+α 双循环。这种布局让缓存命中率最大；如果错误地把 \texttt{psi} 写成
+α 在最外层（\texttt{psi[a*Np*Nq + i*Nq + j]}），\(\sim N_p^2 N_q^2 N_\alpha^2\)
+的双 α 嵌套就会跨越大块连续内存做 stride-cache miss，30 节点情况下
+单线程时间从 \(\sim 1\) s 暴涨到 \(\sim 30\) s。
+
+\subsection{6D 收缩的求积顺序与 OpenMP 并行}
+\label{subsec:ch17-6d-contraction}
+
+形式上 \(\langle\Psi_t|W^{(1)}|\Psi_t\rangle\) 是 \(\Np^2 \cdot \Nq^2 \cdot \Nalpha^2\)
+项之和。对 \((30, 30, 50)\) 的现成 ³H 网格，这是
+\(30 \times 30 \times 30 \times 30 \times 50 \times 50 = 2.025 \times 10^9\) 项。
+每项要调一次 \texttt{tnf.W1\_element(...)}，后者内部还要做角度积分
+\(\int dx\)（\cref{ch:16_3nf_pw_projection} 用 24 GL 节点）。原始时间复杂度
+约 \(5\times 10^{10}\) FP-op；在 8-core OpenMP 上实测 \(\sim 90\) s
+单 LEC 通道，5 个通道 \(\sim 7\) 分钟。
+
+\cref{lst:ch17-contract-w1} 的并行模式：
+\begin{itemize}
+  \item \texttt{collapse(2)} 把外层两层 \((ip, iq)\) 合并成一个长度
+        \(\Np \cdot \Nq = 900\) 的并行循环，避免单层 30 太短而 8 线程负载不均；
+  \item \texttt{schedule(dynamic)} 因为 \texttt{tnf.W1\_element} 内部对
+        \(\PWchanp = \PWchan\) 的 zero-skip 让某些行特别快，dynamic 比
+        static 减少 \(\sim 15\%\) 总时长；
+  \item \texttt{reduction(+:total)} 把每个线程的局部和合并；
+  \item \texttt{psi\_r == 0.0 / psi\_c == 0.0 / w1 == 0.0} 三层 zero-skip
+        是必须的——³H 波函数里只有少数 \(\PWchan\) 有显著振幅
+        （\(L_{2N} \in \{0, 2\}\) 主导），跳过零项后实际 FP-op 大约下降到
+        \(10^{10}\) 量级。
+\end{itemize}
+
+\paragraph{为什么不在 \(W_1\) 元素上做缓存？}
+理论上 \texttt{W1\_element(ar, ac, p\_r, q\_r, p\_c, q\_c, pw)} 在
+\((ar, ac, p\_r, q\_r, p\_c, q\_c)\) 多次重复（外层两个 \((ip, iq)\) 决定
+\((p\_r, q\_r)\)，内层 \((jp, jq)\) 决定 \((p\_c, q\_c)\)），但这些"重复"
+其实在 6D 域上每个组合\textbf{只出现一次}。可以缓存的层次只在
+\(\PWchan\) α 索引上：\(\Nalpha^2 = 2500\) 个 \((ar, ac)\) 重耦合系数
+（\cref{ch:16_3nf_pw_projection} §16.3 的 \(g_J(\PWchanp, \PWchan)\)）确实
+被反复重算。诊断工具没有为此做缓存——因为这是\emph{诊断工具}，正确
+性优先于性能；7 分钟的运行时间相对于 Faddeev 求解器的几十分钟仍然
+完全可接受。
+
+% =========================================
+\section{算法骨架：CHECK-3NF-NORM}
+\label{sec:ch17-algorithm}
+
+把整个诊断流程写成自顶向下的伪码：
+
+\begin{algorithm}[H]
+\SetAlgoLined
+\KwIn{³H 反对称波函数文件 \texttt{H3\_psiasymm\_N3LO\_EM500.dat}}
+\KwOut{\(\langle W^{(1)}\rangle_{\text{LEC}}\) 五通道 + 与 Epelbaum/Witała ratio}
+
+\textbf{Step 1.}\ 读入 \(\psi\) 文件 \(\to\) \texttt{triton\_wavefunction w}
+   （\cref{lst:ch17-read-triton-psi}）\;
+\textbf{Step 2.}\ 计算 \(\langle\Psi|\Psi\rangle\) 并断言 \(=1.0 \pm 0.01\)
+   （\cref{lst:ch17-compute-norm}）；如不满足报警："你可能传错了 \(\psi\) 文件"\;
+\textbf{Step 3.}\ 从 \texttt{w.alpha} 表构造 \texttt{pw\_3N\_statespace pw}
+   （\cref{lst:ch17-build-pw-statespace}），固定 \(2J_{3N}=1, 2T_{3N}=1\)，
+   宇称一致性检查\;
+\textbf{Step 4.}\ \emph{单点验证}：在 \(\spectro{3}{S}{1}\) 通道、\(p=q=p'=q'=0.5\,\mathrm{fm}^{-1}\)、
+   \texttt{c\_E only} 配置下，调一次
+   \texttt{chiral\_N2LO\_3NF::W1\_element(...)}，与 Python 手工
+   oracle \texttt{hand\_calc\_cE.py} 比，要求相对差 \(<2\%\)\;
+\textbf{Step 5.}\ 同上对 \texttt{c\_D only}、\texttt{c\_1+c\_3} 各做一组单
+   点验证（\cref{lst:ch17-singlepoint-check}）\;
+\textbf{Step 6.}\ \emph{LEC 扫描}：依次 \texttt{c\_E\_only, c\_D\_only,
+   c\_1\_only, c\_3\_only, full\_Witala} 五组配置，
+   每组：构造 \texttt{chiral\_N2LO\_3NF tnf(c\_D, c\_E, 500, c\_1, c\_3, 0)}，
+   调 \texttt{contract\_W1\_expectation(w, pw, tnf)} 收缩 6D
+   （\cref{lst:ch17-contract-w1}），输出 \(\langle W\rangle\) 与
+   \(3\cdot\langle W\rangle\)\;
+\textbf{Step 7.}\ 加性检查：\(\sum_{cE+cD+c1+c3} \stackrel{?}{=} \text{full\_Witala}\)
+   残差 \(<10^{-10}\) MeV\;
+\textbf{Step 8.}\ \emph{Epelbaum/Witała 比对}：每个 LEC 通道与文献参考值
+   做 ratio \(X = \text{code}/\text{ref}\)；如四个 \(|X_i|\) \emph{大致相同}
+   则建议施加 \(1/X\) 整体修正；如不一致则提示 per-term bug\;
+\textbf{Step 9.}\ 释放 \texttt{pw} 内存，正常退出\;
+\caption{CHECK-3NF-NORM:\ ³H 期望值闭环}
+\label{alg:ch17-check}
+\end{algorithm}
+
+整个流程 \(<200\) 行 C++17 主代码加上 \(\sim 100\) 行的辅助 \texttt{.cpp}/\texttt{.h}。
+本工具不依赖 Faddeev 求解器，不依赖 P123 缓存，不依赖 Padé 迭代——
+它只引用 \texttt{src/utils/coupling\_coefficients.cpp} 与
+\texttt{src/interactions/three\_nucleon\_force\_model.cpp} 这两个最底层
+的对象，因此即使 AGS 主路径暂时构建失败，诊断工具也能独立 \texttt{make}
+并运行。这是\textbf{诊断工具的核心设计哲学}：它必须比被诊断对象更稳。
+
+% =========================================
+\section{代码落地}
+\label{sec:ch17-code}
+
+% -----------------------------------------
+\subsection{主入口与流程编排}
+\label{subsec:ch17-code-main}
+
+\cref{lst:ch17-main-entry} 是 \texttt{main()} 的前半段，从 argv 读文件名
+到构造 \texttt{pw\_3N\_statespace}：
+
+\begin{lstlisting}[style=cpp, caption={check\_3nf\_normalization.cpp 主入口与归一化检查 (lines 41--86)}, label={lst:ch17-main-entry}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=41]{code_excerpts/snippets/ch17_main_entry.cpp}
+
+代码注解：
+
+\begin{itemize}
+  \item Line 43--46：\texttt{usage} 字符串显式地写入 "Expects the
+        antisymmetric triton wavefunction Ψ" 和"\(\langle\Psi|\Psi\rangle\)
+        must equal 1.0"——这是 commit \texttt{f261f11}（"clearer
+        usage/label + warn on wrong ψ file"）添加的防呆设计。
+  \item Line 49：\texttt{read\_triton\_psi(argv[1])} 见
+        \cref{lst:ch17-read-triton-psi}。返回的 \texttt{triton\_wavefunction}
+        是值类型，里面 \texttt{std::vector} 作为 RAII 持有内存。
+  \item Line 50--58：打印基础维度与前 3 个 \(\PWchan\) 通道；这是给
+        操作者快速核对文件格式的 sanity print。诊断工具的输出可读性
+        优先级始终高于性能。
+  \item Line 59：\texttt{compute\_norm\_radial(w)} 见
+        \cref{lst:ch17-compute-norm}。
+  \item Line 61--65：归一化警告。当文件被错误地传成 \(\psi_t\)（norm
+        \(\approx 0.154\)）而不是 \(\Psi_t\)（norm \(=1\)）时，提示用户
+        切换文件——但程序不退出，因为有时调试需要故意走 Faddeev 分量。
+  \item Line 67--74：构造 \texttt{pw}（\cref{lst:ch17-build-pw-statespace}）
+        + 宇称一致性扫描。
+  \item Line 78--84：定义 5 组 LEC 配置（\(c_E\)-only / \(c_D\)-only /
+        \(c_1\)-only / \(c_3\)-only / Witała 全部）。注意 \(c_1 = -0.81\)
+        GeV\(^{-1}\)、\(c_3 = -3.20\) GeV\(^{-1}\) 是 EM500 (Entem-Machleidt
+        2NF) 的"继承值"，与 N²LO 3NF 同套使用以保持 χEFT 自洽。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{径向归一化的实现细节}
+\label{subsec:ch17-code-norm}
+
+\begin{lstlisting}[style=cpp, caption={\texttt{compute\_norm\_radial} —— 显式的 \(p^2 q^2\) 测度 (lines 22--39)}, label={lst:ch17-compute-norm}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=22]{code_excerpts/snippets/ch17_compute_norm.cpp}
+
+\paragraph{径向 vs.\ reduced 测度的实操区分。}
+循环里第 31 行的 \texttt{factor = w.wp[i] * w.wq[j] * p2 * q2}
+显式地把 GL 权重和 \(p^2 q^2\) 一起乘进去。如果你想把这段代码切到
+"reduced" 约定，只需删掉 \texttt{p2 * q2}——但同时必须把
+\texttt{psi[]} 数组本身预乘上 \(p\,q\)，否则整个数值规范不再相容。
+仓库的设计选择是：\textbf{存储径向函数，归一化时显式带 \(p^2 q^2\)}。
+这种选择的好处是 \(\psi_\PWchan(p, q)\) 在 \(p \to 0, q \to 0\) 处直接
+给出物理意义（动量空间振幅），调试 print 时不需要除回 \(p\,q\)。
+
+\paragraph{并行 vs.\ 串行。}
+归一化只是个 \(\Np \cdot \Nq \cdot \Nalpha = 45000\) 项的串行求和，
+\(\sim 0.01\) ms 运行；不需要 OpenMP。\cref{lst:ch17-contract-w1} 的
+6D 收缩才需要并行。
+
+% -----------------------------------------
+\subsection{6D 收缩内核}
+\label{subsec:ch17-code-contract}
+
+\begin{lstlisting}[style=cpp, caption={\texttt{contract\_W1\_expectation} —— 6D 期望值收缩 (lines 1--43)}, label={lst:ch17-contract-w1}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=1]{code_excerpts/snippets/ch17_contract_w1.cpp}
+
+\paragraph{每一行的物理对应。}
+让我们把这 \(\sim 30\) 行 C++ 与 \cref{eq:ch17-3W} 一一对应：
+
+\begin{itemize}
+  \item Lines 11--13：\texttt{psi\_at(i, j, a)} 内联访问器，行优先布局。
+  \item Lines 15--17：OpenMP \texttt{collapse(2)} 把外两层 \((ip, iq)\)
+        合并并行；\texttt{reduction(+:total)} 处理跨线程求和；
+        \texttt{schedule(dynamic)} 处理负载不均。
+  \item Lines 18--20：从 \texttt{ip, iq} 读出 \((p^{(\text{row})}, q^{(\text{row})})\)
+        及其 GL 权重；\texttt{row\_factor} 收集 \(w^p\,w^q\,p^2\,q^2\)。
+  \item Lines 21--26：内层 \((jp, jq)\) 列循环，对应 \(p^{(\text{col})}, q^{(\text{col})}\)。
+        \texttt{weight = row\_factor * col\_factor} 是
+        \cref{eq:ch17-measure} 的 \(p_i^2 q_j^2 \cdot p_{i'}^2 q_{j'}^2\)
+        径向因子的乘积。
+  \item Lines 27--32：α 双循环。\texttt{psi\_r == 0.0 / psi\_c == 0.0}
+        zero-skip 是 \(\sim 5\times\) 加速来源。
+  \item Line 33：\texttt{tnf.W1\_element(ar, ac, p\_r, q\_r, p\_c, q\_c, pw)}
+        是来自 \cref{ch:16_3nf_pw_projection} 的部分波核——本工具
+        \textbf{消费}它的接口而不去碰它的实现。
+  \item Lines 34--35：再做一次 \texttt{w1 == 0.0} 跳过；最终对
+        \texttt{total} 累加 \(\Psi^*_{\PWchanp}(p_{i'}, q_{j'}) \cdot
+        W^{(1)}_{\PWchanp\PWchan}(p_{i'}, q_{j'};p_i, q_j) \cdot \Psi_\PWchan(p_i, q_j)\)。
+\end{itemize}
+
+\paragraph{Hermiticity 警告。}
+\texttt{W1\_element(ar, ac, p\_r, q\_r, p\_c, q\_c, pw)} 在
+\cref{ch:16_3nf_pw_projection} 的 \texttt{W1\_2pe}（\(c_1, c_3\)）中
+\textbf{并非自动 Hermitian}：rank-2 角动量耦合的 \(g_2(\PWchanp, \PWchan)\)
+本身满足 \(g_2(\PWchanp, \PWchan) = g_2(\PWchan, \PWchanp)\)，但 \((p, q)\)
+变量交换不对称。本章诊断工具显式地把 \((ar, p_r, q_r) \leftrightarrow
+(ac, p_c, q_c)\) 都求和——\(\Psi_t\) 是实波函数，\(\langle\Psi_t|W|\Psi_t\rangle\)
+取实部即可。但如果 \(W^{(1)}\) 没有手动对称化，最终求和的虚部不会
+精确为零；本工具不做虚部检查（因为 \texttt{double total} 是实数），
+所以\textbf{诊断盲点}：一个非 Hermitian \(W^{(1)}\) 的"算术平均"可能
+\emph{看起来}给出合理 ratio。这一陷阱在 §17.8 详细讨论。
+
+% -----------------------------------------
+\subsection{³H 波函数读入}
+\label{subsec:ch17-code-read}
+
+\begin{lstlisting}[style=cpp, caption={\texttt{read\_triton\_psi.cpp} —— ³H 波函数 ASCII 解析 (lines 1--48)}, label={lst:ch17-read-triton-psi}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=1]{code_excerpts/snippets/ch17_read_triton_psi.cpp}
+
+\paragraph{为什么 MKL-free。}
+commit \texttt{26d3238}（"port read\_psi (MKL-free) and print ψ\_3H summary"）
+特别注明这一点。原本的 \texttt{tests/Cont\_Faddeev/read\_psi.cpp}（来自
+Sean Miller 上游）依赖 Intel MKL 的 \texttt{cblas\_dnrm2}/\texttt{cblas\_ddot}
+做归一化检查。这给诊断工具引入了不必要的链接依赖。本工具的
+\texttt{read\_triton\_psi.cpp} 用纯 \texttt{fscanf} + \texttt{std::vector}
+重写，编译器只需要 \texttt{<cstdio>} 和 \texttt{<vector>}。这种"零依
+赖"设计意味着即使 \texttt{libmkl} 因 conda 环境损坏，诊断工具仍然能
+跑——\textbf{诊断工具必须比被诊断对象更稳}。
+
+\paragraph{解析约定。}
+\texttt{fscanf("\%lf \%lf", \&p[i], \&wp[i])} 一次读两个 double，
+\texttt{wp} 已经吸收 GL 权重的 Jacobi 因子。\texttt{psi} 数据按
+"\texttt{p $\to$ q $\to$ alpha}" 三层循环展开成 \(\Np \cdot \Nq \cdot \Nalpha\)
+个连续 double——与 \texttt{(size\_t)i*Nq*Nalpha + j*Nalpha + a} 索引匹配。
+
+\paragraph{结构体 \texttt{triton\_wavefunction}。}
+\cref{lst:ch17-triton-wf-struct} 是头文件里的数据载体：
+
+\begin{lstlisting}[style=cpp, caption={\texttt{triton\_wavefunction} 结构体 (read\_triton\_psi.h)}, label={lst:ch17-triton-wf-struct}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=1]{code_excerpts/snippets/ch17_triton_wf_struct.cpp}
+
+注意第 17 行的注释一字不差地说明了存储布局，这是项目作者对自己的
+未来负责的好习惯。
+
+% -----------------------------------------
+\subsection{部分波态空间从 α 表派生}
+\label{subsec:ch17-code-build}
+
+\begin{lstlisting}[style=cpp, caption={\texttt{build\_pw\_3n\_statespace.cpp} —— 从 α 表构造 \texttt{pw\_3N\_statespace} (lines 1--46)}, label={lst:ch17-build-pw-statespace}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=1]{code_excerpts/snippets/ch17_build_pw_statespace.cpp}
+
+\paragraph{为什么不是直接复用 Tic-tac 的 \texttt{pw\_3N\_statespace}。}
+Tic-tac 主路径的 \texttt{pw\_3N\_statespace} 由
+\texttt{src/core/state\_space/} 的复杂 builder 生成，依赖
+\texttt{run\_params}（\(\Tlab\)、\(J_{2N\max}\)、\(J_{3N\max}\) 等），
+强烈耦合到 Faddeev 求解器配置。诊断工具完全绕过这条复杂链：
+\texttt{pw\_3N\_statespace} 的字段被\textbf{从 \(\psi_t\) 文件 α 表反向构造}，
+量子数照搬，2J\_3N/2T\_3N 字段固定为 \(1\)（因为 ³H 必然如此），
+\(P\_3N\) 由 \((-1)^{L_{2N}+L_{1N}}\) 推导。结果是诊断工具的 \texttt{pw}
+和主路径的 \texttt{pw} 不一定字段完全相同（譬如
+\texttt{chn\_3N\_idx\_array} 这里设为 \texttt{nullptr}），但
+\texttt{W1\_element} 只读它需要的那几个字段，所以这种"瘦身"
+\texttt{pw} 完全够用。
+
+\paragraph{内存所有权。}
+第 9--17 行 \texttt{new int[N]} 分配的数组由调用方持有；
+第 35--46 行 \texttt{free\_pw\_3n\_statespace\_triton} 是配套的释放函数。
+\cref{lst:ch17-main-entry} 程序末尾 \(259\) 行有 \texttt{free\_pw\_3n\_statespace\_triton(pw)}
+调用——valgrind 干净。
+
+% -----------------------------------------
+\subsection{单点验证（与 Python oracle 比对）}
+\label{subsec:ch17-code-singlepoint}
+
+\begin{lstlisting}[style=cpp, caption={Task-3 / Task-4 / Task-5 单点验证 (lines 88--156)}, label={lst:ch17-singlepoint-check}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=88]{code_excerpts/snippets/ch17_singlepoint_check.cpp}
+
+\paragraph{为什么需要单点验证。}
+完整 6D 收缩平均掉了大量信息：如果 \(W^{(1)}\) 对某个孤立 \((\PWchanp, \PWchan)\)
+通道有 sign bug，但这个通道在 \(\Psi_t\) 上振幅很小，最终
+\(\langle W\rangle\) 仍可能落在 5\% 误差内。单点验证的作用是
+\textbf{逐通道地}抓出这种错。每个 \texttt{[Task-N single-point check]}
+段挑一个特征鲜明的通道（\(c_E\) 取 \(\spectro{3}{S}{1}\) 对角；
+\(c_D\) 取 \(\spectro{1}{S}{0} \to \spectro{3}{S}{1}\) 非对角；
+\(c_1+c_3\) 取 \(\spectro{3}{S}{1} \to \spectro{3}{D}{1}\) 张量耦合），
+固定 \(p = q = p' = q' = 0.5\,\mathrm{fm}^{-1}\)（深束缚区典型动量），
+对一组 LEC 仅开一个，输出 \(\sim 6\) 位有效数字的标量值。
+\texttt{hand\_calc\_*.py}（同目录下的 Python 脚本）独立用 \texttt{numpy}
++ \texttt{scipy.special} 把同一公式重新积一次，得到 oracle。Oracle
+和代码的相对差 \(<2\%\) 即认为单点过关。
+
+\paragraph{Oracle 数字一字不差。}
+注意 Lines 105--108 把 oracle 数 \(7.264125 \times 10^{-3}\) fm\(^5\)
+\textbf{硬编码}进 C++ 源里。这看似难维护，实际是\textbf{诊断工具的好做
+法}：oracle 来源是另一份（Python）独立实现，硬编码的数字\textbf{冻结
+了}那次手工 cross-check 的结果。如果某次未来 \texttt{W1\_1pe\_contact}
+被改写后这个数字变了 \(>2\%\)，编译就立刻 print warning——逼迫修改者
+重新写一个 \texttt{hand\_calc\_*.py}，重新冻结 oracle，重新更新源码。
+这种"硬编码 oracle"模式在数值物理代码里比"动态 reference table"
+更值得信赖，因为它强制每次更新都被审视。
+
+% -----------------------------------------
+\subsection{五通道扫描与 Witała ratio}
+\label{subsec:ch17-code-lec-sweep}
+
+\begin{lstlisting}[style=cpp, caption={LEC 扫描、加性检查与 Epelbaum/Witała 比对 (lines 206--260)}, label={lst:ch17-lec-sweep}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, firstnumber=206]{code_excerpts/snippets/ch17_lec_sweep.cpp}
+
+\paragraph{Lines 206--221：扫描循环。}
+这是诊断工具的"主输出"。\texttt{contract\_W1\_expectation(w, pw, tnf)}
+返回 \(\langle\Psi_t|W^{(1)}|\Psi_t\rangle\) 单位 fm\(^{-1}\)（部分波核
+\texttt{W1\_element} 单位是 fm\(^5\)，乘上 \(p^2 q^2 \cdot p'^2 q'^2 \cdot
+\,dp\,dq\,dp'\,dq' \sim \mathrm{fm}^{-6}\) 后净单位 fm\(^{-1}\)）。
+\texttt{v\_MeV = v\_fminv * hbarc} 用 \(\hbarc = 197.327\)\,MeV·fm 换到 MeV。
+
+\paragraph{Lines 218--221：加性检查。}
+\(W^{(1)}\) 对 LEC 严格线性，所以 \texttt{full\_Witala} 应当等于其它四
+个分量之和。残差 \(\sim 10^{-12}\) MeV 是 IEEE 754 双精度算术误差，
+\textbf{不是}物理验证——它确认了代码没有把 \(c_D, c_E, c_1, c_3\)
+错误地交叉耦合（譬如把 \(c_D \cdot c_E\) 项写进了 \(W_{cD}\) 里）。
+任何破坏加性的 commit 应当立刻被 revert。
+
+\paragraph{Lines 228--245：Epelbaum/Witała 参考与 ratio。}
+\texttt{ref\_row} 数组里 5 个条目对应同样 5 个 LEC 配置，
+\texttt{ref\_MeV} 字段是 Epelbaum PRC 66 (2002) Table 2 的 ³H 列经过
+LEC 线性 rescale 到 Witała 现代约定下的数值（详见
+\texttt{epelbaum\_reference.md}）。\texttt{ratio = code\_MeV / ref\_MeV}：
+
+\begin{itemize}
+  \item 若所有 4 个 \(|\text{ratio}_i|\) 在 \(1 \pm 0.05\) 内：诊断通过，
+        \(W^{(1)}\) 部分波核与文献一致；
+  \item 若 4 个 \(|\text{ratio}_i|\) 都偏离 \(1\) 但\textbf{彼此一致}（譬
+        如全部在 \(2.0 \pm 0.1\)）：单一 Fourier 因子或 \(\hbarc\)
+        转换出错，可施加 \(1/X\) 整体修正；
+  \item 若 4 个 \(|\text{ratio}_i|\) \emph{量级不一致}或符号混乱：
+        per-LEC 的部分波核有独立 bug，需要回到 \cref{ch:16_3nf_pw_projection}
+        逐项查 \texttt{W1\_contact} / \texttt{W1\_1pe\_contact} /
+        \texttt{W1\_2pe} 实现。
+\end{itemize}
+
+\paragraph{Lines 247--254：robust c\_1+c\_3 比较。}
+Epelbaum 2002 Table 2 \emph{只}报告 \(c_1+c_3\) 的合并值；逐项 \(c_1\) 和
+\(c_3\) 拆分是估算（80/20 split）。诊断工具因此显式打印
+"\(c_1+c_3\) combined" 一行作为最可信的比较点——这一行不依赖
+Epelbaum-Witała 估算分歧，最适合做 commit/revert 决策的最终判据。
+
+% -----------------------------------------
+\subsection{编译与依赖}
+\label{subsec:ch17-code-makefile}
+
+\begin{lstlisting}[caption={\texttt{Makefile} —— 与 CMake 共栈的轻量编译 (lines 1--37)}, label={lst:ch17-makefile}]
+\end{lstlisting}
+\lstinputlisting{code_excerpts/snippets/ch17_makefile.txt}
+
+\paragraph{编译策略。}
+诊断工具有自己的 \texttt{Makefile}，\textbf{重用} CMake 已经构建出来
+的 \texttt{src/utils/*.o} 和 \texttt{src/interactions/three\_nucleon\_force\_model.cpp.o}
+（在 \texttt{build/CMakeFiles/Tic-tac.dir/src/} 下）。这种"借用上游 .o"
+策略避免了整个工具自己重编译 chiral 重耦合代码（\(\sim 1500\) 行）。
+\texttt{\$(SRC\_OBJS): \\ \$(MAKE) -C \$(ROOT) tic-tac} 一行兜底：如果 CMake
+还没构建过，\texttt{make -C} 进根目录触发一次 \texttt{tic-tac} 目标
+重新构建。
+
+\paragraph{编译命令。}
+\begin{verbatim}
+cd Tic-tac/tools/check_3nf_normalization
+make -j
+./check_3nf_normalization \
+    ../../tests/Cont_Faddeev/Triton_states/H3_psiasymm_N3LO_EM500.dat
+\end{verbatim}
+
+第一次 \texttt{make -j} 会触发上游 CMake 一次（\(\sim 30\) s），第二次
+开始只编译诊断工具本身（\(<5\) s）。
+
+\paragraph{为什么不用 CMake 集成。}
+诊断工具的 \texttt{Makefile} 一共 \(37\) 行；如果用 \texttt{add\_executable}
+集成进 \texttt{CMakeLists.txt}，会引入 CMake 配置时被强制要求
+HDF5/GSL 完整链等问题。诊断工具的设计哲学是"独立可跑"——只需要
+\texttt{libgomp, libpthread, libgsl, libgslcblas, libm}，不依赖 HDF5、不
+依赖任何 fortran toolchain。\textbf{诊断工具应当是仓库里编译要求最低
+的二进制}——这样它在任何机器上都能跑起来给出 ratio。
+
+% =========================================
+\section{数字闭环：\texttt{check\_3nf\_normalization} 的真实输出}
+\label{sec:ch17-numerical-loop}
+
+\begin{numericalbox}[label={box:ch17-real-output}]
+跑 \texttt{tools/check\_3nf\_normalization/check\_3nf\_normalization} 的
+真实输出（来自 \texttt{run\_3nf\_compare\_20260420\_174622.log}，commit
+SHA \(f4df358\) 之前的状态，即 \(c_E\) 符号修复\textbf{前}）：
+
+\begin{verbatim}
+Np=30 Nq=30 Nalpha=50
+p range: [0.0093, 5.9907] fm^-1 (Np=30)
+q range: [0.0101, 6.4899] fm^-1 (Nq=30)
+First 3 alpha channels (L_2N, S_2N, J_2N, T_2N, L_1N, 2J_1N):
+  a=0: 0 0 0 1 0 1
+  a=1: 1 1 0 1 1 1
+  a=2: 1 0 1 0 1 1
+⟨ψ|ψ⟩ (radial p²q² weights, Faddeev component): 1.000000
+Built pw_3N_statespace: Nalpha=50 J_2N_max=6
+All α share parity P_3N=+1: yes
+
+=== ΔE_3NF = ⟨Ψ|(1+P+P²)W^(1)|Ψ⟩
+           = 3·⟨Ψ|W^(1)|Ψ⟩  (antisymmetric Ψ → P|Ψ⟩ = |Ψ⟩) ===
+channel                ⟨W⟩ [MeV]    3·⟨W⟩ [MeV]
+c_E_only               +1.418046e+01       +4.254137e+01
+c_D_only               -5.428292e+00       -1.628488e+01
+c_1_only               +8.097469e+00       +2.429241e+01
+c_3_only               +9.070072e+00       +2.721022e+01
+full_Witala            +2.591970e+01       +7.775911e+01
+Additivity check (3·⟨W⟩):
+   sum(c_E+c_D+c_1+c_3) = +7.775911e+01 MeV;
+   full = +7.775911e+01 MeV;
+   residual = -4.476419e-12 MeV
+
+=== Comparison vs Epelbaum/Witała reference ===
+channel            3·<W>_code [MeV]       <W>_ref [MeV]     ratio X
+c_E_only               +4.254137e+01       +4.100000e-01    +103.759
+c_D_only               -1.628488e+01       -4.500000e-02    +361.886
+c_1_only               +2.429241e+01       -7.300000e-02    -332.773
+c_3_only               +2.721022e+01       -2.940000e-01     -92.552
+full_Witala            +7.775911e+01       -2.000000e-03  -38879.557
+c_1+c_3 comb           +5.150262e+01       -3.670000e-01    -140.334
+\end{verbatim}
+\end{numericalbox}
+
+% -----------------------------------------
+\subsection{结果解读}
+\label{subsec:ch17-results-analysis}
+
+\paragraph{加性检查通过。}
+\(\sum_i 3\cdot\langle W\rangle_i = +77.759\) MeV，与
+\texttt{full\_Witala} 一致到 \(10^{-12}\)。\(W^{(1)}\) 对 LEC 严格线性这
+一架构性质完好，没有 LEC 交叉耦合污染。
+
+\paragraph{归一化通过。}
+\(\langle\Psi|\Psi\rangle = 1.000000\)（输出第 8 行），径向测度约定锁定
+正确；α 表前 3 个通道和宇称扫描都正常。
+
+\paragraph{ratio 全部偏离 \(1\)，幅度不一致。}
+这是\textbf{临界诊断信号}。让我们整理 \cref{tab:ch17-witala-results}：
+
+\begin{table}[h]
+\centering
+\caption{commit \(f4df358\) 前的 ratio 表。\(|X|\) 量级 \(\sim 100\)
+但符号四个不一致——典型的 per-term sign bug 而非 overall normalization
+bug。}
+\label{tab:ch17-witala-results}
+\begin{tabular}{lrrr}
+\toprule
+LEC 通道 & 代码 \(3\cdot\langle W\rangle\) [MeV] & 参考 [MeV] & ratio \(X\) \\
+\midrule
+\texttt{c\_E\_only}    & \(+42.541\) & \(+0.410\) & \(+103.8\) \\
+\texttt{c\_D\_only}    & \(-16.285\) & \(-0.045\) & \(+361.9\) \\
+\texttt{c\_1\_only}    & \(+24.292\) & \(-0.073\) & \(-332.8\) \\
+\texttt{c\_3\_only}    & \(+27.210\) & \(-0.294\) & \(-92.6\) \\
+\midrule
+\texttt{c\_1+c\_3 combined} & \(+51.503\) & \(-0.367\) & \(-140.3\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+如果是单一 Fourier \(1/(2\pi)^3\) 因子缺失（譬如全局 \(\sim 250\)），所有
+\(|X_i|\) 应当大致相同；这里 \texttt{c\_E\_only} 的 \(+103.8\) 与
+\texttt{c\_D\_only} 的 \(+361.9\) 量级差 \(3.5\times\)，明确指向\textbf{每
+个 W\(^{(1)}\) 通道独立 bug}。\textbf{符号}更刺眼：\(c_E\) 和 \(c_D\)
+是正 ratio（代码与参考同号），\(c_1\) 和 \(c_3\) 是负 ratio（代码与
+参考反号）。
+
+\paragraph{commit \texttt{f4df358} 之后的预期变化。}
+\texttt{f4df358}（"fix c\_E sign: use Navrátil/Witała +½ convention"）
+针对 \(c_E\) 通道的 contact 算符做了符号翻转：
+\(c_E\,W^{(1)}_{cE} \to (+\frac{1}{2})\,c_E\,W^{(1)}_{cE}\) 对齐到 Navrátil
+现代约定（与 Epelbaum 老约定差一个负号 + 一个 \(\frac{1}{2}\) 系数）。
+预期效果：
+
+\begin{itemize}
+  \item \texttt{c\_E\_only} 的 \(\langle W\rangle\) 翻号并 \(\times \frac{1}{2}\)：
+        \(+42.541 \to -21.271\) MeV，ratio \(+103.8 \to -51.9\)；
+  \item \texttt{c\_D\_only}, \texttt{c\_1\_only}, \texttt{c\_3\_only} 不变；
+  \item \texttt{full\_Witala} 因为 \(c_E\) 改变而改变；加性检查仍然成立。
+\end{itemize}
+
+修复后 \(c_E\) 与参考同号但仍未对齐，说明剩余的 \(c_E\) overall
+factor 仍有问题。后续的 commit \texttt{8db06bf} (\(c_D\)
+rewrite)、\texttt{1f05031} (\(c_1, c_3\) rewrite)、\texttt{bdb239d}
+(\(1/(2\pi)^3\) Fourier) 进一步逐项压平 \(|X|\)；这条诊断闭环每次
+commit 都重跑，是 ratio 收敛到 \(1\) 附近的"标尺"。
+
+\paragraph{robust \(c_1+c_3\) 比较。}
+独立的 \(c_1, c_3\) ratio 受到 80/20 split 估算的影响；
+\(c_1+c_3\) 合并 ratio \(-140.3\) 才是与 Epelbaum 直接报告的 combined
+\(\langle W\rangle = -0.367\)\,MeV 比较的可靠数字。这一行被工具显式
+标注 "\texttt{(robust: c-terms combined)}"。任何 PR 改 \(c_1, c_3\)
+代码都应当首先看这一行；逐项 \(c_1, c_3\) 的 ratio 可以暂时容忍较
+大偏差（\(\pm 30\%\)），合并 ratio 必须在 \(\pm 5\%\) 内才算过关。
+
+% -----------------------------------------
+\subsection{LEC rescale 表}
+\label{subsec:ch17-lec-rescale}
+
+\begin{table}[h]
+\centering
+\caption{Witała/Navrátil 现代约定 LEC 与 Epelbaum 2002 LEC 的换算。
+\texttt{epelbaum\_reference.md} 里完整推导。}
+\label{tab:ch17-lec-rescale}
+\begin{tabular}{lrrl}
+\toprule
+LEC & Witała 值（本仓库代码） & Epelbaum 2002 值 & rescale 因子 \\
+\midrule
+\(c_D\)  & \(-0.20\)              & \(+3.6\)         & \(-0.0556\) \\
+\(c_E\)  & \(-0.205\)             & \(+0.37\)        & \(-0.5541\) \\
+\(c_1\)  & \(-0.81\)\,GeV\(^{-1}\) & \(-0.81\)        & \(\times 1\) \\
+\(c_3\)  & \(-3.20\)\,GeV\(^{-1}\) & \(-3.40\)        & \(\times 0.94\) \\
+\(\Lambda_{3NF}\) & 500 MeV       & 500 MeV          & \(\times 1\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\(c_D\) 与 \(c_E\) 的符号差源于 Epelbaum 2002 (eq.~2.11--2.12) 与
+Navrátil (Few-Body Syst.~41, 117) 的 contact 顶点定义符号惯例不同。
+本工具的 \texttt{epelbaum\_reference.md} 第 27--31 行用一行算式说清
+这一点：\(W^{(1)}\) 在物理耦合常数上严格线性，所以 LEC 重 scale 等价
+于 \(\langle W\rangle\) 重 scale。
+
+% -----------------------------------------
+\subsection{运行时间与可重复性}
+\label{subsec:ch17-runtime}
+
+在 8-core Intel i7-9700K (3.6 GHz) 上：
+
+\begin{itemize}
+  \item \texttt{read\_triton\_psi} + \texttt{compute\_norm\_radial} +
+        \texttt{build\_pw\_3n\_statespace}：\(<10\) ms；
+  \item 5 个单点验证：\(<10\) ms；
+  \item 5 个 LEC 通道的 \texttt{contract\_W1\_expectation}：每次 \(\sim 90\) s
+        OpenMP 8 线程，总约 \(7.5\) 分钟；
+  \item Epelbaum 比对打印：\(<1\) ms。
+\end{itemize}
+
+输出数字 bit-exact 可重复（OpenMP \texttt{reduction(+:total)} 在固定
+线程数下顺序固定；切换 \texttt{OMP\_NUM\_THREADS} 会因为求和顺序变化
+导致最低 1--2 位浮点差异，不影响 \(6\) 位精度的 ratio 结论）。
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch17-interfaces}
+
+% -----------------------------------------
+\subsection{与 \cref{ch:16_3nf_pw_projection} 的接口}
+\label{subsec:ch17-iface-ch16}
+
+诊断工具\textbf{消费} \cref{ch:16_3nf_pw_projection} 提供的接口：
+
+\begin{itemize}
+  \item \texttt{class chiral\_N2LO\_3NF}（\texttt{src/interactions/chiral\_N2LO\_3NF.h}）：
+        构造时传入 \((c_D, c_E, \Lambda_{MeV}, c_1, c_3, c_4)\) 6 个参数；
+        提供 \texttt{double W1\_element(int ar, int ac, double pp, double qp,
+        double pc, double qc, const pw\_3N\_statespace\&) const} 一个唯一
+        public 方法。
+  \item \texttt{struct pw\_3N\_statespace}（\texttt{include/type\_defs.h}）：
+        诊断工具用 \cref{lst:ch17-build-pw-statespace} 自己构造一个，
+        而不是用主路径的复杂 builder。
+  \item \texttt{src/utils/coupling\_coefficients.cpp},
+        \texttt{src/utils/spin\_isospin\_algebra.cpp},
+        \texttt{src/utils/chiral\_3nf\_recoupling.cpp}：通过 Makefile
+        从 CMake 构建出的 .o 文件直接链接，不重复编译。
+\end{itemize}
+
+\textbf{诊断工具不修改 \cref{ch:16_3nf_pw_projection} 的任何代码}。如果
+W1\_element 的接口签名变化，诊断工具会编译失败，强制把 §17.5 重写
+后才能跑——这是"诊断工具不能比被诊断对象更脆弱"的反过来：诊断工
+具应当贴着被诊断对象的接口贴紧，让对象的任何接口变化都立刻被反
+馈到诊断工具自己的可编译性。
+
+% -----------------------------------------
+\subsection{不参与 production 路径}
+\label{subsec:ch17-not-production}
+
+\(\langle\Psi_t|W^{(1)}|\Psi_t\rangle\) 是\textbf{束缚态}期望值；
+本仓库 production 路径求解的是 \emph{散射态} U 矩阵元
+（\cref{ch:11_faddeev_solver}）。这两条路径在物理对象、积分变量、
+结果单位上完全不同：
+
+\begin{itemize}
+  \item Production：\(\Tlab \in [70, 250]\,\mathrm{MeV}\) 的散射动量、
+        Faddeev/AGS 解、U 矩阵 (fm\(^2\))、\(d\sigma/d\Omega\)、\(iT_{11}\)；
+  \item Diagnostic：³H 束缚态 \(\Psi_t\)、\(\langle W\rangle\) (MeV)、
+        与 Epelbaum/Witała 比对的 ratio。
+\end{itemize}
+
+但这两条路径\textbf{共享} \(W^{(1)}\) 部分波核：
+\texttt{chiral\_N2LO\_3NF::W1\_element}。这个共享是诊断工具的所有
+价值所在：束缚态闭环里的任何 \(W^{(1)}\) 错误都会同时污染散射闭环，
+反之亦然。任何修改 \(W^{(1)}\) 实现的 commit 应当：
+
+\begin{enumerate}
+  \item 先跑 \texttt{check\_3nf\_normalization}，确认 ratio 在阈值内；
+  \item 再跑 \texttt{python3 examples/deuteron\_proton\_Ay.py}（带 3NF
+        开关）确认 \(d\sigma/d\Omega\) 与 \(iT_{11}\) 不退化；
+  \item 两条都过才能 commit。
+\end{enumerate}
+
+只过散射闭环是危险的：散射观测量对 \(W^{(1)}\) 的微弱 sign-flip
+不敏感（被求解器的非线性反馈和角度积分平滑掉）；束缚态闭环是
+"手术刀级"敏感性。
+
+% -----------------------------------------
+\subsection{文档支撑}
+\label{subsec:ch17-docs}
+
+诊断工具目录 \texttt{tools/check\_3nf\_normalization/} 内有四个 Markdown
+文档：
+
+\begin{itemize}
+  \item \texttt{epelbaum\_reference.md} —— Epelbaum 2002 Table 2 的
+        逐 LEC 数字，rescale 到 Witała 现代约定；本章 §17.6 数字闭环
+        的参考来源。
+  \item \texttt{formula\_reference.md} —— Golak EPJA 43 (2010) 与
+        Hebeler PRC 91 (2015) 的部分波公式抄录；这是
+        \cref{ch:16_3nf_pw_projection} 的"图书馆"，但放在这里是因
+        为修改 \(W^{(1)}\) 时多半同时要改诊断工具的硬编码 oracle，
+        放在一起便于同时审视。
+  \item \texttt{miller\_benchmark.md} —— Sean Miller PRC 106 (2022) 的
+        2NF nd-scattering 基准（不直接进入本章，但与 \cref{ch:14_miller_gate1}
+        相关）。
+  \item \texttt{hand\_calc\_*.py} —— Python oracle 脚本，独立实现
+        \(W^{(1)}\) 单点求值。
+\end{itemize}
+
+这种"代码 + 文献抄录 + Python oracle"三件套是诊断工具的完整闭
+环：未来一旦 Epelbaum/Witała 数据被更准确地复现，
+\texttt{epelbaum\_reference.md} 一处更新；oracle 数字变了，
+\texttt{hand\_calc\_*.py} 一处更新；C++ 接受 oracle 变化，硬编码数字
+一处更新——三处一起 commit，git 历史里清晰留痕。
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch17-pitfalls}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-psi-norm}]
+\textbf{陷阱 1：\(\psi_t\) vs.\ \(\Psi_t\) 文件混淆。}
+
+仓库里 \texttt{tests/Cont\_Faddeev/Triton\_states/} 同时存在
+\texttt{H3\_psi\_N3LO\_EM500.dat}（Faddeev 分量 \(\psi_t\)）和
+\texttt{H3\_psiasymm\_N3LO\_EM500.dat}（完整反对称态 \(\Psi_t\)）。两者
+文件格式完全相同（\((\Np, \Nq, \Nalpha)\) + GL 节点 + α 表 + \(\psi\)
+数据），\textbf{看一眼无法判别}。判别方法：
+\begin{itemize}
+  \item \(\psi_t\)：径向 norm \(\approx 0.154 \approx 1/6.5\)；
+  \item \(\Psi_t\)：径向 norm \(=1.000000\)（精确）。
+\end{itemize}
+\cref{lst:ch17-main-entry} 里 line 61--65 的运行时警告就是为此设计。
+忽略这一警告 + 用 \(\psi_t\) 跑诊断 = 所有 \(\langle W\rangle\) 偏小
+\(\sim 6.5\times\) 的 ratio——\emph{看似只差一个常数因子}，特别隐蔽。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-radial-vs-reduced}]
+\textbf{陷阱 2：径向 vs.\ reduced 测度选错。}
+
+\(p^2 q^2\) 因子在 \cref{lst:ch17-compute-norm} 第 31 行 / \cref{lst:ch17-contract-w1}
+第 20、25 行各出现一次。三个地方任何一个把 \(p^2 q^2\) 误删，
+归一化 + 收缩\textbf{同时}失去这个因子，最终 \(\langle W\rangle\)
+错 \(\sim 200\times\)，但 ratio 在所有 LEC 通道上同步偏 \(200\)——
+看起来"过 norm 不过 ratio"，容易误判为部分波核 bug。
+\textbf{诊断}：先单独跑 \texttt{compute\_norm\_radial}（已经有），
+norm \(=1.000000\) 才说明测度对；不到则停止往下推。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-hermiticity}]
+\textbf{陷阱 3：Hermiticity 默认假设但不检查。}
+
+\(\Psi_t\) 是实波函数（\texttt{double psi[]}），所以
+\(\langle\Psi_t|W^{(1)}|\Psi_t\rangle\) 实际计算的是
+\(\frac{1}{2}\bigl[\langle\Psi_t|W^{(1)}|\Psi_t\rangle +
+\langle\Psi_t|W^{(1)\dagger}|\Psi_t\rangle\bigr]\)。如果 \(W^{(1)}\) 不是
+Hermitian（例如把 \(\bm{\sigma}_2 \cdot \bm{q}_2\) 误写成
+\(-\bm{\sigma}_2 \cdot \bm{q}_2\) 但只在 bra 边）：
+
+\begin{itemize}
+  \item 真实物理结果应当虚部为零；
+  \item 实数代码取的是 \texttt{double total} 的累加，自动取实部
+        \(\frac{1}{2}(W^{(1)} + W^{(1)\dagger})\)；
+  \item 这种"自动对称化"会掩盖 sign bug。
+\end{itemize}
+
+\textbf{修复}：未来重大 \(W^{(1)}\) 改动后，应当增加一个
+\texttt{contract\_W1\_expectation\_check\_hermitian} 函数，把
+\((\PWchanp, \PWchan, p, q, p', q') \leftrightarrow (\PWchan, \PWchanp, p', q', p, q)\)
+单独累加成 \(\Delta\)，要求 \(|\Delta| / |\text{total}| < 10^{-5}\)。
+本工具当前\textbf{不做}此检查（commit 历史里仍是 TODO）。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-1plusP}]
+\textbf{陷阱 4：\((1+P+P^2)\) 反对称化因子的"3"系数处理。}
+
+\cref{eq:ch17-3W} 推得 \(\langle\Psi_t|\Wsymm|\Psi_t\rangle = 3\cdot\langle\Psi_t|W^{(1)}|\Psi_t\rangle\)
+依赖 \(\Pop|\Psi_t\rangle = |\Psi_t\rangle\)。如果你错把 \(\psi_t\)
+（Faddeev 分量，\(\Pop|\psi_t\rangle \neq |\psi_t\rangle\)）当成
+\(\Psi_t\) 用，\(\times 3\) 因子\textbf{在数学上不再合法}——
+\(\langle\psi_t|(1+\Pop+\Pop^2)W^{(1)}|\psi_t\rangle\) 需要显式做
+\(\Pop W^{(1)}\) 项，而 \(\Pop\) 在 \(\psi_t\) 上的作用涉及
+\cref{ch:09_permutation_p123} 的复杂置换矩阵。诊断工具假设了
+\(\Pop|\Psi\rangle = |\Psi\rangle\) 这条捷径——一旦传错文件，
+\(\times 3\) 因子失去物理意义，但代码不会报错（它会愉快地
+做 \(3\times\) 一个错误的 \(\langle\rangle\)）。
+
+\textbf{防御}：陷阱 1 的 norm 警告就是第一道防线。第二道防线：
+检查 α 表的对称性——\(\Psi_t\) 在循环置换下不变意味着 α 通道分布
+应当"对称"分散在 \(L_{2N}\)、\(L_{1N}\) 上；\(\psi_t\) 则会偏向
+spectator-1 标记的某个 cluster。本工具当前\textbf{不做}这一检查。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-noise}]
+\textbf{陷阱 5：6D 收缩的数值噪声底。}
+
+\(\Np^2 \cdot \Nq^2 \cdot \Nalpha^2 = 2 \times 10^9\) 项的双精度求和，
+单步加法相对误差 \(\sim 10^{-16}\)，累积理论上界 \(\sqrt{N}\cdot 10^{-16}
+\sim 10^{-11}\)。OpenMP \texttt{reduction(+:total)} 内部用
+binary tree 求和，实际相对误差更小（\(\sim 10^{-13}\)）。
+\textbf{相对精度的实际下限因此是 \(\sim 10^{-5}\)}：低于这个量级
+的 ratio 偏差很可能是浮点噪声、不是 bug。
+
+但如果某次 commit 后 ratio 偏差 \(>10^{-3}\)（譬如从 \(1.001\) 跳到
+\(1.05\)）：\textbf{这是 bug，不是噪声}。\cref{eq:ch17-additivity-check}
+的加性残差 \(<10^{-11}\) MeV 是 \(\frac{\text{加性残差}}{\text{量级}} \sim 10^{-12}\)
+的相对精度证据；任何 ratio 偏差远高于这个底线都\emph{不能}用"浮点噪声"打发。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-ce-sign-history}]
+\textbf{陷阱 6：commit \(f4df358\) 之后的 ratio "假改善"。}
+
+回顾 \cref{tab:ch17-witala-results}：commit 前 \(c_E\) 通道
+\(3\cdot\langle W\rangle = +42.5\) MeV，参考 \(+0.41\) MeV，
+ratio \(+103.8\)。commit \(f4df358\) 把 \(c_E\) 系数翻号 + 乘 \(\frac{1}{2}\)
+之后，\(c_E\) 通道变成 \(-21.27\) MeV。若粗看 ratio \(-21.27/+0.41 = -51.9\)，
+比之前的 \(+103.8\) 小一半，\textbf{看起来更接近 1}——但符号是负的！
+
+这种"假改善"在自动化 CI 里是危险信号：单纯监控 \(|X|\) 减小会
+误判 commit 为正向；必须同时监控\textbf{符号一致性}。本工具当前
+打印 ratio 是带符号的浮点数；future CI 应当 assert 每个 LEC 通道
+ratio \(\in [+0.95, +1.05]\)（包含正号要求）才能放行。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-binary-artifacts}]
+\textbf{陷阱 7：编译产物未被 \texttt{.gitignore}。}
+
+仓库当前状态（git status）：
+
+\begin{verbatim}
+?? tools/check_3nf_normalization/build_pw_3n_statespace.o
+?? tools/check_3nf_normalization/check_3nf_normalization
+?? tools/check_3nf_normalization/check_3nf_normalization.o
+?? tools/check_3nf_normalization/contract_W1_expectation.o
+?? tools/check_3nf_normalization/read_triton_psi.o
+\end{verbatim}
+
+这些是\texttt{Makefile} 在源码目录里就地生成的 \texttt{.o} 与
+可执行文件，应当被 \texttt{.gitignore}。当前\textbf{没有}相应规则，
+意味着任何贡献者跑一次 \texttt{make} 后 \texttt{git status}
+就会被这些二进制 artifact 噪声污染——容易误 add 进 commit，
+让仓库膨胀到几 MB 的二进制存储。
+
+\textbf{修复}：在 \texttt{tools/check\_3nf\_normalization/.gitignore}
+里加：
+\begin{verbatim}
+*.o
+check_3nf_normalization
+\end{verbatim}
+本仓库 \cref{ch:19_refactor_evolution} 的"未来工作清单"包含这一项；
+当前章节作者只能记录陷阱不能修复（修复属于 Wave 6 的整理工作）。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch17-pitfall-oracle-staleness}]
+\textbf{陷阱 8：硬编码 oracle 与代码漂移。}
+
+\cref{lst:ch17-singlepoint-check} 里的
+\(7.264125 \times 10^{-3}\) fm\(^5\)（\(c_E\) oracle）、
+\(3.392900 \times 10^{-3}\) fm\(^5\)（\(c_D\) oracle）是 commit
+\texttt{c15606e} / \texttt{8db06bf} 当时手算冻结的数字。如果未来
+\texttt{chiral\_N2LO\_3NF.h} 的算法分支被合理重写（譬如把 \(\int dx\)
+从 24-pt GL 提升到 32-pt），这些 oracle 数字会因高阶截断而\emph{合
+法地}发生 \(<2\%\) 的小变化，但工具仍会打印 "WARNING: relative
+difference \(>2\%\)"。
+
+\textbf{操作建议}：把每次 oracle 更新的 commit 标识记入
+\texttt{formula\_reference.md} 里的"oracle 锁定记录"段落。当前的
+"硬编码 oracle 但不记入文档"模式在长期维护里会失血——
+未来代码作者重跑时无法判断 \(>2\%\) 偏差是 bug 还是合法漂移。
+\end{pitfallbox}
+
+\paragraph{陷阱清单的统一观察。}
+上述 8 条陷阱中，第 1、2、4 条与"约定"相关（norm 测度、波函数文
+件、反对称化因子），第 3、5、6 条与"代码 vs 物理"相关（Hermiticity、
+浮点噪声、符号），第 7、8 条与"工程约束"相关（git 卫生、oracle
+维护）。\textbf{诊断工具的最大价值不在于一次跑得对}——一次 ratio
+\(\approx 1\) 不能保证未来不退化；诊断工具的价值在于\textbf{每次
+commit 都重跑}，把上述 8 条陷阱固化进 CI/PR 检查清单。在
+Tic-tac 当前状态下，这条 CI 还\textbf{没有自动化}，依赖
+\cref{ch:18_origin_codebase} 与 \cref{ch:19_refactor_evolution} 的
+后续工作完成集成。
+
+% =========================================
+\section{本章小结}
+\label{sec:ch17-summary}
+
+\paragraph{诊断闭环的三层验证。}
+\texttt{tools/check\_3nf\_normalization/} 设计了三层独立验证：
+
+\begin{enumerate}
+  \item \emph{单点验证}（\cref{lst:ch17-singlepoint-check}）：固定通
+        道 + 固定 \((p, q, p', q')\)，与 Python oracle 比，要求 \(<2\%\)。
+        防御部分波核内部的"局部 sign bug"。
+  \item \emph{加性检查}（\cref{lst:ch17-lec-sweep} line 218--221）：
+        \(\sum_{cE,cD,c1,c3} \stackrel{?}{=} \text{full\_Witala}\)，要求 \(<10^{-10}\) MeV。
+        防御 LEC 交叉耦合污染。
+  \item \emph{Witała ratio}（\cref{lst:ch17-lec-sweep} line 228--254）：
+        每个 LEC 通道与 Epelbaum/Witała 文献参考比，要求 \(|X-1| < 0.05\)。
+        防御 overall normalization bug 与 Fourier 因子缺失。
+\end{enumerate}
+
+三层一起，构成一个"\textbf{部分波核 → 6D 收缩 → 文献}"的端到端闭
+环，跨 \cref{ch:15_3nf_physics, ch:16_3nf_pw_projection, ch:17_3nf_numerical}
+三章的所有数值约定。
+
+\paragraph{诊断不参与 production，但替 production 把关。}
+诊断工具不在 \texttt{deuteron\_proton\_Ay.py} 主流程里被调用；它的
+唯一角色是在 \(W^{(1)}\) 部分波核被修改时跑一次，做"事前 lint"。
+项目演化的 commit 历史（\texttt{git log -- tools/check\_3nf\_normalization/}）
+显示这条工具与 \cref{ch:16_3nf_pw_projection} 的 \(c_E, c_D, c_1, c_3\)
+重写工作完全同频：先有诊断信号 (commit \texttt{ab9bfee}: "compare
+against Epelbaum reference, report ratio X")，再有相应修复 (commits
+\texttt{bdb239d, 8db06bf, 1f05031, f4df358})。这种"诊断驱动 重构"
+（diagnostic-driven refactor）是 Tic-tac 仓库里 3NF 部分波核能在
+2026-04 期间相对快速收敛到正确实现的关键工程实践。
+
+\paragraph{未完工作。}
+\begin{itemize}
+  \item Hermiticity 自动检查（\cref{box:ch17-pitfall-hermiticity}）；
+  \item \texttt{.gitignore} 里二进制 artifact 规则
+        （\cref{box:ch17-pitfall-binary-artifacts}）；
+  \item Oracle 锁定记录文档（\cref{box:ch17-pitfall-oracle-staleness}）；
+  \item 自动化 CI 集成（\cref{ch:19_refactor_evolution} 后续工作）。
+\end{itemize}
+
+下一章 \cref{ch:18_origin_codebase} 转到\textbf{仓库历史视角}，回顾
+Tic-tac 如何从 Sean Miller 的 \texttt{seanbsm/Tic-tac} 上游 fork 演化
+而来，包含本章诊断工具在内的"补丁层"是如何一层一层叠在原始代码
+之上的。

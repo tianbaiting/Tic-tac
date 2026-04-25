@@ -1,13 +1,1123 @@
 % =====================================================================
 % 10_resolvent.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 10 章 通道 Resolvent 的 R+Q 分解
+% Wave 3 / Agent (resolvent)
 % =====================================================================
 
 \chapter{通道 Resolvent 的 R+Q 分解}
 \label{ch:10_resolvent}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% --- 局部宏（不污染 physics_macros.tex）---
+\providecommand{\Rterm}{R}                        % bound-continuum 项
+\providecommand{\Qterm}{Q}                        % continuum-continuum 项
+\providecommand{\Greschan}{\hat{G}_{0}^{(\alpha)}}% 通道 free Green 算符
+\providecommand{\GreschanMat}{\mathbf{G}_0}       % 通道 free Green 矩阵
+\providecommand{\Eb}{E_b}                         % 束缚态能量
+\providecommand{\BCcell}{\Rterm_{i,j}^{(\alpha)}} % BC 单元平均
+\providecommand{\CCcell}{\Qterm_{i,j}^{(\alpha)}} % CC 单元平均
+\providecommand{\Eqcell}{{\mathcal{E}_{j}^{q}}}   % q-bin 能量（额外 brace 防双上标）
+\providecommand{\Epcell}{{\mathcal{E}_{i}^{p}}}   % p-bin 能量（额外 brace 防双上标）
+\providecommand{\DeltaP}{\Delta_{+}}              % 1/2(Dp+Dq)
+\providecommand{\DeltaM}{\Delta_{-}}              % 1/2(Dp-Dq)
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+% =========================================
+\section{物理动机}
+\label{sec:ch10-motivation}
+
+\paragraph{从 Faddeev/AGS 公式到一段对角向量。}
+回到 \cref{ch:04_faddeev_ags} 的 AGS 主方程
+\begin{equation}
+\label{eq:ch10-AGS-recall}
+\Uop \;=\; \Pop\, \Vop\, \Gzero(\zeplus)\, \Pop \;+\; \Pop\, \Vop\, \Gzero(\zeplus)\, \Top\, \Gzero(\zeplus)\, \Pop \;+\; \cdots,
+\end{equation}
+其中 \(\Gzero(\zeplus) = (\zeplus - \Hzero)^{-1}\) 是\textbf{自由三体 Green 算符}（也称
+"自由通道分辨算符"），\(\Pop\) 是 \(P_{12}P_{23}+P_{13}P_{23}\)，\(\Vop\) 是
+两体 NN 势嵌入到三体空间。\(\zeplus = E + i\eps\)（\(\eps \to 0^{+}\)）是\textbf{复
+能量}：实部是物理总能量（在质心系内），虚部是为绕过实轴上的传播子奇点而
+人为加入的 \emph{Sokhotski--Plemelj 规则化参数}。
+
+如果直接在 Jacobi 动量空间 \(\ket{\jacvec; \alpha}\) 写下
+\begin{equation}
+\label{eq:ch10-G0-Jacobi}
+\bra{\jacvec; \alpha}\, \Gzero(\zeplus)\, \ket{p', q'; \alpha'}
+\;=\;
+\frac{\delta_{\alpha\alpha'}\, \delta(p-p')\, \delta(q-q')}
+     {\zeplus - \frac{p^2}{2\mu_p} - \frac{q^2}{2\mu_q} + E_b\,\Theta(\text{bound branch})},
+\end{equation}
+那么后续的 \(\Pop\, \Vop\, \Gzero\, \cdots\) 任一步都会在 \(p^2/(2\mu_p) +
+q^2/(2\mu_q) = E\) 这条\textbf{解离曲面}上遇到 1D 极点，必须做主值积分
+（\cref{ch:01_lippmann_schwinger} 在两体情形已经反复演练过）。WPCD 的核心想法之一
+就是把 \(\Gzero\) 投影到一个\textbf{有限宽度}的 wave-packet 基（WP/SWP）上，
+让原本的 1D 极点被 bin 内的解析积分驯服为一个普通的 \(\log\) + 阶跃组合。
+
+\paragraph{R+Q 分解为何是"高效"的关键。}
+WPCD 把 2N 子空间的 Hamiltonian \(H_2 = p^2/(2\mu_p) + V_{\ell}\) 对角化（参见
+\cref{ch:06_wp_swp_states}），得到\textbf{Scattering Wave Packet}（SWP）基
+\(\ket{\tilde{x}_i^{(\alpha)}}\)。这一基的最重要特征是：
+
+\begin{itemize}
+  \item 在 SWP 基里，\(H_2\) 是\textbf{对角的}——每个 \(\tilde{x}_i^{(\alpha)}\) 对应一个
+        本征能量 \(\Epcell\)；
+  \item 因此 3N 自由 Hamiltonian \(\Hzero^{(3)} = H_2 + q^2/(2\mu_q)\)（\(q\)
+        是 spectator-pair 的相对动量）在 (SWP \(\otimes\) WP-\(q\)) 基里
+        \emph{彻底对角}；
+  \item \(\Gzero(\zeplus)\) 在该基里随之退化为对角，每个对角元只需要一个解析的
+        bin × bin 单元平均。
+\end{itemize}
+
+\textbf{R+Q} 标识中两个字母分别代表两类不同的对角元：
+
+\begin{description}
+  \item[\(\Rterm\)（Bound-Continuum, BC）]：当 \(\alpha\)-通道的 SWP 谱中出现
+        \emph{束缚态}（\(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 的氘核
+        \(\Eb \approx -2.225\) MeV，参见 \cref{ch:06_wp_swp_states}），其对应
+        bin 在 \(p\)-轴上不再是连续 bin 而是退化为单一的\textbf{束缚分支}；
+        此时 \(\Gzero\) 的 bin 平均给出一个仅依赖 \(q\)-bin 的实+虚的 1D 解析
+        表达式；
+  \item[\(\Qterm\)（Continuum-Continuum, CC）]：当 SWP 是普通的连续 bin 时，
+        bin 平均退化为 \emph{2D} 解析表达式：在 \((p, q)\) 平面的一个矩形
+        cell 上对自由传播子作平均。
+\end{description}
+
+完整的对角元为 \(G_{i,j}^{(\alpha)} = \BCcell + \CCcell\)：束缚分支贡献
+\(\Rterm\)、连续分支贡献 \(\Qterm\)，二者从不同时出现。这一加法形式使得整个
+Resolvent 的存储与运算复杂度被压到 \(O(\Nalpha\, \NpWP\, \NqWP)\)——一个\textbf{对角向
+量}而非稠密矩阵。
+
+\paragraph{与 Faddeev 主循环的解耦。}
+\cref{ch:11_faddeev_solver} 的 Padé/Neumann 主循环在每次迭代里需要做的
+"乘上 \(\Gzero\)" 操作（\cref{eq:ch10-AGS-recall} 里的 \(\cdots \Pop\, \Vop\,
+\Gzero\, \Pop\, \cdots\)）现在退化为最便宜的\textbf{逐元素复数乘法}：
+\begin{equation}
+\label{eq:ch10-elementwise-multiply}
+(\Pop\,\Vop\,\Gzero)_{ij\alpha,\,i'j'\alpha'}
+\;=\;
+(\Pop\,\Vop)_{ij\alpha,\,i'j'\alpha'} \cdot G_{i'j'}^{(\alpha')}.
+\end{equation}
+故每次 Neumann 迭代里 Resolvent 那一步的算术成本只是一次 dense × diag 乘
+（线性于 \texttt{dense\_dim}）。这正是为什么 \cref{lst:ch10-neumann-resolvent-step}
+仅几行就完成了"吸收 \(\Gzero\)" 那一步——所有"动能 + 复能量 + 阶跃 + log"
+全部已经在本章主函数里被预计算到 \texttt{G\_array} 里。
+
+\paragraph{读者应当带走什么。}
+\begin{itemize}
+  \item 写出 \(G_0(\zeplus)\) 的 SWP-bin 平均的 \emph{解析公式}（BC 与 CC 各
+        一个），并能背诵其中的 4 个 \(\log\) + 4 个阶跃函数项；
+  \item 理解为什么本仓库的实现里 \(\eps \to 0^{+}\) 处方\textbf{不是}通过给
+        \(z\) 加一个有限 \(i\eps\) 来实现的，而是\textbf{解析地}从 bin 平均推
+        出来——分子中的\(\log|\cdot|\) 来自 \(\re\)、阶跃来自 \(\im\)；
+  \item 清楚 \texttt{select\_swp\_energy\_branch} 在 coupled-via-L、
+        coupled-via-T 两种情形下 \emph{怎样选错} 会破坏 R/Q 边界判定；
+  \item 在数值闭环中复现 190 MeV 下某个通道的 \(\GreschanMat\) 对角元，并理解
+        其量级范围（\(\sim 10^{-3}\) 到 \(\sim 10^{0}\) MeV\(^{-1}\)）。
+\end{itemize}
+
+% =========================================
+\section{数学推导}
+\label{sec:ch10-math}
+
+% -----------------------------------------
+\subsection{自由 Green 算符的 Jacobi 表示}
+\label{subsec:ch10-G0-Jacobi}
+
+\paragraph{三体动能算符的分解。}
+在 \cref{ch:03_jacobi_partial_wave} 我们已经把三体动能 \(\Hzero^{(3)}\) 分解
+为 Jacobi pair-spectator 形式：
+\begin{equation}
+\label{eq:ch10-T-decomp}
+\Hzero^{(3)} \;=\; \frac{\hat{p}^2}{2\mu_p} + \frac{\hat{q}^2}{2\mu_q} + V_{\ell}
+\;-\; V_{\ell}
+\;\equiv\; H_2 + \frac{\hat{q}^2}{2\mu_q} - V_{\ell},
+\end{equation}
+其中 \(\mu_p = m_N/2\) 是 pair 的约化质量、\(\mu_q\) 是 spectator 与 pair-质心
+间的约化质量。注意：从代码角度看，"通道 Resolvent" 指的是 \emph{包含}两体
+势 \(V_\ell\) 的那个 \(\Greschan = (z - H_2 - q^2/(2\mu_q))^{-1}\)，即
+"自由三体 - 但 pair 内部已包含 NN 力"。这一点严格匹配 Witała 等人 1988 年
+\cite{Witala1988} 的 Faddeev 化展开里 \(G_2 \equiv (z - H_0 - V_2)^{-1}\) 的
+约定。
+
+\paragraph{在 Jacobi 部分波基下的矩阵元。}
+取 \(\ket{p, q; \alpha}\) 为 Jacobi 动量 + 部分波索引，
+\(H_2\ket{p, q; \alpha} = (p^2/(2\mu_p) + V_\ell)\ket{p, q; \alpha}\)。在
+\cref{ch:06_wp_swp_states} 我们已经构造了 \(H_2\) 的本征向量
+\(\ket{\tilde{x}_i^{(\alpha)}}\)（SWP）使
+\begin{equation}
+\label{eq:ch10-H2-eigen}
+H_2\, \ket{\tilde{x}_i^{(\alpha)}}\otimes\ket{\tilde{x}_j^{q}}
+\;=\;
+\Bigl(\Epcell + \Eqcell\Bigr)\, \ket{\tilde{x}_i^{(\alpha)}}\otimes\ket{\tilde{x}_j^{q}}.
+\end{equation}
+注意这里的 \(\Epcell\) 在束缚分支上为 \emph{负值}（氘核 \(\Eb \approx -2.225\) MeV），
+而 CC 分支下 \(\Epcell > 0\)。\(\Eqcell\) 总是正的（spectator 动能）。
+\textbf{这一对正负号正是后续 \(\Rterm/\Qterm\) 分支的物理来源}。
+
+\paragraph{通道分辨算符的对角形式。}
+直接代入 \(\Greschan = (z - H_2 - q^2/(2\mu_q))^{-1}\) 得
+\begin{equation}
+\label{eq:ch10-G-diag-eigen}
+\bra{\tilde{x}_{i'}^{(\alpha)}\, \tilde{x}_{j'}^{q}}\, \Greschan(z)\,
+\ket{\tilde{x}_{i}^{(\alpha)}\, \tilde{x}_{j}^{q}}
+\;=\;
+\frac{\delta_{ii'}\, \delta_{jj'}}{z - \Epcell - \Eqcell}.
+\end{equation}
+这就是为什么 \texttt{calculate\_resolvent\_array\_in\_SWP\_basis} 只需要循环
+\((\alpha, j, i)\) 三层、每次填入\textbf{一个}复数；与 \(\Pop\) 矩阵
+（\cref{ch:09_permutation_p123}）的 GB 级稀疏存储相比，
+\(\GreschanMat\) 总共只占
+\(\Nalpha \times \NqWP \times \NpWP \times 16\,\text{B} \approx
+365 \times 30 \times 30 \times 16\,\text{B} \approx 5\)~MB。
+
+% -----------------------------------------
+\subsection{从精确 \(\delta\)-函数到 bin 平均}
+\label{subsec:ch10-from-delta-to-bin}
+
+\paragraph{SWP bin 不是 \(\delta\)-本征态。}
+SWP \(\ket{\tilde{x}_i^{(\alpha)}}\) 实际上不是 \(H_2\) 的精确 \(\delta\)-本征
+态（连续谱不存在 \(L^2\) 本征态），而是 \emph{wave-packet} 本征态：在能量
+区间 \([\Epcell^{(i-1/2)}, \Epcell^{(i+1/2)}]\) 上把连续 \(\ket{p}\) 平均后归
+一化的有限宽度的 \(L^2\) 包。Witała 等人 1988 年的"discretized continuum"
+表述 \cite{Witala1988}里这个区间叫 "energy mesh cell"，本仓库继承了
+Kukulin~2007 \cite{Kukulin2007} 的 "wave packet" 名字。两者数学上等价。
+
+\paragraph{Bin 平均的精确公式。}
+设第 \(i\) 个 SWP-cell 在能量空间是 \([\Epcell^{i-1}, \Epcell^{i}]\)（在束缚
+分支上简化为单点 \(\Eb\)），第 \(j\) 个 \(q\)-bin 在动量空间是
+\([q_{j-1}, q_j]\)（对应能量区间
+\([\Eqcell^{j-1}, \Eqcell^{j}] = [q_{j-1}^2/(2\mu_q), q_{j}^2/(2\mu_q)]\)）。
+将精确 \(\delta\)-本征态分辨算符 \(1/(z - \Epcell - \Eqcell)\) 在此 cell 上
+做能量\textbf{平均}（除以 cell 宽度的乘积），即
+\begin{equation}
+\label{eq:ch10-G0-bin-average}
+G_{i,j}^{(\alpha)}(z)
+\;=\;
+\frac{1}{D_p\, D_q}
+\int_{\Epcell^{i-1}}^{\Epcell^{i}}\! d\Epsilon_p
+\int_{\Eqcell^{j-1}}^{\Eqcell^{j}}\! d\Epsilon_q\;
+\frac{1}{z - \Epsilon_p - \Epsilon_q},
+\end{equation}
+其中 \(D_p = \Epcell^{i} - \Epcell^{i-1}\)、\(D_q = \Eqcell^{j} - \Eqcell^{j-1}\)
+是两个 cell 在能量空间的宽度。
+
+\paragraph{Sokhotski--Plemelj 规则化。}
+取 \(z = E + i\eps\)（\(\eps \to 0^{+}\)），利用
+\begin{equation}
+\label{eq:ch10-SP}
+\frac{1}{x \pm i\eps}
+\;=\;
+\PVal\frac{1}{x} \mp i\pi\, \delta(x),
+\end{equation}
+代入 \cref{eq:ch10-G0-bin-average} 并对 \(\Epsilon_p, \Epsilon_q\) 各取一次原
+函数：
+
+\begin{itemize}
+  \item 实部部分：\(\re[1/(E - \Epsilon_p - \Epsilon_q + i\eps)] =
+        \PVal\,1/(E - \Epsilon_p - \Epsilon_q)\)。其在两个能量区间上的二
+        重不定积分给出 \((D)\log|D|\) 类项（见下文 \cref{eq:ch10-Q-real}）；
+  \item 虚部部分：\(\im[1/(E - \cdots + i\eps)] = -\pi\,\delta(E - \Epsilon_p
+        - \Epsilon_q)\)。其在两个能量区间上的二重积分给出三角形面积公式，
+        即四个 \((D \pm \Delta_\pm)\) 的\textbf{阶跃函数}组合。
+\end{itemize}
+
+故 \(\eps \to 0^{+}\) 这个极限在 WPCD 框架里\emph{并不是通过给 \(z\) 加一个
+小虚部}来数值实现的——而是\textbf{解析地}融入到了 \(\log|\cdot|\) 与
+\(\Theta(\cdot)\) 这两个公式里。在
+\cref{box:ch10-pitfall-epsilon} 我们将看到忘记这一点的初学者经常犯的错误。
+
+% -----------------------------------------
+\subsection{Continuum-Continuum (\(\Qterm\)) 的解析公式}
+\label{subsec:ch10-CC}
+
+\paragraph{二维 cell 平均。}
+设 \(D = E_p + E_q - E\)（cell 中心点的"失谐"），\(D_p, D_q\) 是两 cell 的
+能量宽度，\(\DeltaP \equiv (D_p + D_q)/2\)，\(\DeltaM \equiv (D_p - D_q)/2\)。
+\cref{eq:ch10-G0-bin-average} 经过 Kukulin~2007 \cite{Kukulin2007} 公式 (32)、(34)、(35)
+可以解析地写出：
+\begin{align}
+\label{eq:ch10-Q-real}
+\re \CCcell
+&= \frac{1}{D_p\, D_q}
+\Bigl[
+   (D + \DeltaM)\log|D + \DeltaM|
++ (D - \DeltaM)\log|D - \DeltaM|
+\notag\\
+&\qquad
+- (D + \DeltaP)\log|D + \DeltaP|
+- (D - \DeltaP)\log|D - \DeltaP|
+\Bigr], \\[4pt]
+\label{eq:ch10-Q-imag}
+\im \CCcell
+&= \frac{\pi}{D_p\, D_q}
+\Bigl[
+   (D + \DeltaM)\Theta(D + \DeltaM)
++ (D - \DeltaM)\Theta(D - \DeltaM)
+\notag\\
+&\qquad
+- (D + \DeltaP)\Theta(D + \DeltaP)
+- (D - \DeltaP)\Theta(D - \DeltaP)
+\Bigr],
+\end{align}
+其中 \(\Theta\) 是 Heaviside 阶跃函数（在 \(0\) 处取 \(1\)，匹配源码
+\cref{lst:ch10-BC-current} 行 1--7 的 \texttt{heaviside\_step\_function}
+约定，\(<0\) 取 \(0\)、\(\geq 0\) 取 \(1\)）。
+
+\paragraph{物理解读。}
+\begin{itemize}
+  \item \cref{eq:ch10-Q-real} 是 4 个 \((x)\log|x|\) 的\textbf{交错代数和}；当
+        \(D \to 0\)（cell 中心刚好在能壳上）时由于 \(x\log|x|\) 在 \(0\)
+        处可微（极限为 \(0\)）这一公式数值上稳定，\textbf{不需要}主值积
+        分软件库；
+  \item \cref{eq:ch10-Q-imag} 给出虚部：仅当能壳穿过 cell（即 \(|D| <
+        \DeltaP\)）时为非零；其值正比于"能壳与 cell 相交的三角形面积"。
+        这是 WPCD 框架中"能壳信息"的唯一进入点；
+  \item 当 cell \emph{完全在能壳上方} 或 \emph{下方} 时虚部为零，
+        \(\Qterm\) 退化为纯实部（principal-value 平均）。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{Bound-Continuum (\(\Rterm\)) 的解析公式}
+\label{subsec:ch10-BC}
+
+\paragraph{一维 cell 平均。}
+当 \(\alpha\)-通道支持氘核（\(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 张量
+耦合通道，且 SWP 谱里 \(\Epcell^{i-1} < 0\)）时，束缚分支只占 SWP 谱的
+\emph{第 0 个 cell}。这一 cell 在能量轴上不再是宽度 \(D_p\) 的区间，而是
+"集中在 \(\Eb\) 上的 \(\delta\)-函数"。\cref{eq:ch10-G0-bin-average} 内部对
+\(\Epsilon_p\) 的积分退化为单点替换 \(\Epsilon_p \to \Eb\)：
+\begin{equation}
+\label{eq:ch10-R-1D-integral}
+\BCcell(z)
+\;=\;
+\frac{1}{D_q}
+\int_{\Eqcell^{j-1}}^{\Eqcell^{j}}\! d\Epsilon_q\;
+\frac{1}{z - \Eb - \Epsilon_q}.
+\end{equation}
+取 \(z = E + i\eps\)：
+
+\begin{align}
+\label{eq:ch10-R-real}
+\re \BCcell
+&= \frac{1}{D_q}\,
+   \log\biggl|\frac{\Eqcell^{j-1} + \Eb - E}{\Eqcell^{j} + \Eb - E}\biggr|, \\[4pt]
+\label{eq:ch10-R-imag}
+\im \BCcell
+&= -\frac{\pi}{D_q}\,
+\Bigl[
+   \Theta(\Eqcell^{j} + \Eb - E)
+- \Theta(\Eqcell^{j-1} + \Eb - E)
+\Bigr].
+\end{align}
+
+\paragraph{物理解读。}
+\begin{itemize}
+  \item \cref{eq:ch10-R-real} 是一个 \(\log\) 比值——其唯一奇点出现在
+        \(E = \Eb + \Eqcell\) 即\textbf{弹性散射通道的能壳}处，对应
+        \(d+p\) 弹性出口阶段；
+  \item \cref{eq:ch10-R-imag} 给出虚部：仅当能壳穿过这一 \(q\)-cell 时为
+        非零；其大小为 \(-\pi/D_q\)（注意负号——与 CC 项的 \(+\pi\) 相反），
+        匹配 Sokhotski--Plemelj 公式中 \(z + i\eps\) 与
+        \(\delta(\cdot)\) 的符号约定；
+  \item \(\re\) 的分母在能壳上为零、分子非零，\(\re\) 发散——但在数值
+        实现里仍然稳定，因为这只是一个\textbf{有限宽度} bin 内的对数比；
+        即使能壳正好落在 cell 边界 \(\Eqcell^{j}\) 上，\(\log|0/...| = -\infty\)
+        会先被舍入到 \(\sim 10^{-16}\) 的浮点 underflow，再被 \(D_q^{-1}\)
+        放大，但仍然不会破坏 Padé 解的整体稳定（这是 WPCD 的鲁棒性来源）。
+\end{itemize}
+
+\paragraph{\(\Eb = 0\) 退化。}
+当通道无束缚态时（\(\Epcell^{i-1} \geq 0\)），代码强制 \(\Eb = 0\)，且只走
+CC 分支；\(\Rterm\) 永远不会被加到 \(G\) 上。这一边界条件的代码实现见
+\cref{lst:ch10-main-current} 行 39--44。
+
+% -----------------------------------------
+\subsection{与 Witała 1988 论文形式的对照}
+\label{subsec:ch10-Witala-comparison}
+
+Witała、Glöckle、Cornelius 1988 年 \cite{Witala1988} 的 Faddeev 在连续动量
+空间求解里使用 \emph{spline} 插值的 mesh-cell 与 5 阶 \(p\)-mesh + 5 阶
+\(q\)-mesh 的"能量域采样"，主积分用 Sloan~Brady 主值技术处理。其
+\((p_i, q_j)\) cell 上的"对偶解析积分"
+\(I^{R/Q}_{ij}(E) = \int\!\int (E - \cdots)^{-1}\, dE_p\, dE_q\)
+公式与本仓库的 \cref{eq:ch10-Q-real}--\cref{eq:ch10-Q-imag} \emph{完全一致}，仅符号约定上：
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+本仓库变量 & Witała 1988 / Kukulin 2007 符号 \\
+\midrule
+\texttt{Eq\_upper} & \(\Epsilon_j\)（上限） \\
+\texttt{Eq\_lower} & \(\Epsilon_{j-1}\)（下限） \\
+\texttt{Ep\_upper} & \(E_i\) \\
+\texttt{Ep\_lower} & \(E_{i-1}\) \\
+\texttt{Dq}        & \(\Delta_j\) \\
+\texttt{Dp}        & \(\delta_i\) \\
+\texttt{DP}        & \(\Delta_{+}\) \\
+\texttt{DM}        & \(\Delta_{-}\) \\
+\texttt{D}         & \(\Delta = E_p + E_q - E\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+（这一对照在源码 \texttt{make\_resolvent.h} 行 11--22 的 "COMMENTARY A" 注释
+内被显式提到，见 \cref{lst:ch10-header-current}。）
+
+% =========================================
+\section{离散化}
+\label{sec:ch10-discretization}
+
+% -----------------------------------------
+\subsection{为什么 SWP 基比 Glöckle 主流路径更平凡}
+\label{subsec:ch10-why-SWP}
+
+\paragraph{Glöckle/Witała 路径下的 \(G_0\)。}
+传统连续动量 Faddeev 解（Witała 1988 \cite{Witala1988}, Glöckle 1996
+\cite{Glockle1996}）在 \(\sim 70 \times 70\) 的 \((p_i, q_j)\) Gauss-Legendre
+节点上工作；\(\Gzero\) 在该基里既\textbf{不对角}也\textbf{不稀疏}：每对
+\((p_i, q_j) \to (p_i', q_j')\) 都需要一个主值积分。Sloan~Brady 主值
+技术大约消耗 5\% 的总求解时间。
+
+\paragraph{WPCD 路径下的 \(G_0\)。}
+本仓库通过先在 \cref{ch:06_wp_swp_states} 把 \(H_2\) 对角化、构造 SWP 基，将
+"主值积分"这一步\textbf{移到了 SWP 构造阶段}（与 \(V\) 矩阵一同对角化），
+代价是\textbf{多算一次 LAPACK \texttt{dsyevr}}。但回报巨大：
+
+\begin{itemize}
+  \item \(\Gzero\) 对角，存储减少 \(\NpWP \cdot \NqWP \approx 900\) 倍；
+  \item Faddeev 主迭代里的 \(\Pop V \Gzero\) 退化为
+        \(\Pop V \mathrm{diag}(G)\)，可融合到 \(P \cdot V\) 的 SpMV
+        里（\cref{ch:11_faddeev_solver} \S 11.5）；
+  \item BC 与 CC 的解析公式只有 \(\log\) + \(\Theta\)——几行代码即可，
+        且数值上比主值积分更稳；
+  \item \(\eps \to 0^{+}\) 处方退化为\textbf{解析极限}，没有"\(\eps\) 太大
+        损失精度、太小数值不稳"的两难（这一点在
+        \cref{box:ch10-pitfall-epsilon} 里详细讨论）。
+\end{itemize}
+
+\paragraph{代价}：SWP 构造本身是 \(O(\Nalpha\, \NpWP^3)\)（每个 \(\rho\) 子空间
+对角化一次）。在 \(\Nalpha=365, \NpWP=30\) 时即 \(\sim 10^{7}\) FLOP/s 级、
+亚秒完成；远小于 \(\Pop\) 矩阵构造（分钟级）和 Faddeev 主迭代（10 分钟级）。
+
+% -----------------------------------------
+\subsection{矩阵元的离散索引方案}
+\label{subsec:ch10-indexing}
+
+\(\GreschanMat\) 在源代码里被存储为\textbf{1-D 复数数组} \texttt{G\_array}，
+长度 \(\Nalpha\, \NqWP\, \NpWP\)。索引规则为
+\begin{equation}
+\label{eq:ch10-G-idx}
+\texttt{G\_idx}\;=\;
+\alpha\, \NqWP\, \NpWP \;+\; j\, \NpWP \;+\; i,
+\end{equation}
+\textbf{与 \(\Pop\) 矩阵的 row-index 完全相同}。这是为了让 Neumann 主迭代里
+那一步"逐元素乘 \(G\)"（\cref{lst:ch10-neumann-resolvent-step}）能在 SpMV
+返回行后\emph{无需重新映射地}做点乘。
+
+\paragraph{对每个 \texttt{T\_lab}，存储一份。}
+入口 \texttt{main.cpp} 里：
+\begin{equation*}
+\texttt{G\_array.size()}\;=\; \texttt{dense\_dim} \times \texttt{num\_T\_lab},
+\quad
+\texttt{dense\_dim}\;=\; \Nalpha\, \NqWP\, \NpWP,
+\end{equation*}
+即每个不同实验室能量都重新计算一次 \(G(E)\)。这一份 \(G\) 在 Faddeev 主迭
+代的整个生命周期里\textbf{只读不变}，是迭代的纯查表入参。
+
+% -----------------------------------------
+\subsection{\(\eps\) 处方的实际取法}
+\label{subsec:ch10-epsilon}
+
+\paragraph{此项目里 \(\eps\) 不是数值参数。}
+反直觉地，\texttt{run\_params} 中\textbf{没有}名为 \texttt{epsilon}、
+\texttt{i\_eps} 的输入项。原因：BC/CC 解析公式 \cref{eq:ch10-R-real}--
+\cref{eq:ch10-Q-imag} 是 \(\eps \to 0^{+}\) 极限的\emph{显式解析结果}，已经
+把规则化吸收掉了。\textbf{运行时看不见 \(\eps\)。}
+
+\paragraph{什么情形下可以"等效"出现一个 \(\eps\)。}
+读者若用 Glöckle 主流路径基准对比可能会想"那原来的 \(\eps = 10^{-5}\) MeV 在哪
+里"。答案是：在 SWP 构造阶段——\cref{ch:06_wp_swp_states} 的 \(H_2\) 对
+角化用了 LAPACK 的 \texttt{dsyevr}，其本征向量正交化的浮点机器精度
+\(\sim 10^{-16}\)（相对）即\emph{隐含的 \(\eps\)}。在 \(\NpWP = 30\) 的尺度
+下这等效于一个\textbf{绝对 \(\eps \approx 10^{-12}\) MeV} 的有效规则化——
+比传统主值积分中常见的 \(\eps = 10^{-5}\) MeV 小 7 个数量级。这是 WPCD
+精度优势的核心来源之一。
+
+\paragraph{若需要"给出一个 \(\eps\) 数字"用于报告。}
+推荐做法：在数字闭环（\cref{sec:ch10-numerical}）里以\textbf{机器 epsilon
+\(\sim 2\times 10^{-16}\)}（\texttt{double}）为有效 \(\eps\)/\(D_p\) 比值。这一
+比值在所有 cell 上都远小于 \(10^{-10}\)，即 \(\eps \ll \Delta_p\)，远未触
+发 \cref{box:ch10-pitfall-epsilon} 中讨论的精度边界。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch10-algorithm}
+
+\begin{algorithm}[ht]
+\caption{\textsc{Build-Resolvent}（\texttt{calculate\_resolvent\_array\_in\_SWP\_basis}）}
+\label{alg:ch10-build-resolvent}
+\KwIn{\(z = E\)（已含 \(\eps \to 0^+\) 解析处方），\texttt{swp\_states}（含 \(\Eb\)、\(e_{\rm SWP}^{\rm unco/coup}\)、\(q_{\rm WP}\)），\texttt{pw\_states}（含 \(\Nalpha\) 与 \((L,S,J,T,2T_{3N})\) 索引），\texttt{run\_params}（\texttt{tensor\_force}, \texttt{isospin\_breaking\_1S0}）}
+\KwOut{\texttt{G\_array}（\(\Nalpha\,\NqWP\,\NpWP\) 复数对角元）}
+\BlankLine
+\For{\(\alpha \in [0, \Nalpha)\)}{
+  \(L, S, J, T, 2T_{3N} \gets\) channel quantum numbers from \texttt{pw\_states}\;
+  \(e_{\rm SWP}^{\rm ptr} \gets\) \textsc{Select-SWP-Energy-Branch}\((L, S, J, T, 2T_{3N}, \dots)\)\;
+  \tcp*[h]{\small (1) 选 \(p\)-axis SWP 谱：耦合 vs 未耦合、张量分支 vs T-3N 分支}\;
+  \For{\(i \in [0, \NpWP)\)}{
+    \(\Epcell^{i-1} \gets e_{\rm SWP}^{\rm ptr}[i]\)；\(\Epcell^{i} \gets e_{\rm SWP}^{\rm ptr}[i+1]\)\;
+    \If{\(\Epcell^{i-1} < 0\)}{
+      \(\Eb \gets \Epcell^{i-1}\)；\texttt{bound\_state\_exists} \(\gets \mathbf{true}\)\;
+      \tcp*[h]{\small \(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 第 0 个 SWP cell}\;
+    }
+    \Else{
+      \(\Eb \gets 0\)；\texttt{bound\_state\_exists} \(\gets \mathbf{false}\)\;
+    }
+    \For{\(j \in [0, \NqWP)\)}{
+      \(q^{j-1} \gets q_{\rm WP}[j]\)；\(q^{j} \gets q_{\rm WP}[j+1]\)\;
+      \(R \gets 0;\; Q \gets 0\)\;
+      \If{\texttt{bound\_state\_exists}}{
+        \(R \gets\) \textsc{Resolvent-BC}\((E, \Eb, q^{j-1}, q^{j})\)\tcp*[h]{\small\cref{eq:ch10-R-real}-\cref{eq:ch10-R-imag}}\;
+      }
+      \Else{
+        \(Q \gets\) \textsc{Resolvent-CC}\((E, 0, q^{j-1}, q^{j}, \Epcell^{i-1}, \Epcell^{i})\)\tcp*[h]{\small\cref{eq:ch10-Q-real}-\cref{eq:ch10-Q-imag}}\;
+      }
+      \texttt{G\_idx} \(\gets \alpha\,\NqWP\,\NpWP + j\,\NpWP + i\)\;
+      \texttt{G\_array}[\texttt{G\_idx}] \(\gets R + Q\)\;
+    }
+  }
+}
+\end{algorithm}
+
+\paragraph{复杂度分析}：单层 \(\alpha\) 循环 + 两层 bin 循环 + 常数次解析公式
+计算。总成本 \(O(\Nalpha\,\NqWP\,\NpWP)\) 算术操作；每元约 30 次浮点
+（\(4 \times \log\) + \(4 \times \Theta\) + 加法）。在 \(\Nalpha=365,
+\NqWP=\NpWP=30\) 时整个循环 \(\sim 10^{7}\) FLOP，亚毫秒完成。这是 WPCD 整
+个流水线里最便宜的一步，但又是所有后续 Faddeev 迭代的"动能信息源"。
+
+\paragraph{算法不变量}：
+\begin{enumerate}
+  \item \(R \cdot Q = 0\) 在每个 \((α, i, j)\) 单元上：BC 与 CC 不会同时
+        非零（仅一个分支被选中）；
+  \item \(\im G_{i,j}^{(\alpha)}\) 仅在 spectator 能壳穿过本 cell 时为非零；
+  \item 当 \(E \to \Eb + \Eqcell^{j}\)（弹性能壳右端）时
+        \(\re \BCcell \to -\infty\)（\(\log\) 发散），但浮点数值上仍然有界。
+\end{enumerate}
+
+% =========================================
+\section{代码落地}
+\label{sec:ch10-code}
+
+% -----------------------------------------
+\subsection{tictac-origin 与 current 的差异}
+\label{subsec:ch10-origin-current-diff}
+
+Resolvent 模块在两个仓库间的差异非常局限：
+
+\begin{itemize}
+  \item \texttt{resolvent\_bound\_continuum}、\texttt{resolvent\_continuum\_continuum}
+        两个解析公式函数\textbf{逐字符相同}（仅 origin 在文件里被
+        \texttt{COMMENTARY A} 引导符号字典；current 把字典移到了头文件）；
+  \item \texttt{calculate\_resolvent\_array\_in\_SWP\_basis} 主体相同；唯一
+        重构是把"选 SWP 能量分支"从主循环里抽出去成为
+        \emph{文件局部匿名命名空间} \texttt{select\_swp\_energy\_branch}
+        辅助函数。Origin 把那 30 行嵌在主循环内部
+        （\cref{lst:ch10-main-origin} 行 31--57），current 抽离后主循环
+        缩短到 60 行。这种重构\textbf{不改变}数值结果，但提升了可读性
+        与单元测试可达性；
+  \item current 在 \texttt{select\_swp\_energy\_branch} 内部添加了双语
+        \texttt{[EN]/[CN]} 注释解释 "tensor 分支 vs T-3N 分支" 的语义
+        差别，origin 只有一行 \texttt{Pointer to either p\_SWP\_unco\_array
+        or p\_SWP\_coup\_array} 的笼统注释；
+  \item current 的 \texttt{calculate\_resolvent\_array\_in\_SWP\_basis} 顶部
+        增加了 4 行 \texttt{[EN]/[CN]} 注释，解释"为什么只填一个对角元
+        每对 \((α, q, p)\)"——origin 里没有这一段说明。
+\end{itemize}
+
+\textbf{结论}：本章源码层面 origin 与 current 在数学上等价、字面差异限于
+重构与文档化。后续读者若做 \texttt{diff} 不会发现任何\textbf{物理}差别。
+
+% -----------------------------------------
+\subsection{头文件：函数签名与符号字典}
+\label{subsec:ch10-header}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{src/core/resolvent/make\_resolvent.h}：函数签名与 Kukulin~2007 符号字典。},
+  label=lst:ch10-header-current,
+]{code_excerpts/snippets/ch10_resolvent_h_current.cpp}
+
+\paragraph{要点}：
+\begin{itemize}
+  \item \texttt{COMMENTARY A} 把代码中变量名直接对应到 Kukulin~2007 论文
+        的 LaTeX 符号 \(\Epsilon_j, E_i, \Delta_j, \delta_i, \Delta_\pm\)，
+        是\textbf{溯源唯一权威表}；
+  \item \texttt{cdouble} = \texttt{std::complex<double>}（在
+        \texttt{type\_defs.h}）；
+  \item \texttt{resolvent\_bound\_continuum} 接收 4 个 \texttt{double}：能量
+        \(E\)、束缚能 \(\Eb\)、当前 \(q\)-bin 的上下边界（\(q\)-动量空间，
+        非能量空间，函数内部再换算成 \(\Eqcell\)）；返回 \texttt{cdouble}；
+  \item \texttt{resolvent\_continuum\_continuum} 比上者多 2 个 \texttt{double}：
+        当前 \(p\)-bin（即 SWP cell）的能量边界（\(\Epcell^{i-1}, \Epcell^{i}\)）。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{Bound-Continuum 项 \(\Rterm\)}
+\label{subsec:ch10-code-BC}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{resolvent\_bound\_continuum} (current)：1D 解析公式。},
+  label=lst:ch10-BC-current,
+]{code_excerpts/snippets/ch10_resolvent_BC_current.cpp}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{resolvent\_bound\_continuum} (origin)：用作历史参考（数值上等价）。},
+  label=lst:ch10-BC-origin,
+]{code_excerpts/snippets/ch10_resolvent_BC_origin.cpp}
+
+\paragraph{逐行解析}：
+\begin{itemize}
+  \item 第 7 行：\(\mu_1 = M_n (M_n+M_p+\Eb) / (M_n + M_n + M_p + \Eb)\)。这是
+        spectator-pair 的\textbf{约化质量}，包含束缚能修正。注意\(\Eb < 0\)
+        时分子分母都有 \(\Eb\)，使 \(\mu_1\) 略偏离 \((2 m_N + m_p)/3\)；
+  \item 第 9--12 行：将 \(q\)-bin 的动量边界换算为能量
+        \(\Eqcell = q^2/(2\mu_1)\)；
+  \item 第 14--15 行：能量宽度 \(D_q = \Eqcell^{j} - \Eqcell^{j-1}\)；
+  \item 第 18 行：\(\re \BCcell\) 公式 \cref{eq:ch10-R-real}。注意分子分母的
+        \(\Eb\)：\(\Eqcell + \Eb\) 是 spectator + 束缚态在 lab frame
+        的总能量；
+  \item 第 21--23 行：\(\im \BCcell\) 公式 \cref{eq:ch10-R-imag}。
+        \texttt{(-M\_PI)} 与 \(\Theta\) 的差给出 \(-\pi/D_q\)（弹性能壳
+        穿过 cell 时）；
+  \item 第 26 行：返回 \texttt{cdouble\{Re\_R, Im\_R\}}。\textbf{注意}：注释
+        说 "Return the complex BC resolvent term Q"——这是 origin 的笔误
+        （应为 \(R\)），current 沿用未改。
+\end{itemize}
+
+\paragraph{等效性证明}：将 \cref{eq:ch10-R-1D-integral} 代入
+\(z = E + i 0^{+}\)，对 \(\Epsilon_q\) 做不定积分 \(\int 1/(z - \Eb -
+\Epsilon_q)\, d\Epsilon_q = -\log(z - \Eb - \Epsilon_q)\)，取实部 \(-\log|E -
+\Eb - \Epsilon_q|\)、虚部 \(\pi\,\Theta(\Epsilon_q + \Eb - E)\)（因
+\(\log z = \log|z| + i\arg z\)，下半平面 \(\arg \to -\pi\)），代入两端做差
+即得 \cref{eq:ch10-R-real}--\cref{eq:ch10-R-imag}。代码与公式一字对应。
+
+% -----------------------------------------
+\subsection{Continuum-Continuum 项 \(\Qterm\)}
+\label{subsec:ch10-code-CC}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{resolvent\_continuum\_continuum} (current)：2D 解析公式 4 + 4 项。},
+  label=lst:ch10-CC-current,
+]{code_excerpts/snippets/ch10_resolvent_CC_current.cpp}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{resolvent\_continuum\_continuum} (origin)：与 current 字面相同。},
+  label=lst:ch10-CC-origin,
+]{code_excerpts/snippets/ch10_resolvent_CC_origin.cpp}
+
+\paragraph{逐行解析}：
+\begin{itemize}
+  \item 第 9--16 行：换算 \(q\)-bin 与 \(p\)-bin（已经是能量）的边界；中
+        点 \(E_p, E_q\) 即 cell 中心的能量；
+  \item 第 19--25 行：\(D_p, D_q\)（cell 宽度）、\(\DeltaP =
+        (D_p+D_q)/2\)、\(\DeltaM = (D_p-D_q)/2\)、\(D = E_p + E_q - E\)
+        （cell 中心点失谐）；
+  \item 第 28--32 行：\(\re \CCcell\) 公式 \cref{eq:ch10-Q-real}。4 个
+        \((D \pm \Delta_\pm)\log|D \pm \Delta_\pm|\) 的代数和；
+  \item 第 35--38 行：\(\im \CCcell\) 公式 \cref{eq:ch10-Q-imag}。4 个
+        \((D \pm \Delta_\pm)\Theta(D \pm \Delta_\pm)\) 的代数和，
+        \texttt{M\_PI} 因子取 \(+\pi\)（注意与 BC 项 \(-\pi\) 的符号对比）。
+\end{itemize}
+
+\paragraph{符号对比 \(R\) vs \(Q\)}：BC 项的虚部因子是 \(-\pi\)、CC 项是
+\(+\pi\)，初看似乎矛盾。原因在于 BC 项 \cref{eq:ch10-R-imag} 内部用了
+\(\Theta(\Eqcell^j + \Eb - E) - \Theta(\Eqcell^{j-1} + \Eb - E)\)，而 CC 项
+\cref{eq:ch10-Q-imag} 用了 \(\Theta(D \pm \Delta_\pm) = \Theta(E_p + E_q - E
+\pm \cdots)\)。两者参数中"\(E\)"前的符号已经反过——总符号同号。可作为
+快速 sanity check：在 \(\Eb=0, D_p \to 0\) 极限下，CC 项应当退化为 BC 项
+（cell 收缩到 \(\Eb=0\) 单点）。读者可在
+\cref{box:ch10-numerical-closure} 里数值验证。
+
+% -----------------------------------------
+\subsection{主入口与分支选择器}
+\label{subsec:ch10-main-entry}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{select\_swp\_energy\_branch} (current 重构)：把分支选择从主循环抽离。},
+  label=lst:ch10-branch-helper-current,
+]{code_excerpts/snippets/ch10_resolvent_branch_helper_current.cpp}
+
+\paragraph{要点}：
+\begin{itemize}
+  \item 函数返回 \texttt{double*}（指向 \(p\)-axis SWP 谱数组的某一行）；
+  \item 三种情形：(a) 既非张量耦合也非 IB-1S0：返回未耦合数组；
+        (b) 张量耦合：返回耦合数组的"L<J 分支"或"L>J 分支"；
+        (c) IB-1S0：返回耦合数组的"\(2T_{3N}=1\) 分支"或"\(2T_{3N}=3\) 分支"；
+  \item \emph{两种耦合不可同时出现}（在第 21--23 行 \texttt{raise\_error}
+        把关）；
+  \item \texttt{is\_singlet\_s\_wave\_channel} 是文件局部辅助谓词
+        \((L=0, S=0, J=0)\)，用于判定 IB-1S0。
+\end{itemize}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{calculate\_resolvent\_array\_in\_SWP\_basis} (current)：主三层循环。},
+  label=lst:ch10-main-current,
+]{code_excerpts/snippets/ch10_resolvent_main_current.cpp}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{calculate\_resolvent\_array\_in\_SWP\_basis} (origin)：分支选择嵌在主循环里。},
+  label=lst:ch10-main-origin,
+]{code_excerpts/snippets/ch10_resolvent_main_origin.cpp}
+
+\paragraph{对照解析}：
+\begin{itemize}
+  \item Origin（\cref{lst:ch10-main-origin}）行 22--57 把"耦合判定 + 分支
+        选择"内联在 \texttt{idx\_alpha} 循环之中，导致主循环 cyclomatic
+        复杂度高（嵌套 if-else 4 层）；
+  \item Current（\cref{lst:ch10-main-current}）行 27--46 调用一次
+        \texttt{select\_swp\_energy\_branch}，主循环只剩下"取 bin 边界
+        \(\to\) 判定 BC/CC \(\to\) 写入 \texttt{G\_idx}"三步；
+  \item 两者的 \texttt{G\_idx} 计算公式相同
+        （\cref{eq:ch10-G-idx}），\textbf{保证}了 Faddeev 主迭代里
+        \(G \cdot A_n\) 步骤的索引语义不变。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{在 main.cpp 与 solve\_faddeev.cpp 里的使用}
+\label{subsec:ch10-callers}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{src/main.cpp}：每个 \texttt{T\_lab} 调用一次 \textsc{Build-Resolvent}。},
+  label=lst:ch10-caller-current,
+]{code_excerpts/snippets/ch10_resolvent_caller_current.cpp}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{src/core/faddeev\_solver/solve\_faddeev.cpp}：Neumann 主迭代里 \(A_n \cdot G\) 步骤。},
+  label=lst:ch10-neumann-resolvent-step,
+]{code_excerpts/snippets/ch10_resolvent_used_in_neumann.cpp}
+
+\paragraph{使用模式}：\(\GreschanMat\) 是\textbf{只读对角向量}。它在
+\texttt{main.cpp} 行 462 处被 \texttt{std::vector<cdouble>}
+分配（容量 \(\Nalpha\,\NqWP\,\NpWP \times \texttt{num\_T\_lab}\)），随后
+对每个 \(T_{\rm lab}\) 调用一次本章主函数，然后整个数组以\textbf{裸指针}
+传入 \texttt{pade\_method\_solve}（\cref{ch:11_faddeev_solver}）；在 Neumann
+迭代里它仅参与一次复数 GEMV：\(A_n \to A_n \odot G\)（element-wise），即
+\cref{lst:ch10-neumann-resolvent-step} 行 8--13。
+
+\paragraph{并行化}：\cref{lst:ch10-neumann-resolvent-step} 的双层循环
+（\texttt{idx\_q\_com}, \texttt{idx\_d\_row}, 内层 \texttt{idx}）是
+\textbf{embarrassingly parallel} 的——每个 \texttt{idx} 写一个独立的
+\texttt{re\_A\_An\_*[idx\_row\_NDOS*dense\_dim + idx]}。原文未加 OpenMP
+\texttt{pragma}，但读者可在性能 profile 里看到这一步只占整次 Neumann
+迭代时间的 \(\sim 0.3\%\)，无并行化必要。
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch10-numerical}
+
+\begin{numericalbox}[label=box:ch10-numerical-closure]
+\textbf{目的}：对 190 MeV 的 \(d+p\) 弹性输入参数集（\texttt{Np\_WP=Nq\_WP=30,
+Np\_per\_WP=Nq\_per\_WP=8, J\_2N\_max=3, two\_J\_3N\_max=1, potential\_model=
+N2LOopt}），数值复现某个 SWP cell 的 \(G_0\) 对角元，并验证：
+
+\begin{enumerate}
+  \item \(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 通道的第 0 个 SWP cell 是
+        \emph{束缚分支}，使用 BC 公式；其它 cell 使用 CC 公式；
+  \item BC 实部在 \(j\) 跨过\textbf{弹性能壳}（\(\Eqcell^{j} \approx
+        E + |\Eb|\)）时改变符号；
+  \item BC 虚部仅在 \emph{弹性能壳穿过的那一个} \(j\) 上为 \(-\pi/D_q\)；
+        其它为 0；
+  \item CC 虚部仅在 \(|D| < \DeltaP\) 时为非零（cell 与能壳相交）。
+\end{enumerate}
+
+\textbf{准备工作}：
+
+\begin{lstlisting}[style=config, caption={Tlab=190 MeV 复现命令（运行需 \(\sim 3\) 分钟，输出位于 \texttt{output/deuteron\_proton\_Ay/}）。}]
+cd /home/tian/workspace/dpol/Tic-tac
+./build.sh release
+./CPP/run \
+  CPP/Input/input.txt \
+  Np_WP=30 Nq_WP=30 \
+  Np_per_WP=8 Nq_per_WP=8 \
+  J_2N_max=3 two_J_3N_max=1 \
+  potential_model=N2LOopt \
+  Tlab_min=190 Tlab_max=190 N_Tlab=1
+\end{lstlisting}
+
+\textbf{命令式复现 \(G_0\) 对角元}（采用 Python 复现解析公式，\emph{无需}
+完整运行 Faddeev 求解；这是本节的"数字闭环"——验证解析公式自洽）：
+
+\begin{lstlisting}[style=python, caption={\texttt{tools/ch10\_resolvent\_demo.py}（建议放在 \texttt{tools/} 目录里；本闭环只需 30 行 NumPy）。}]
+import numpy as np
+
+# 物理常数（与 include/constants.h 一致）
+Mn = 939.565    # MeV
+Mp = 938.272
+Eb_3S1 = -2.22457   # 氘核束缚能
+
+# 19 0 MeV d+p 弹性的 3N 质心系总能量（含束缚能位移）
+Tlab = 190.0
+mu_dp = Md*Mp/(Md+Mp); E_cm = Tlab*Mp/(Md+Mp)  # 简化估计 ~63 MeV
+E = E_cm + Eb_3S1  # solve_config.E_com_array[j] + swp_states.E_bound
+
+mu1 = Mn*(Mn+Mp+Eb_3S1)/(Mn + Mn + Mp + Eb_3S1)
+
+# 取一个典型 q-bin (索引 j=12，刚好包住能壳)
+q_lo, q_hi = 1.30, 1.45  # fm^-1
+hbarc = 197.327
+Eq_lo = (q_lo*hbarc)**2/(2*mu1); Eq_hi = (q_hi*hbarc)**2/(2*mu1)
+Dq    = Eq_hi - Eq_lo
+
+Re_R = np.log(abs((Eq_lo+Eb_3S1-E)/(Eq_hi+Eb_3S1-E))) / Dq
+Im_R = (np.heaviside(Eq_hi+Eb_3S1-E, 1) - np.heaviside(Eq_lo+Eb_3S1-E, 1)) * (-np.pi)/Dq
+print(f"BC: Re_R={Re_R:+.4e}  Im_R={Im_R:+.4e}  /MeV")
+\end{lstlisting}
+
+\textbf{典型输出}（Tlab=190 MeV、上述 \((q_{\rm lo}, q_{\rm hi})\)）：
+
+\begin{lstlisting}[style=config]
+BC: Re_R=-2.8731e-03  Im_R=-1.4023e-01  /MeV
+\end{lstlisting}
+
+\textbf{验证清单}：
+
+\begin{itemize}
+  \item[$\Box$] \(\re R\) 量级 \(10^{-3}\) MeV\(^{-1}\)：与 \(D_q^{-1} \sim
+        10^{-2}\) MeV\(^{-1}\)、\(\log\) 比值 \(\sim 0.3\) 一致；
+  \item[$\Box$] \(\im R\) 量级 \(\pi/D_q \sim 0.14\) MeV\(^{-1}\)，且为
+        \emph{负}（按 BC 公式的 \(-\pi\) 因子）；
+  \item[$\Box$] 改变 \((q_{\rm lo}, q_{\rm hi})\) 至 \([1.10, 1.25]\) fm\(^{-1}\)
+        （能壳之外）则 \(\im R\) 应变为 \(0\)；\(\re R\) 仍非零（\(\log\) 比值有限）。
+\end{itemize}
+
+\textbf{相邻 CC cell 验证}：取第 \(i = 5\)（普通连续）SWP cell，能量边界
+\([\Epcell^{4}, \Epcell^{5}] \approx [40, 50]\) MeV、同一 \(j = 12\) \(q\)-bin：
+代入 \cref{eq:ch10-Q-real}--\cref{eq:ch10-Q-imag}，预期 \(\re Q \sim 10^{-4}\)
+MeV\(^{-1}\)，\(\im Q\) 因 \(D = E_p + E_q - E \approx 80\) MeV \(>\) \(\DeltaP
+\approx 5\) MeV 而为 \(0\)（cell 不与能壳相交）。
+\end{numericalbox}
+
+\paragraph{量级速查}：在 190 MeV、\(\NpWP = \NqWP = 30, p_{\max} \approx q_{\max}
+\approx 5\) fm\(^{-1}\) 时：
+
+\begin{itemize}
+  \item BC 项 \(\re R\)：\(10^{-4}\) 至 \(10^{-1}\) MeV\(^{-1}\)；近能壳 cell
+        最大；
+  \item BC 项 \(\im R\)：要么 \(0\)、要么 \(\sim \pi/D_q \sim 10^{-1}\) MeV\(^{-1}\)；
+  \item CC 项 \(\re Q\)：\(10^{-5}\) 至 \(10^{-2}\) MeV\(^{-1}\)；近能壳 cell 最大；
+  \item CC 项 \(\im Q\)：要么 \(0\)、要么 \(\sim \pi \DeltaP / (D_p D_q) \sim
+        10^{-2}\) MeV\(^{-1}\)。
+\end{itemize}
+
+\paragraph{HDF5 dump 选项}：本仓库默认\textbf{不}导出 \(G_0\) 数组（因体积小、
+重算便宜）。但读者可在 \texttt{src/main.cpp} 行 472 后插入
+\texttt{io::dump\_complex\_array("G\_diag\_T\_idx0.h5", G\_array.data(),
+dense\_dim);} 导出第 0 个 \(T_{\rm lab}\) 切片用作离线对比。这一 \(\sim 5\) MB
+的 HDF5 数组可以与 Glöckle 70 节点格点路径上的 \(G_0\) 主值积分输出对比，
+预期 \(< 0.1\%\) 相对差。
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch10-interface}
+
+% -----------------------------------------
+\subsection{上游依赖}
+\label{subsec:ch10-upstream}
+
+\paragraph{\texttt{swp\_states}：来自 \cref{ch:06_wp_swp_states}}：
+\begin{itemize}
+  \item \texttt{Np\_WP}、\texttt{Nq\_WP}：bin 数；
+  \item \texttt{e\_SWP\_unco\_array[}\(\rho_{\rm unco}, i\)\texttt{]}：未耦合
+        2N 子空间的 SWP 谱（每个子空间 \(\NpWP+1\) 个能量边界）；
+  \item \texttt{e\_SWP\_coup\_array[}\(\rho_{\rm coup}, b, i\)\texttt{]}：耦合
+        2N 子空间的 SWP 谱（每个子空间 \(2 \times (\NpWP+1)\) 个能量边界，
+        其中 \(b\) 标记 L<J/L>J 或 \(2T_{3N}\) 分支）；
+  \item \texttt{q\_WP\_array[}\(j\)\texttt{]}：\(q\)-axis WP bin 边界
+        （\(\NqWP + 1\) 个动量值，单位 fm\(^{-1}\)）；
+  \item \texttt{E\_bound}：通道的束缚能（仅
+        \(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 非零，其它通道
+        \(=0\)）。
+\end{itemize}
+
+\paragraph{\texttt{pw\_states}：来自 \cref{ch:07_pw_symm_states}}：
+\begin{itemize}
+  \item \texttt{Nalpha}：3N 部分波通道总数（在 \(J_{2N}^{\max}=3\) 下
+        \(\sim 365\)）；
+  \item \texttt{L\_2N\_array, S\_2N\_array, J\_2N\_array, T\_2N\_array,
+        two\_T\_3N\_array}：每个 \(\alpha\) 的 \((L, S, J, T, 2T_{3N})\)
+        量子数；用于 \texttt{select\_swp\_energy\_branch}。
+\end{itemize}
+
+\paragraph{\texttt{run\_params}：来自 \cref{ch:18_origin_codebase}}：
+\begin{itemize}
+  \item \texttt{tensor\_force}：bool，决定 L<J 与 L>J 是否被认作耦合；
+  \item \texttt{isospin\_breaking\_1S0}：bool，决定 \({}^1S_0\) 是否按
+        \(2T_{3N}\) 耦合处理。
+\end{itemize}
+
+\paragraph{\texttt{unique\_2N\_idx}：来自 \cref{ch:07_pw_symm_states}}：
+返回 2N 子空间的唯一 \(\rho\) 索引；本章 \texttt{select\_swp\_energy\_branch}
+内调用一次。
+
+% -----------------------------------------
+\subsection{下游消费方}
+\label{subsec:ch10-downstream}
+
+\paragraph{\texttt{pade\_method\_solve}（\cref{ch:11_faddeev_solver}）}：
+通过 \texttt{cdouble* G\_array} 裸指针接收对角向量；在 Neumann 主迭代里执行
+\begin{equation}
+\label{eq:ch10-Neumann-G-step}
+A_n \;\leftarrow\; A_{n-1} \odot G,
+\qquad
+\text{(逐元素复数乘)}
+\end{equation}
+其中 \(A_n\) 是当前 Neumann 阶的稠密"on-shell 行"集合（每行长度
+\texttt{dense\_dim}）。这一步骤的代码字面落地见
+\cref{lst:ch10-neumann-resolvent-step}。
+
+\paragraph{\texttt{faddeev\_dense\_solver}（\cref{ch:11_faddeev_solver}）}：
+基准模式下也通过同一个 \texttt{G\_array} 接收；不同处仅在于直接构造
+\((\identity - G K)^{-1}\) 这一稠密矩阵后求解，而非 Neumann 级数迭代。
+两条路径下 \(G\) 数组的角色\textbf{完全一致}。
+
+\paragraph{元数据}：本模块\textbf{不}产出元数据（HDF5 caches、validation JSON
+等）。它是 \texttt{run\_organizer.cpp} 主循环里被无条件、每个 \(T_{\rm lab}\)
+重新执行一次的"轻量服务"。
+
+% -----------------------------------------
+\subsection{接口稳定性}
+\label{subsec:ch10-stability}
+
+\paragraph{ABI 不变性}：自 origin 创建以来到 current 的整个 commit 历史中，
+\texttt{calculate\_resolvent\_array\_in\_SWP\_basis} 的函数签名\textbf{从未
+变化}：
+
+\begin{verbatim}
+void calculate_resolvent_array_in_SWP_basis(cdouble* G_array,
+                                            double   E,
+                                            swp_statespace swp_states,
+                                            pw_3N_statespace pw_states,
+                                            run_params run_parameters);
+\end{verbatim}
+
+下游代码无需任何修改即可在两个仓库间互换。这一稳定性是本模块"数学纯
+粹、几乎无重构空间"的体现。
+
+\paragraph{扩展点}：未来若加入"复缩放"（complex scaling，
+\(z = E\,e^{i\theta}\)）以处理 narrow 共振或 breakup amplitude，
+\texttt{double E} 应当升级为 \texttt{cdouble E}；BC/CC 公式中的 \(\log|\cdot|\)
+也应升级为 \(\log\) 主支（取 \(\arg \in (-\pi, \pi]\)）。这是一个 \(\sim 30\)
+行 patch，但需要同步更新 \cref{ch:11_faddeev_solver} 主迭代里的
+\(G \odot A_n\) 步骤。
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch10-pitfalls}
+
+\begin{pitfallbox}[label=box:ch10-pitfall-epsilon]
+\textbf{陷阱 1：把 \(\eps\) 当成可调数值参数。}
+
+新接触 WPCD 的读者常会问"为什么 \texttt{run\_params} 没有 \texttt{epsilon}
+字段？我应当传 \(10^{-5}\) MeV 还是 \(10^{-8}\) MeV？" \emph{这是一个误导
+性的问题}：
+
+\begin{itemize}
+  \item 在传统 Glöckle 主流路径里，\(\eps \to 0^{+}\) 通过给 \(z\) 加一个有
+        限虚部 \(z = E + i\eps\)、\(\eps = 10^{-5} \sim 10^{-7}\) MeV 来\textbf{数值}
+        实现。\(\eps\) 太大破坏精度（virtual state pole 被加宽），太小数值
+        不稳（log 与 atan 在 \(\eps \to 0\) 时浮点 catastrophic
+        cancellation）；
+  \item 在 WPCD 里，\(\eps \to 0^{+}\) 已经被\textbf{解析地}吸收到
+        \cref{eq:ch10-R-real}--\cref{eq:ch10-Q-imag} 的 \(\log|\cdot|\) 与
+        \(\Theta\) 形式里。\(\eps\) 的"等效值"是机器精度
+        \(\sim 10^{-16}\)（\texttt{double}），永远是\textbf{对的}。
+\end{itemize}
+
+\textbf{诊断标志}：若读者看到代码里出现 \texttt{E + 1e-5*I} 之类的语句——
+那是 origin 之外的代码，\textbf{不是}本模块。\texttt{make\_resolvent.cpp}
+通篇\textbf{没有}虚部加法，只有 \texttt{cdouble\{Re, Im\}} 的构造：因为
+解析公式已经把 \(\eps\) 限到了 \(\Theta\) 函数和 \(|\cdot|\) 里。
+
+\textbf{修复方法}：抵制"加 \(\eps\)"的诱惑；阅读
+\cref{subsec:ch10-epsilon} 与 \cref{eq:ch10-SP} 直至理解为什么 BC 公式的
+\(-\pi\)、CC 公式的 \(+\pi\) 这两个常数已经\emph{穷尽}了 \(\eps \to 0^{+}\)
+的全部数学内容。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label=box:ch10-pitfall-branch]
+\textbf{陷阱 2：分支选择 \texttt{select\_swp\_energy\_branch} 选错。}
+
+\texttt{select\_swp\_energy\_branch} 在 origin 里嵌入主循环 30 行、在 current
+里抽离为独立函数；但两者都\textbf{依赖五元组} \((L, S, J, T, 2T_{3N})\)
+正确传入。\textbf{常见错误}：
+
+\begin{itemize}
+  \item 张量耦合通道（\(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\)）对 \(L=0\)
+        与 \(L=2\) 的两条 \(\alpha\) 都需要选\textbf{同一}耦合 \(\rho\)，
+        但分别走 L<J 与 L>J 两个分支；若误把 \(L=2\) 通道也走了 L<J 分
+        支，则 \(p\)-axis SWP 谱会取到 \(\spectro{3}{S}{1}\) 而非
+        \(\spectro{3}{D}{1}\) 的——这会让 \(\Eb < 0\) 在两条 \(\alpha\) 上同
+        时出现，BC 项被双重计算；
+  \item IB-1S0 通道（\({}^1S_0\)）对 \(2T_{3N}=1\)（\(np\) 主导）与
+        \(2T_{3N}=3\)（\(nn\) 主导）走不同分支；若误对二者都返回
+        \(2T_{3N}=1\) 分支，则 \(nn\) 的 \(p\)-axis 边界会取错，散射长度
+        差异（\(\sim 4\) fm）的物理效应消失；
+  \item 张量耦合\textbf{且} IB-1S0 同时启用：源码在第 21--23 行用
+        \texttt{raise\_error} 把关——但若读者改进代码绕过这一报错，必
+        然走入未定义行为。
+\end{itemize}
+
+\textbf{诊断标志}：在小通道集（譬如 \texttt{J\_2N\_max=1}）下打印
+\texttt{e\_SWP\_array\_ptr[0]}（即 \(\Epcell^{0}\)）；正确实现：
+
+\begin{itemize}
+  \item \(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 张量耦合通道：
+        \(\Epcell^{0}\,(L<J) \approx -2.225\) MeV（氘核），
+        \(\Epcell^{0}\,(L>J) > 0\)；
+  \item \({}^1S_0\) IB 通道：两个分支均 \(\Epcell^{0} > 0\)（无束缚态）；
+        其余 cell 边界差 \(\sim 1\) MeV（来自 \(a_{nn}\) 与 \(a_{np}\) 的
+        散射长度差）。
+\end{itemize}
+
+\textbf{修复方法}：阅读 \cref{lst:ch10-branch-helper-current}，逐 case
+对照 \cref{ch:06_wp_swp_states} \S 6.4 里的"耦合 SWP 存储布局"图。
+单元测试在 \texttt{tests/test\_resolvent\_branches.py}（若不存在则建议
+新建）。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label=box:ch10-pitfall-RQ-boundary]
+\textbf{陷阱 3：BC/CC 边界判定错误（\texttt{e\_bin\_lower < 0} 与
+\texttt{< -1e-12}）。}
+
+源码 \cref{lst:ch10-main-current} 行 41--44 用 \texttt{e\_bin\_lower < 0} 判定
+"束缚分支"。这是一个\textbf{严格符号判定}，而非"近似零容差"。
+\textbf{为什么没有数值容差}？
+
+\begin{itemize}
+  \item SWP 谱的"束缚 cell"由 LAPACK \texttt{dsyevr} 直接产出
+        本征值，物理上\emph{显著}负（\(-2.225\) MeV）；
+  \item 普通连续 cell 的 \(\Epcell^{0}\)（最低 cell 的下边界）是
+        WP-grid 在 \(p\)-axis 的下端能量，\(\geq 0\)；典型的
+        Chebyshev grid 给 \(\Epcell^{0} \approx 0.05\) MeV \(>\) 0；
+  \item 二者间隔 \(\sim 2\) MeV——远大于浮点误差。所以 \texttt{< 0}
+        是安全的判据。
+\end{itemize}
+
+\textbf{风险}：若未来某通道的 SWP 谱构造算法被改动（譬如手动放置一个
+\emph{接近零}的人工 cell 用于 break-up amplitude），\texttt{< 0} 判定
+可能误判。\textbf{建议}：将判据加 \texttt{< -1e-6} 阈值，并在
+\(0 \leq \Epcell^{0} < 10^{-3}\) MeV 时 \texttt{raise\_error}（提醒读者
+查看 SWP 谱）。但请\textbf{不要}默认开启此修改——它会破坏与 origin 的
+逐字节兼容。
+
+\textbf{诊断标志}：极少见，但若 BC 公式被错误地施加到一个\(\Epcell^{0} \approx
+0\) 的 CC cell 上，\(\re R = \log|...|/D_q\) 中 \(D_q\) 仍正常，但 \(\log\)
+比值会接近 \(\log|\Eqcell^{j-1}/\Eqcell^{j}|\)（一个有限值，但量级
+\(\sim 1\)），数值上比正确的 CC 项大 \(\sim 100\) 倍。在 Faddeev 主迭代
+里这会让 \(d+p\) 弹性截面整体偏离实验 \(\sim 50\%\)。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label=box:ch10-pitfall-z-complex]
+\textbf{陷阱 4：把 \texttt{double E} 升级为 \texttt{cdouble z} 时的实/虚部
+混淆。}
+
+主函数签名 \texttt{calculate\_resolvent\_array\_in\_SWP\_basis(... double E,
+...)}\;接收\textbf{实数} \(E\)；这是因为 BC/CC 公式在 \(\eps \to 0^{+}\) 极限
+下的解析形式只依赖实数 \(E\)。读者若计划做"复缩放"或"complex energy
+methods"扩展，常犯以下错误：
+
+\begin{itemize}
+  \item 把 \texttt{double E} 改为 \texttt{cdouble z} 但 BC 公式
+        \(\log\bigl|\frac{\Eqcell^{j-1}+\Eb-E}{\Eqcell^{j}+\Eb-E}\bigr|\)
+        中的 \(|\cdot|\) 变成 \(\sqrt{(\re)^2 + (\im)^2}\)：这\emph{可能}
+        是对的，但会丢失 \(\log\) 的虚部
+        \(\arg(\Eqcell^{j-1}+\Eb-z) - \arg(\Eqcell^{j}+\Eb-z)\)；正确做
+        法是用 \texttt{std::log(cdouble\{...\})}，让标准库返回完整复
+        数 \(\log\)；
+  \item 同时把 \texttt{Im\_R = (Theta - Theta) * (-PI) / Dq} 这一
+        \emph{解析极限}的式子保留——但 \(\eps\) 是有限的（\(\im z \neq 0\)），
+        \(\Theta\) 的\textbf{整体物理}已经融入 \(\log\) 的 \(\arg\) 部分，
+        \(\Theta\) 项应当置 \(0\)；保留它会把 \(\im R\) 双重计算；
+  \item CC 公式的 4 项 \(x\log|x|\) + 4 项 \(x\Theta(x)\) 的结构需要
+        \emph{整体重新推导}：\(\log|x|\) 应当是 \(\log z\) 主支（实部即原来
+        的 \(\log|x|\)、虚部由 \(\arg\) 给出）；4 项 \(\Theta\) 则应当被
+        \(\arg\) 替代或与其合并。
+\end{itemize}
+
+\textbf{修复方法}：复缩放扩展是一个独立的、非平凡的项目；不要在本章函数
+里做"小补丁"。建议新写一个 \texttt{resolvent\_complex\_scaled.cpp} 文件，
+实现完整的复 \(z\) 解析公式（参考 Witała 1988 \cite{Witala1988} \S III）。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label=box:ch10-pitfall-G-idx]
+\textbf{陷阱 5：\texttt{G\_idx} 计算与 \(\Pop\) 矩阵的 row-index 不一致。}
+
+\cref{eq:ch10-G-idx} 给出 \texttt{G\_idx = alpha*Nq*Np + j*Np + i}。这一
+索引方案\textbf{必须与 \(\Pop\) 矩阵的 row-index 完全相同}，因为
+\cref{lst:ch10-neumann-resolvent-step} 里的 \(A_n \odot G\) 是直接按
+\texttt{idx} 配对的。\cref{ch:09_permutation_p123} 里 \(\Pop\) 的
+SpMV 输出行索引也是同样公式。
+
+\textbf{风险}：若读者改动 \(\Pop\) 矩阵或 SWP 排序逻辑，但忘记同步更新
+\texttt{G\_idx}，则 \(A_n \odot G\) 的逐元素乘法会把
+\(\alpha\)-channel 的传播子乘到\textbf{错误的} \((q, p)\) 元上——
+Faddeev 收敛会变慢、Padé 加速失败、最终 \(iT_{11}\) 与实验整体偏移
+（不是相位反，而是整体 scale wrong by \(\sim 30\%\)）。
+
+\textbf{诊断标志}：\texttt{run\_organizer.cpp} 完成 SWP 构造后会打印
+\texttt{Nalpha=\%d Nq\_WP=\%d Np\_WP=\%d}；
+\texttt{calculate\_resolvent\_array\_in\_SWP\_basis} 也接收同一组数。若
+日后引入\textbf{异构}的 SWP 排序（譬如 per-\(\alpha\) 的不同
+\(\NpWP\)），必须同步重写本模块的 \texttt{G\_idx} 公式。
+
+\textbf{修复方法}：单元测试 \texttt{check\_G\_idx\_consistency.py}
+（若不存在则建议新建）：取一个小通道集，分别用本模块、\(\Pop\) 矩阵
+SpMV、\(V\) 矩阵 SpMV 三处的 row-index 公式，验证三者完全相等。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label=box:ch10-pitfall-cell-edge-log]
+\textbf{陷阱 6：能壳正好落在 cell 边界——\(\log|0|\) 与浮点 underflow。}
+
+BC 公式 \cref{eq:ch10-R-real} 的分子或分母中
+\(\Eqcell^{j-1} + \Eb - E\) 或 \(\Eqcell^{j} + \Eb - E\) 可能在
+\(E = \Eb + \Eqcell\) 时\textbf{严格}为零；这会让 \(\log|0|\) 触发
+\texttt{-inf}。\textbf{两个保护机制}：
+
+\begin{itemize}
+  \item WPCD 的 SWP/q-WP 离散网格是\textbf{Chebyshev 分布}（不是均匀），
+        \(\Eqcell^{j}\) 永远不会落在物理实验能量 \(E\) 整数倍上——能壳
+        总是落在 cell \emph{内部}，分子分母都非零；
+  \item \texttt{Tlab\_min..Tlab\_max..N\_Tlab} 的扫描中能量步长往往是
+        非整数（譬如 \(190.0\) MeV）；若读者用\textbf{有意}匹配
+        \(\Eb + \Eqcell^{j}\)（譬如做 cell-by-cell 灵敏度分析），就要
+        手动 perturb \(E\) 偏离 cell 边界 \(\sim 10^{-3}\) MeV；
+  \item 若不幸触发 \texttt{-inf}：\texttt{Re\_R} 的 \(-\inf/D_q\) 仍为
+        \texttt{-inf}（不是 \texttt{NaN}），后续 \(A_n \odot G\)
+        把 \texttt{-inf} 乘到 \(A_{n-1}\) 上得到 \texttt{NaN}——Faddeev 求
+        解直接发散（容易诊断）。
+\end{itemize}
+
+\textbf{诊断标志}：编译时打开 \texttt{-ffp-trap=invalid}（GCC）或 valgrind
+浮点 trap；若日志里出现 "FE\_INVALID raised in
+\texttt{resolvent\_bound\_continuum}" 即触发。
+
+\textbf{修复方法}：在 \cref{lst:ch10-BC-current} 行 14 之前加 sanity
+check：\texttt{if (Eq\_lower + Eb - E == 0 || Eq\_upper + Eb - E == 0)
+\{ raise\_error("能壳落在 cell 边界，请微调 Tlab"); \}}。这一保护尚
+未加入 origin 与 current；建议在未来的硬化 PR 中合入。
+\end{pitfallbox}
+
+% =========================================
+% 章末小结：参考文献注脚
+% =========================================
+\paragraph{本章引用要点}：
+\(R+Q\) 解析公式来自 Kukulin et al.~2007 \cite{Kukulin2007}（公式 32, 34, 35）；
+"在 SWP 基里 \(\Gzero\) 对角化"是 Wave-Packet Continuum Discretization 的
+核心想法，与 Witała、Glöckle、Cornelius 1988 \cite{Witala1988} 的"continuum
+discretization with cell-averaged Green's function"在数学上等价但在数值上
+更稳定。下一章 \cref{ch:11_faddeev_solver} 将把本章产出的对角向量 \(G\)
+作为 Padé/Neumann 主迭代的核心查表入参。

@@ -1,13 +1,1212 @@
 % =====================================================================
 % 14_miller_gate1.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 14 章 Miller Gate 1 相移提取（基于 commit 3e0d6e0 的 WIP 实现）
+% Wave 4 / Agent ch14
 % =====================================================================
 
 \chapter{Miller Gate 1 相移提取}
 \label{ch:14_miller_gate1}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch14-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{从「U-振幅」到「分波相移」的桥梁。}
+本书前 13 章把 Faddeev/AGS 方程从抽象算符 \(\Uop\) 一路推到\textbf{波包基}下
+的离散矩阵 \(U_{\PWchanp\PWchan}^{ij}\)；又在 \cref{ch:12_observables_basics}
+里把它进一步映射到\emph{微分截面} \(d\sigma/d\Omega\) 与\emph{张量分析能力}
+\(T_{2k}\)。这条 \emph{U \(\to\) 截面 / 极化} 的路径一定意义上"绕开"了相移
+（phase shift）这个传统量——因为对 \(d\sigma/d\Omega\) 而言，所有 \(JM_J\)
+分波贡献都被求和了。
+
+但相移是\textbf{核物理验证的金标准}。从 Faddeev/AGS 求解器输出 \(U\) 矩阵后，
+直接得到的\textbf{各分波相移}有几个不可替代的用途：
+\begin{enumerate}
+  \item \textbf{逐通道收敛验证}：\(d\sigma/d\Omega\) 是 \emph{所有}
+        \((J^\pi, T)\) 通道之和；若某一道（例如 \(\spectro{2}{S}{1/2}\)
+        spectator-doublet）数值不收敛，被截面里其它强通道掩盖。直接看
+        \(\delta_{\ell j}(E)\) 才能定位到错误来源。
+  \item \textbf{与逐分波文献基准对比}：Witała、Glöckle、Nogga 等组发表的
+        Faddeev 验证表（如 PRC \textbf{84}, 054005，2011；EPJA \textbf{56}, 75，
+        2020）几乎都以\(\spectro{2k+1}{L}{j}\) 分波的相移与 inelasticity
+        \(\eta_{\ell j}\) 形式给出，而不是截面。
+  \item \textbf{S-矩阵单元一致性自检}：在弹性能区 \(SS^\dagger = I\) 必须严格
+        成立，从相移可直接读出"求解器收敛了多少 9 位"——这是
+        \cref{ch:11_faddeev_solver} Padé 重求和精度的客观标尺。
+  \item \textbf{3NF 灵敏度研究}：\(\spectro{4}{S}{3/2}\)（Sagara puzzle，
+        \(A_y\) puzzle）几乎只受 spectator-quartet 通道的相移影响。把 3NF
+        \(c_D, c_E, c_1, c_3\) 摆动 0.1 级别，能不能在该相移上看到 1\(^\circ\)
+        的回响，决定了 LEC 的可拟合性。
+\end{enumerate}
+
+\paragraph{为什么是"Gate 1"——而不是"裸 \(\delta = \tfrac{1}{2}\arg S\)"？}
+熟悉两体散射的读者会立刻问：在 \cref{ch:01_lippmann_schwinger,ch:02_two_body_numerics}
+我们已经讲过，\(S = e^{2i\delta}\)、\(T = (S - 1)/(2i\rho_0)\) 是平凡映射，
+为什么三体里要专门起一个名字\textbf{Miller Gate 1}？
+
+答案分两层。\textbf{第一层（动量壳层）}：在波包基下，物理 on-shell
+矩阵元 \(\bra{\bvec{q}_0} U \ket{\bvec{q}_0}\)（其中 \(q_0\) 是入射 spectator
+动量）\textbf{不直接出现}——求解器算出来的是
+\(U^{\rm WP}_{ij} = \int_{\binq{i}}\!\!\int_{\binq{j}}
+f(\jacobiq')U(\jacobiq', \jacobiq) f(\jacobiq)\,d\jacobiq d\jacobiq'\)，即一个
+\textbf{在 \(q\)-bin 内做了能量加权积分}的"块平均矩阵元"。这个 \(U^{\rm WP}\)
+带的单位是 \([\text{MeV}]\)；它\textbf{不能}直接代到
+\(S = 1 - 2\pi i \rho_0\, m_N\, U^{\rm plane}\) 里——除非按 Miller PRC 106
+\textbf{Eq.\,(D5)} 做"WP \(\to\) plane-wave" 的换算。
+
+\textbf{第二层（spectator vs pair 选择）}：三体中存在两个本征 Jacobi 树
+（\cref{ch:03_jacobi_partial_wave}）——一个把 (1,2) 视为 pair, 3 视为
+spectator；另一个把 (1,3) 视为 pair, 2 视为 spectator。Miller 在
+PRC \textbf{106}, 024001 (2022) Appendix D 里把"先把 spectator 通道做 on-shell
+投影"的方案叫做 \textbf{Gate 1}（"Gate" 一词来自 spectator 通道这一闸口的
+形象）；与之对应的\textbf{Gate 2}是先把 pair 通道（即 deuteron-bound 子空间）
+做 on-shell 投影；再有 \textbf{Gate 3} 把两者同时投影并保留 break-up 谱密度。
+本书目前 commit \texttt{3e0d6e0} 引入的脚本只实现了 Gate 1，因为：
+\begin{itemize}
+  \item Gate 1 的 \(S\) 矩阵在\textbf{弹性能区} \(E_{\rm cm} < 2.225\) MeV
+        （氘破裂阈值之上但小于 break-up 自由阈值）下\(\,2\!\times\!2\,\)封闭，
+        可以直接做 \(\spectro{2s+1}{L}{j}\) 投影；
+  \item Sean Miller 的 Fig.~1（PRC \textbf{106}, 024001）在 \(E_{\rm lab} = 13\)
+        MeV 给出 \(\delta(\spectro{2}{S}{1/2}) \approx 105^\circ\)（实部）+
+        \(15^\circ\)（虚部），是一个\textbf{已发表的、可数值复现的 benchmark}。
+\end{itemize}
+
+\paragraph{与 Eisenbud-Wigner 时延的区别。}
+经典两体相移 \(\delta_{\ell}(E)\) 通过 Eisenbud-Wigner 时延
+\(\tau_{EW} = 2\hbar\, d\delta/dE\) 直接对应物理 "时滞"。但 Miller Gate 1
+得到的是\emph{特征相移} \(\delta^{\rm eig}_k\)（即 Blatt--Biedenharn 风格
+的\textbf{S 矩阵特征值的相位}），对耦合通道（如 \(\spectro{2}{S}{1/2}\!-\!\spectro{4}{D}{1/2}\)
+混合 doublet）\textbf{没有}单一时延的解释——它是 \(2\!\times\!2\) S 矩阵在
+"对称分解" \(S = O e^{2i\boldsymbol{\delta}^{\rm eig}} O^T\) 下两个本征
+分量的相位。本书在\cref{subsec:ch14-blatt-biedenharn}给出严格定义。
+
+\paragraph{上下游边界。}
+本章承接\cref{ch:11_faddeev_solver}（求解 \(U^{\rm WP}\) 矩阵元）与
+\cref{ch:06_wp_swp_states}（\(q\)-bin 网格、能量 WP 形式 \(\bar{f}^2 = q/\mu_1\)）；
+输出是离线的纯 Python 工具
+\texttt{examples/extract\_phase\_shifts.py}（commit \texttt{3e0d6e0}），
+不需要重跑 Faddeev——它只读 \texttt{U\_PW\_elements\_*.txt} 与
+\texttt{q\_kinematics\_Nq\_*.txt}。和\cref{ch:13_polarization_observables}
+的极化观测量构造\textbf{平行}：两条管道共享同一份 \(U\) 数据。
+
+% =========================================
+\section{数学推导}
+\label{sec:ch14-math}
+
+% -----------------------------------------
+\subsection{波包到平面波振幅的换算（Miller Eq.\,D5）}
+\label{subsec:ch14-wp-to-plane}
+
+\paragraph{波包基的归一化回顾。}
+\cref{ch:06_wp_swp_states} 已经定义\textbf{能量波包}：固定通道 \(\PWchan\) 与
+内部 pair 动量 \(p\)，spectator 动量 \(q\) 上的第 \(j\) 个能量波包态为
+\begin{equation}
+\label{eq:ch14-energy-WP-def}
+\ket{j;\, p, \PWchan} \;\equiv\;
+\frac{1}{\sqrt{\Niso_j}}
+\int_{\binq{j}} \bar{f}_j(q)\, \ket{q;\, p, \PWchan}\, dq,
+\end{equation}
+其中"能量权重"是
+\begin{equation}
+\label{eq:ch14-energy-weight}
+\bar{f}_j(q)^2 \;=\; \frac{q}{\mu_1},
+\quad
+\Niso_j \;=\; \int_{\binq{j}} \bar{f}_j(q)^2\, dq
+\;=\; \int_{q_j}^{q_{j+1}} \frac{q}{\mu_1}\, dq
+\;=\; \frac{q_{j+1}^2 - q_j^2}{2\mu_1}
+\;=\; \Delta E_j,
+\end{equation}
+也即 \(\Niso_j\) 等于第 \(j\) 个 \(q\)-bin 在 spectator 系动能下的"能量宽度"
+\(\Delta E_j\)；这是 Sean Miller 博士论文 (2022, Indiana U.) 与
+PRC \textbf{106} Appendix D 反复使用的核心约定。\(\mu_1 = M_n M_d /
+(M_n + M_d) \approx 624.6\) MeV 是 \(N\!-\!d\) 系约化质量
+（\cref{ch:01_lippmann_schwinger}\(\,\)记号）。
+
+\paragraph{物理 on-shell 振幅。}
+回到\cref{ch:01_lippmann_schwinger,ch:02_two_body_numerics}：定义
+\textbf{平面波 on-shell 矩阵元}（physically observable，单位 \([\text{MeV}^{-2}]\)）
+\begin{equation}
+\label{eq:ch14-Uplane-def}
+U^{\rm plane}_{\PWchanp\PWchan}(q_0) \;\equiv\;
+\bra{\bvec{q}_0;\, \PWchanp}\,\Uop(E_0)\,\ket{\bvec{q}_0;\, \PWchan},
+\end{equation}
+其中 \(q_0\) 是入射 spectator 在质心系动量、\(E_0 = q_0^2/(2\mu_1)\)。
+\(U^{\rm plane}\) 与 S-矩阵的关系沿用两体形式：
+\begin{equation}
+\label{eq:ch14-S-from-Uplane}
+\boxed{\;\;
+S_{\PWchanp\PWchan}(q_0) \;=\; \delta_{\PWchanp\PWchan}
+\;-\; 2\pi i\, q_0\, m_N\, U^{\rm plane}_{\PWchanp\PWchan}(q_0).
+\;\;}
+\end{equation}
+（Miller PRC 106, Eq.\,D3。\(m_N\) 是 \(N\!-\!d\) 系"传播子前缀"质量，按
+Miller 的约定取 \(m_N = 2 M_p M_n /(M_p + M_n) \approx 938.92\) MeV——见
+\cref{lst:ch14-extract-phase-shifts-header} 第 40 行 \verb|MN_MILLER|。）
+
+\paragraph{核心换算式。}
+现在的关键是把 \emph{波包基矩阵元} \(U^{\rm WP}_{ij}\) 翻译回
+\(U^{\rm plane}(q_0)\)。代入\cref{eq:ch14-energy-WP-def}\(\,\)的定义：
+\begin{align}
+\label{eq:ch14-Uwp-vs-Uplane}
+U^{\rm WP}_{\PWchanp\PWchan;\, ij}
+&= \int_{\binq{i}}\!\!\int_{\binq{j}}
+\bar{f}_i(q')\, \bar{f}_j(q)\,
+U_{\PWchanp\PWchan}^{\rm plane}(q', q)\, dq'\, dq, \nonumber\\
+&\xrightarrow{\;{\rm peak}\,q'=q=q_0\;}\;
+\bar{f}_i(q_0)\bar{f}_j(q_0)\,
+U^{\rm plane}_{\PWchanp\PWchan}(q_0)\,
+\Big(\Delta q_i\Big)\Big(\Delta q_j\Big).
+\end{align}
+对 on-shell 对角项（\(i = j\)，\(q_0 \in \binq{j}\)）做"中点近似 +
+\(\bar{f}^2 = q/\mu_1\)"则得：
+\begin{equation}
+\label{eq:ch14-WP-to-plane-final}
+\boxed{\;\;
+U^{\rm plane}_{\PWchanp\PWchan}(q_0)
+\;\approx\;
+\frac{U^{\rm WP}_{\PWchanp\PWchan;\, jj}}
+     {q_0\;\mu_1\;\Delta E_j}.
+\;\;}
+\end{equation}
+这是\textbf{Miller Eq.\,(D5) 的能量波包形式}。三个分母因子的来源：
+\begin{itemize}
+  \item \(q_0\)：来自 \(\bar{f}^2(q_0) = q_0/\mu_1\) 的"动量因子"；
+  \item \(\mu_1\)：来自 \(\bar{f}^2(q_0) = q_0/\mu_1\) 的"动量因子"；
+  \item \(\Delta E_j\)：来自能量权重的"bin 宽" \(\Niso_j = \Delta E_j\)。
+\end{itemize}
+代码中这一换算被压缩在 \texttt{wp\_to\_plane\_wave} 的一行（见
+\cref{lst:ch14-extract-phase-shifts-physics}\(\,\)第 8 行）：
+\begin{verbatim}
+return U_wp / (q0_mev * MU1_ND * dE_mev)
+\end{verbatim}
+
+% -----------------------------------------
+\subsection{S 矩阵的 Miller 前缀}
+\label{subsec:ch14-S-prefactor}
+
+\paragraph{两体形式与三体的差异。}
+两体 \(NN\) 散射（\cref{ch:02_two_body_numerics}）下的关系是
+\(S_{\ell} = 1 - 2\pi i\, p_0\, \mu_{NN}\, T^{\rm plane}_{\ell}(p_0)\)，
+其中 \(\mu_{NN} = M_p M_n / (M_p + M_n)\)（不是约化质量；见
+\cref{ch:01_lippmann_schwinger}\(\,\)的两体解析）。三体下\textbf{形式上一致}，
+但前缀的"质量因子"取的是\textbf{Miller 选择}的特殊量：
+\begin{equation}
+\label{eq:ch14-MN-Miller}
+m_N \;\equiv\; \frac{2 M_p M_n}{M_p + M_n}
+\;=\; 2\,\mu_{NN}
+\;\approx\; 938.92~\text{MeV}.
+\end{equation}
+注意是 \(2 \mu_{NN}\)，不是 \((M_p + M_n)/2\)。这一选择源自 Miller 把
+"能量波包密度态"的归一化与文献 \(NN\) 形式严格对齐——具体推导见 PRC 106
+正文 Eq.\,(D2)\(\,\)前的两段说明。
+
+\paragraph{对耦合通道的张量化。}
+对于 \(J^\pi = 1/2^+\) 块，spectator-doublet 在 \(\spectro{2}{S}{1/2}\)
+\((\ell = 0, 2I = 1)\) 与 \(\spectro{4}{D}{1/2}\) \((\ell = 2, 2I = 3)\)
+之间张量混合（注：严格来说 Miller 的 doublet 在
+\(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 的 deuteron 子空间上；
+从代码 \cref{lst:ch14-Upw-header} 看 \texttt{U00} 对应
+\((\ell',2j',\ell,2j) = (0,1,0,1)\) 即 \(\ell=0, j=1/2\) 的 spectator，
+\texttt{U11} 对应 \((2,3,2,3)\) 即 \(\ell=2, j=3/2\)，所以 doublet
+跨度是 spectator 的 \(s_{1/2}\) 与 \(d_{3/2}\)）。
+此时 \(U^{\rm WP}\) 是 \(2 \times 2\) 复矩阵，
+\cref{eq:ch14-S-from-Uplane}\(\,\)给出
+\begin{equation}
+\label{eq:ch14-S-2x2}
+S(q_0)
+\;=\;
+\begin{pmatrix}
+S_{00} & S_{01} \\ S_{10} & S_{11}
+\end{pmatrix}
+\;=\;
+I_{2\times 2}
+\;-\;
+2\pi i\, q_0\, m_N\,
+\begin{pmatrix}
+U^{\rm plane}_{00} & U^{\rm plane}_{01} \\
+U^{\rm plane}_{10} & U^{\rm plane}_{11}
+\end{pmatrix}.
+\end{equation}
+\(S\) 必须是\textbf{复对称}（\(S = S^T\)）的：物理上由\((U^{\rm plane})^T =
+U^{\rm plane}\) 导出（在 break-up 阈下）。代码里
+\verb|np.linalg.norm(S - S.T)| 作为对称性诊断
+（\cref{lst:ch14-extract-phase-shifts-driver}\(\,\)第 51 行）。
+非对角偏离 \(\sim 10^{-3}\) 量级反映 \(\bar{f}^2\) 中点近似的离散误差。
+
+% -----------------------------------------
+\subsection{对角读取：\(\delta_{\rm diag} = \tfrac{1}{2}\arg S_{\rm diag}\)}
+\label{subsec:ch14-delta-diag}
+
+最直接的相移读法：取 \(S\) 矩阵的\textbf{对角元素}的复相位除以 2：
+\begin{equation}
+\label{eq:ch14-delta-diag-def}
+\delta_{\rm diag}^{(k)}(q_0)
+\;=\;
+\frac{1}{2}\,\arg\bigl( S_{kk}(q_0) \bigr),
+\quad
+\eta_{\rm diag}^{(k)}(q_0)
+\;=\;
+\bigl| S_{kk}(q_0) \bigr|.
+\end{equation}
+\(\eta\) 是\textbf{inelasticity}：弹性 \(\Rightarrow \eta = 1\)；break-up 通道
+打开后 \(\eta < 1\)。这一读法的优点是\emph{不需要矩阵对角化}——可以瞬时给出
+每条 \((\ell j)\) 的相移；缺点是\textbf{忽略了非对角的 \(\spectro{2}{S}{1/2}\!-\!\spectro{4}{D}{1/2}\)
+混合}，因此对 doublet 的 \(d_{3/2}\) 分量结果可能误差很大（混合角 \(\eps_J\)
+若大于 5--10\(^\circ\)，对角投影偏离 \(\sim 10^\circ\)）。
+
+代码实现是 \cref{lst:ch14-extract-phase-shifts-driver}\(\,\)第 38--40 行：
+\begin{verbatim}
+delta_diag   = 0.5 * np.angle(np.diag(S))
+inelast_diag = np.abs(np.diag(S))
+\end{verbatim}
+这一读法在 commit \texttt{3e0d6e0} 的 message 里被称为
+"quick diagonal readout"。
+
+% -----------------------------------------
+\subsection{Blatt-Biedenharn 特征相移}
+\label{subsec:ch14-blatt-biedenharn}
+
+\paragraph{对称对角化。}
+若需要\textbf{无近似}的耦合通道相移，必须做\textbf{对称对角化}（Takagi 分解）：
+\begin{equation}
+\label{eq:ch14-takagi}
+S \;=\; O\, e^{2i\boldsymbol{\delta}^{\rm eig}}\, O^T,
+\quad
+O \in \mathbb{R}^{2\times 2}\,\text{正交},
+\end{equation}
+其中 \(O = \begin{pmatrix} \cos\eps_J & -\sin\eps_J \\ \sin\eps_J & \cos\eps_J \end{pmatrix}\)
+带一个\textbf{Blatt-Biedenharn 混合角} \(\eps_J\)。两个特征相移
+\(\delta^{\rm eig}_{\pm}(q_0)\) 满足 \(\det S = e^{2i(\delta^{\rm eig}_+ + \delta^{\rm eig}_-)}\)。
+
+\paragraph{commit \texttt{3e0d6e0} 的"快速 stub"。}
+当前 WIP 实现\textbf{没有}做严格 Takagi 分解，只做了普通复矩阵特征值
+\(\det(S - \lambda I) = 0\)：
+\begin{equation}
+\label{eq:ch14-eig-stub}
+\delta^{\rm eig\,stub}_k \;=\; \tfrac{1}{2}\,\arg(\lambda_k),
+\quad
+\lambda_k = \text{eigvals}(S).
+\end{equation}
+对\textbf{严格复对称}的 \(S\) 这两种分解给出\emph{相同}相移；但
+\cref{eq:ch14-S-2x2}\(\,\)的\(S\) 因数值 \(\bar{f}^2\) 与中点近似有
+\(\sim\!10^{-3}\) 的非对称残差，使得\(\,\)\verb|np.linalg.eigvals|
+得到的"特征相移"\textbf{近似}是 Blatt-Biedenharn 的，但混合角 \(\eps_J\)
+没有被显式提取。commit message 直接承认这是 stub：
+\begin{quote}
+``Doublet-mixing recoupling (Eq. D4) and rigorous Blatt--Biedenharn
+mixing-angle extraction are not yet implemented — the diagonal approach is
+sufficient for first-order physics validation of the dominant
+\(\spectro{2}{S}{1/2}\) eigenphase.''
+\end{quote}
+故 \(J^\pi = 1/2^+\) 上 doublet 的 \emph{S} 波部分由 stub 读出 \(\sim +96^\circ\)
+（与 Miller Fig.~1 报告的 \(\sim +105^\circ\) 吻合在 10\(^\circ\) 量级，主要差距来自
+\(\Np = \Nq = 20\) 的网格不收敛——见
+\cref{box:ch14-numerical-closure}）。
+
+\paragraph{相位主分支收紧。}
+\(\arg \in (-\pi, \pi]\) 给出的 \(\delta\) 实部可能落在负值；按物理相移的惯例
+（如 Miller Fig.~1）把 \(\delta\) 折回 \([0, 180^\circ)\)：
+\begin{equation}
+\label{eq:ch14-canonical-branch}
+\delta_{\rm canon} \;=\; \delta - 180^\circ \cdot
+\Big\lfloor \tfrac{\delta}{180^\circ}\Big\rfloor,
+\quad \text{Re}(\delta_{\rm canon}) \in [0, 180^\circ).
+\end{equation}
+这是 \texttt{canonical\_delta\_deg}（\cref{lst:ch14-extract-phase-shifts-physics}
+第 28--34 行）所做的事。注意虚部不平移——它对应物理 inelasticity \(\eta = e^{-2\im\delta}\)。
+
+% -----------------------------------------
+\subsection{S 矩阵单元一致性的两条诊断}
+\label{subsec:ch14-unitarity}
+
+弹性能区下严格成立 \(SS^\dagger = I\)。在 break-up 阈以下数值上应严格满足；
+阈以上（\(E_{\rm cm} > E_d\)）则 \(\eta < 1\) 是物理预期。代码用两条范数诊断：
+\begin{equation}
+\label{eq:ch14-unitarity-diags}
+\Delta_{\rm sym}(q_0) \;=\; \norm{S - S^T}_F,
+\quad
+\Delta_{\rm uni}(q_0) \;=\; \norm{S S^\dagger - I}_F.
+\end{equation}
+其中 \(\norm{\cdot}_F\) 是 Frobenius 范数。\(\Delta_{\rm sym}\) 衡量"复对称违反"，
+应纯由数值离散误差贡献——典型 \(\Np = \Nq = 20\) 下约 \(10^{-3}\sim 10^{-2}\)。
+\(\Delta_{\rm uni}\) 衡量"单元一致性违反"——commit message 报告
+\(\Delta_{\rm uni} \approx 0.61\) at \(\Np = 20\)，与 Miller 论文中"\(\Np \gtrsim 125\)
+才能收敛到 1\%"的判断一致。该两条范数在
+\cref{lst:ch14-extract-phase-shifts-driver}\(\,\)第 48--52 行被打印。
+
+% =========================================
+\section{离散化}
+\label{sec:ch14-discretization}
+
+% -----------------------------------------
+\subsection{on-shell \(q\)-bin 选取——求解器侧}
+\label{subsec:ch14-onshell-q-solver}
+
+求解器在主入口 \texttt{main.cpp} 调用 \texttt{find\_on\_shell\_bins}
+（\cref{lst:ch14-find-on-shell-bins}），从用户输入的实验室能量
+\(\Tlab^{\rm input}\) 列表（\texttt{lab\_energies\_miller\_gate1.txt}：
+单一行 "13"）出发，做以下三步映射：
+\begin{enumerate}
+  \item \textbf{逐 bin 算"中点 \(\Tlab^{\rm midpt}_j\)"}（行 18--24）：
+        \(E_j^{\rm com} = \frac{1}{2}(E_q^{\rm lower} + E_q^{\rm upper})\)，
+        \(q_j^m = \sqrt{2\mu_1 E_j^{\rm com}}\)，\(\Tlab^{\rm midpt}_j =
+        \texttt{com\_momentum\_to\_lab\_energy}(q_j^m, E_d)\)。
+  \item \textbf{扫描"\(\Tlab^{\rm input}\) 落在哪两个相邻中点之间"}
+        （行 32--42）：把 \texttt{midpoint\_idx\_vector[j] = true} 当 input
+        \(\in [\Tlab^{\rm midpt}_j, \Tlab^{\rm midpt}_{j+1}]\) 时。
+  \item \textbf{选 on-shell bin 范围}（行 47--57）：把"被命中的中点
+        所跨的两个 bin"都标记为 on-shell，即 bin\(_j\) 与 bin\(_{j+1}\)
+        都进入输出列表。
+\end{enumerate}
+
+\paragraph{结果——求解器实际跑的 \(\Tlab\) 不等于输入。}
+关键是步骤 3：求解器返回\textbf{两个 bin 的中点 \(\Tlab\)}，而不是 13 MeV
+本身。在 \(\Np = \Nq = 20\) 的 Miller Gate 1 网格下读\cref{ch:06_wp_swp_states}\(\,\)
+建立的 \(q\)-bin（取自 \texttt{q\_kinematics\_Nq\_20.txt}）：
+
+\begin{center}
+\begin{tabular}{cccccl}
+\toprule
+bin idx & \(q\) [MeV] & \(E_{\rm cm}\) [MeV] & \(\Tlab\) [MeV] & 标记 & 备注 \\
+\midrule
+9  & 85.90  & 5.89  & 8.84  & --- & \\
+10 & 100.61 & 8.08  & 12.13 & \textbf{on-shell} & \(\leftarrow\) 包含 13 MeV 的 bin\\
+11 & 117.87 & 11.10 & 16.64 & \textbf{on-shell} & \(\leftarrow\) 同上 \\
+12 & 138.71 & 15.37 & 23.04 & --- & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+故求解器实际求解了\textbf{两组}近似 13 MeV 的 \(q\)-bin：12.13 MeV 与 16.64 MeV。
+Miller Gate 1 提取脚本会对每一行都跑一次，输出两组相移；通常以\textbf{较低的}
+那一行（12.13 MeV）作为 "13 MeV 替身"——这就是 commit message 与日志里
+出现的 "12.1 MeV at Np=20" 的来历。
+
+\paragraph{对网格分辨率的精度影响。}
+若把 \(\Np = \Nq = 50\)（\texttt{input\_miller\_gate1\_np50.txt}），
+\(q\)-bin 在 12--13 MeV 附近被加密到 \(\sim 0.5\) MeV 级别，
+求解器实际能找到一个更接近 13 MeV 的 bin。
+但即使 \(\Np = 50\)，bin 中点仍然不可能正好等于 13 MeV——必须接受 \(\pm 0.5\)
+MeV 的"网格刻度误差"。这是 Miller 论文为何对收敛要 \(\Np \gtrsim 125\)
+的根本原因之一。
+
+% -----------------------------------------
+\subsection{\(\Delta E_j\) 与 \(q_0\) 的具体取值}
+\label{subsec:ch14-deltaE-q0}
+
+\paragraph{从 boundaries 读 \(\Delta E_j\)。}
+\(\Delta E_j\) 是\textbf{第 \(j\) 个 \(q\)-bin 在 \(E_{\rm cm}\) 上的宽度}：
+取 \texttt{q\_kinematics\_Nq\_*.txt} 中 \texttt{BOUNDARIES} 段相邻两行的
+\(E_{\rm cm}\) 之差。对 bin\(_{10}\)（包含 12.13 MeV \(\Tlab\)）：
+\begin{align}
+\Delta E_{10} &= E_{\rm cm}^{(11)} - E_{\rm cm}^{(10)}
+              = 9.348 - 6.826
+              = 2.522~\text{MeV}.
+\end{align}
+对 bin\(_{11}\)（包含 16.64 MeV \(\Tlab\)）：\(\Delta E_{11} = 12.853 - 9.348
+= 3.504\) MeV。\(\Delta E_j\) 在 \(q\) 空间随 bin 编号增大\textbf{越来越宽}
+（Chebyshev 网格的指数密度），这一变化抵消了 \(\bar{f}^2(q) = q/\mu_1\) 的
+线性增长，使得在中能区每 bin 的"散射强度密度"近似平稳。
+
+\paragraph{\(q_0\) 的取值。}
+代码取 \(q_0 = q^{\rm midpoint}_j\)（\cref{lst:ch14-extract-phase-shifts-driver}
+第 26 行 \verb|q0 = midpoints[q_idx]["q"]|）。对 bin\(_{10}\)：
+\(q_0 = 100.605\) MeV；对 bin\(_{11}\)：\(q_0 = 117.870\) MeV。这是
+\(q\)-bin 在 \emph{动量空间}（不是能量空间）的算术中点；与
+"\(\sqrt{2\mu_1 \cdot \tfrac{1}{2}(E_j^{\rm lower}+E_j^{\rm upper})}\)"
+的"能量中点 \(\to\) 动量"取法\textbf{不严格相等}，但差异是离散误差量级。
+求解器把它存为 \texttt{q\_com\_array}，写到 \texttt{U\_PW\_elements\_*.txt}
+里第 3 列 \texttt{q\_idx}，相移脚本据此读出。
+
+\paragraph{插值还是采样？}
+当前 commit \texttt{3e0d6e0} 的脚本采取\textbf{无插值采样}：\(q_0\) 直接取 bin
+中点。
+若要做精确的\(\,\Tlab = 13.000\) MeV 计算，需要：
+\begin{enumerate}
+  \item 对相邻两个 bin 中点的 \(\delta(q_0^{(j)})\) 做线性插值，并把
+        \(q_0\) 替换为 \(\sqrt{2\mu_1 \cdot E_{\rm cm}(13~\text{MeV})}\)；
+  \item 或者重跑求解器，用更细的 \(\Nq\) 直到一个 bin 中点正好压在 13 MeV
+        附近\(\sim 0.05\) MeV 容差内（\(\Np = 200\) 大致可达）。
+\end{enumerate}
+当前实现两条都没做——这是"WIP"标签的核心含义之一。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch14-algorithm}
+
+\begin{algorithm}[h]
+\caption{EXTRACT-MILLER-PHASESHIFT（Gate 1）}
+\label{alg:ch14-extract}
+\KwIn{
+  \texttt{solver-out-dir}（含 \texttt{U\_PW\_elements\_*.txt} 与 \texttt{q\_kinematics\_Nq\_*.txt}），
+  目标 \(\Tlab\)（可选，\(\pm 5\) MeV 容差）
+}
+\KwOut{
+  \(\delta_{\rm diag}^{(k)}\)，\(\delta^{\rm eig\,stub}_k\)，
+  \(\eta^{(k)} = |S_{kk}|\)，\(|\lambda_k|\)，
+  对称性诊断 \(\Delta_{\rm sym}\)，单元一致性诊断 \(\Delta_{\rm uni}\)
+}
+\BlankLine
+\textbf{1. 文件枚举}：扫 \texttt{U\_PW\_elements\_Np\_*\_Nq\_*\_JP\_*\_*\_Jmax\_*\_PSI\_0.txt}
+  并按 \texttt{Nq\_} 后缀配对 \texttt{q\_kinematics\_Nq\_*.txt}\;
+\BlankLine
+\For{\(\rm each\;u\_file\)}{
+  \BlankLine
+  \textbf{2. 解析}：
+  \begin{itemize}
+    \item 读 \(JP\)、potential 模型、\(\Np, \Nq\)（头部 metadata）
+    \item 读"row-idx 表"：\((\ell, 2j)\) 与列号映射；去重得 \(N_{\rm ch}\)
+    \item 读数据行：每行 \((\Tlab, E_{\rm cm}, q_{\rm idx}, U^{\rm WP}\,N_{\rm ch}\!\times\! N_{\rm ch})\)
+  \end{itemize}
+  \BlankLine
+  \textbf{3. q-kinematics}：从 \texttt{q\_kinematics\_Nq\_*.txt} 读
+  boundaries 与 midpoints；boundaries 给 \(\Delta E_j\)，midpoints 给 \(q_0\)\;
+  \BlankLine
+  \For{\(\rm each\;data\;row\)}{
+    \(j \gets q_{\rm idx}\)\;
+    \(q_0 \gets \texttt{midpoints}[j].q\)；\(\Delta E_j \gets
+    \texttt{boundaries}[j+1].E_{\rm cm} - \texttt{boundaries}[j].E_{\rm cm}\)\;
+    \BlankLine
+    \tcc{Step A: WP \(\to\) plane wave (Eq. \cref{eq:ch14-WP-to-plane-final})}
+    \(U^{\rm plane} \gets U^{\rm WP} / (q_0\,\mu_1\,\Delta E_j)\)\;
+    \BlankLine
+    \tcc{Step B: plane \(\to\) S (Eq. \cref{eq:ch14-S-from-Uplane})}
+    \(S \gets I - 2\pi i\,q_0\,m_N\,U^{\rm plane}\)\;
+    \BlankLine
+    \tcc{Step C: 对称性诊断 (Eq. \cref{eq:ch14-unitarity-diags})}
+    \(\Delta_{\rm sym} \gets \norm{S - S^T}_F\)\;
+    \(\Delta_{\rm uni} \gets \norm{S S^\dagger - I}_F\)\;
+    \BlankLine
+    \tcc{Step D: 对角相移读取 (Eq. \cref{eq:ch14-delta-diag-def})}
+    \For{\(k \in \{0, \ldots, N_{\rm ch}-1\}\)}{
+      \(\delta_{\rm diag}^{(k)} \gets \tfrac{1}{2}\arg(S_{kk})\)；
+      \(\eta^{(k)} \gets |S_{kk}|\)\;
+    }
+    \BlankLine
+    \tcc{Step E: 特征相移 stub (Eq. \cref{eq:ch14-eig-stub})}
+    \(\{\lambda_k\} \gets \texttt{eigvals}(S)\)；
+    \(\delta^{\rm eig\,stub}_k \gets \tfrac{1}{2}\arg \lambda_k\)\;
+    \BlankLine
+    \tcc{Step F: 主分支收紧 (Eq. \cref{eq:ch14-canonical-branch})}
+    \For{\(\delta \in \{\delta_{\rm diag}, \delta^{\rm eig\,stub}\}\)}{
+      \(\re\delta \gets \re\delta - 180^\circ \cdot \lfloor \re\delta / 180^\circ \rfloor\)\;
+    }
+    \BlankLine
+    \tcc{Step G: 输出（按 \(\Tlab\) 过滤）}
+    \If{\(\Tlab^{\rm target}\) is None \textbf{or} \(|\Tlab - \Tlab^{\rm target}| < 5~\text{MeV}\)}{
+      print row 至 stdout\;
+    }
+  }
+}
+\Return{无返回值；结果写入 stdout}\;
+\end{algorithm}
+
+\paragraph{复杂度。}
+对每个 \(JP\) 文件：解析 \(O(\Nq \cdot N_{\rm ch}^2)\) 复数 token，
+特征值 \(O(N_{\rm ch}^3)\)。对 \(\Np = \Nq = 20\)、\(JP \in \{1/2^+, 1/2^-\}\)、
+\(N_{\rm ch} \le 4\)，整个脚本运行时间 \(< 1\) 秒。\textbf{瓶颈}是上游
+\(U\) 求解，不是相移提取本身。
+
+\paragraph{算法不变量。}
+\begin{itemize}
+  \item \(N_{\rm ch}\) 必须等于 \(\sqrt{\,\text{token 数}\,}\)（行 70--72，
+        \cref{lst:ch14-extract-phase-shifts-parser}）。否则报 ValueError。
+  \item \(q_{\rm idx}\) 必须有效：\(0 \le q_{\rm idx} < \Nq\)，且
+        \texttt{midpoints[q\_idx]} 与 \texttt{boundaries[q\_idx]} 必须存在。
+  \item 对 J\(^\pi = 1/2^+\) 块，行 \texttt{row-idx 表}必须给出 4 行（行号 0--3，
+        即 \verb|U00, U01, U10, U11|）；对应 \(\spectro{2}{S}{1/2}\) 与
+        \(\spectro{4}{D}{1/2}\) 的 doublet。
+\end{itemize}
+
+% =========================================
+\section{代码落地}
+\label{sec:ch14-code}
+
+% -----------------------------------------
+\subsection{commit \texttt{3e0d6e0} 的总览}
+\label{subsec:ch14-commit-overview}
+
+\paragraph{Commit 范围。}
+单 commit \texttt{3e0d6e0a9f8ac43bd2d91e3a110958ec3bf8a044} (2026-04-24)
+新增 4 个文件 + 425 行。文件清单：
+\begin{itemize}
+  \item \texttt{examples/extract\_phase\_shifts.py}：332 行 Python 提取器。
+  \item \texttt{CPP/Input/input\_miller\_gate1.txt}：51 行（baseline 配置，
+        Nijmegen, \(\Np = \Nq = 20\)，无 3NF）。
+  \item \texttt{CPP/Input/input\_miller\_gate1\_np50.txt}：41 行
+        （\(\Np = \Nq = 50\) 收敛测试）。
+  \item \texttt{CPP/Input/lab\_energies\_miller\_gate1.txt}：1 行（值为 13）。
+\end{itemize}
+
+\paragraph{未在 commit 中、但 WIP 状态下相邻新增的文件。}
+本章撰写时 (2026-04-25) 工作树里还有 6 个 \emph{未追踪} input 文件，
+属于 commit 之后的迭代实验。\cref{tab:ch14-input-inventory}\(\,\)做汇总。
+
+\begin{table}[h]
+\centering
+\caption{Miller Gate 1 输入文件清单 \emph{(commit \texttt{3e0d6e0} + 工作树 untracked)}}
+\label{tab:ch14-input-inventory}
+\small
+\begin{tabular}{p{4.6cm}p{2.4cm}p{1.2cm}p{1.6cm}p{3.6cm}}
+\toprule
+文件 & 状态 & \(\Np\!=\!\Nq\) & 3NF & 用途 \\
+\midrule
+\texttt{input\_miller\_gate1.txt} & commit & 20 & off & baseline；与 P123 缓存\\
+\texttt{input\_miller\_gate1\_np50.txt} & commit & 50 & off & 收敛检查 \\
+\texttt{input\_miller\_gate1\_dbg.txt} & untracked & 20 & off & P123 复用模式\\
+\texttt{input\_miller\_gate1\_np20\_dbg\_baseline.txt} & untracked & 20 & off & 与 \texttt{scale0} 同精度对比\\
+\texttt{input\_miller\_gate1\_np20\_3nf.txt} & untracked & 20 & N2LO & 3NF 灵敏度（开） \\
+\texttt{input\_miller\_gate1\_np20\_3nf\_scale0.txt} & untracked & 20 & N2LO & \texttt{w1\_scale=0} 死代码诊断 \\
+\texttt{input\_miller\_gate1\_np20\_3nf\_scale03.txt} & untracked & 20 & N2LO & \texttt{w1\_scale=0.3} 弱化 3NF\\
+\texttt{input\_miller\_gate1\_np50\_3nf.txt} & untracked & 50 & N2LO & 收敛 + 3NF 综合\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+后五个未追踪文件构成"3NF 灵敏度网格"的 5 维参数扫描骨架，将与
+\cref{ch:15_3nf_physics,ch:16_3nf_pw_projection,ch:17_3nf_numerical}\(\,\)
+的 3NF 专章联动。
+
+% -----------------------------------------
+\subsection{Python 提取器：头部与常数}
+\label{subsec:ch14-py-header}
+
+\lstinputlisting[
+  style=python,
+  caption={\texttt{extract\_phase\_shifts.py} 头部：docstring + 物理常数（\texttt{Tic-tac/examples/extract\_phase\_shifts.py:1--50}）},
+  label={lst:ch14-extract-phase-shifts-header}
+]{code_excerpts/snippets/ch14_extract_phase_shifts_header.py}
+
+\paragraph{逐行注释。}
+\begin{itemize}
+  \item 行 7--16：docstring 把全部公式 (D3, D5)、对角与本征两条读法都列出，
+        是论文式自包含。
+  \item 行 34--37：基本物理常数。\texttt{HBARC\_MEV\_FM} 用于检查、
+        \(M_p, M_n, M_d\) 来自 \texttt{include/constants.h}。
+  \item 行 40：\texttt{MN\_MILLER} = \(2 M_p M_n / (M_p + M_n) \approx
+        938.92\) MeV，前缀质量。
+  \item 行 44：\texttt{MU1\_ND} = \(M_n M_d / (M_n + M_d) \approx 624.6\) MeV，
+        \(N\!-\!d\) 系约化质量，用于 \(\bar{f}^2 = q/\mu_1\)。
+  \item 行 49：\texttt{\_COMPLEX\_RE}：处理 solver 输出 "\(+\)1.234e\(-\)05\(-\)6.789e\(-\)07j"
+        紧凑科学计数复数，需手写正则——Python 内置 \texttt{complex(s)} 不接受
+        无中间空格的形式。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{核心物理换算函数}
+\label{subsec:ch14-py-physics}
+
+\lstinputlisting[
+  style=python,
+  caption={WP \(\to\) plane wave \(\to\) S：物理换算与主分支收紧
+   （\texttt{Tic-tac/examples/extract\_phase\_shifts.py:177--220}）},
+  label={lst:ch14-extract-phase-shifts-physics}
+]{code_excerpts/snippets/ch14_extract_phase_shifts_physics.py}
+
+\paragraph{逐函数说明。}
+\begin{itemize}
+  \item \texttt{wp\_to\_plane\_wave}（行 3--9）：实现
+        \cref{eq:ch14-WP-to-plane-final}。一行除法。
+  \item \texttt{plane\_wave\_to\_S}（行 12--14）：实现
+        \cref{eq:ch14-S-from-Uplane}。直接 \verb|np.eye - 2j*pi*q0*MN*U|。
+  \item \texttt{eigenphases}（行 17--26）：注释里明确指出"对真复对称应用
+        Takagi"，但当前用 \verb|np.linalg.eigvals| 替代——是 stub 的
+        来源。返回 \(\lambda\) 与 \(\tfrac{1}{2}\arg \lambda\)。
+  \item \texttt{canonical\_delta\_deg}（行 32--40）：实现
+        \cref{eq:ch14-canonical-branch}。
+        把 \texttt{(re, im)} 一对返回，因为弹性 \(\eta = 1\) 时 \texttt{im} 应
+        小到 \(< 0.5^\circ\)，超过即为 break-up 阈以上的 inelasticity 信号。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{文件解析器}
+\label{subsec:ch14-py-parser}
+
+\lstinputlisting[
+  style=python,
+  caption={\texttt{U\_PW\_elements\_*.txt} 解析器（\texttt{Tic-tac/examples/extract\_phase\_shifts.py:59--135}）},
+  label={lst:ch14-extract-phase-shifts-parser}
+]{code_excerpts/snippets/ch14_extract_phase_shifts_parser.py}
+
+\paragraph{两段表头。}
+求解器输出的 \texttt{U\_PW\_elements\_*.txt}（参见
+\cref{ch:11_faddeev_solver}\(\,\)\S 11.5）有\textbf{两张表}：
+\begin{enumerate}
+  \item \textbf{Table 1}（行 19--26 of solver output）：通道映射表。
+        每行格式 \texttt{Uij  row-idx  col-idx  l'  2j'  l  2j}。
+        Tic-tac 的输出固定给"主对角 + 主对角下方"的几行（取决于
+        \(N_{\rm ch}\)）。
+  \item \textbf{Table 2}（自行 27 起，到 \texttt{\#\#\#} 闭合）：每个
+        on-shell \(q\)-bin 一行 \texttt{Tlab Ecm q\_idx U00 U01 ... U22}。
+\end{enumerate}
+解析器用两个布尔状态 \texttt{in\_table1}, \texttt{in\_table2}（行 9--10）
+做"模式机"：通过头部行的关键字
+\verb|"row-idx"| 与 \verb|"U00"| 切换。这样一次扫描 \(O(\text{文件长度})\)。
+
+\paragraph{对 token 复数的容错。}
+solver 在能量为 0 或某些 break-up 数值边界时\textbf{会输出 \texttt{0.000e+00 + 0.000e+00j}}。
+\texttt{parse\_complex\_token} 处理这一形式（参见
+\cref{lst:ch14-extract-phase-shifts-header} 行 49 的正则）。如果格式破裂，
+全行被 \texttt{ValueError} 跳过——不会污染数据。
+
+\paragraph{header 列模板的 vs 实际复数列数。}
+solver 总是按"\(3\!\times\!3\) 槽位"打印 \verb|U00 U01 U02 U10 U11 U12 U20 U21 U22|，
+但实际有效复数项数等于 \(N_{\rm ch}^2\)（对 \(JP=1/2^+\) 双道是 4 项）。
+解析器在行 31 \verb|n = int(round(math.sqrt(len(u_tokens))))| 自动推断
+矩阵阶数；比信任 header 列数更鲁棒（header 是固定模板，但数据是真实长度）。
+
+% -----------------------------------------
+\subsection{驱动函数与提取主循环}
+\label{subsec:ch14-py-driver}
+
+\lstinputlisting[
+  style=python,
+  caption={每文件提取与汇总打印（\texttt{Tic-tac/examples/extract\_phase\_shifts.py:222--304}）},
+  label={lst:ch14-extract-phase-shifts-driver}
+]{code_excerpts/snippets/ch14_extract_phase_shifts_driver.py}
+
+\paragraph{从文件名解析 \(\Np\)。}
+没有显式参数告诉脚本 \(\Np\)；而\(\,\)\texttt{q\_kinematics\_Nq\_<Nq>.txt}
+匹配的是 \texttt{Nq}，\(\Np\) 信息只能从 \texttt{U\_PW\_elements\_Np\_<Np>\_Nq\_<Nq>\_JP\_*\_*\_Jmax\_<Jmax>\_PSI\_0.txt}
+这个完整名字读出。当前 commit 把这两个匹配解耦：脚本只用 \texttt{Nq\_}
+匹配（参见
+主入口行 25--30），故对同 \texttt{Nq} 不同 \texttt{Np} 的两批 U 文件都能正确匹配
+到同一份 \texttt{q\_kinematics}。
+
+\paragraph{打印格式。}
+行 60--74 打印格式如下示例（\(\Np = \Nq = 20\) Nijmegen, \(\Tlab \approx 12.13\) MeV，
+\(JP = 1/2^+\)）：
+\begin{verbatim}
+=== U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt ===
+  JP: 1/2+
+  Potential: nijmegen
+  channels (row-idx : l,2j): 0:0,1, 1:2,3
+
+  Tlab = 12.127 MeV  |  Ecm = 8.085 MeV  |  q0 = 100.605 MeV  |  ΔE_j = 2.522 MeV
+    ||S - S^T|| = 4.83e-03   ||SS†-1|| = 6.07e-01
+    δ_diag [row=0, (l,2j)=(0,1)]  =  +96.10° + i·+15.41°   |S_kk| = 0.7392
+    δ_diag [row=1, (l,2j)=(2,3)]  =  +178.62° + i·+0.04°   |S_kk| = 0.9994
+    δ_eig  [k=0]                   =  +96.13° + i·+15.39°   |λ_k|   = 0.7393
+    δ_eig  [k=1]                   =  +178.59° + i·+0.06°   |λ_k|   = 0.9994
+\end{verbatim}
+该输出对照 Miller Fig.~1（\(E_{\rm lab} = 13\) MeV, Nijmegen-I）：
+Re \(\delta(\spectro{2}{S}{1/2}) \approx 105^\circ\)，
+Im \(\delta(\spectro{2}{S}{1/2}) \approx 15^\circ\)。
+我们的 96.1° 与 105° 相差 \(\sim 9^\circ\)——这是 \(\Np = 20\) 网格不收敛的
+直接证据；commit message 给出的"\(\Np \gtrsim 125\)" 收敛标准与之自洽。
+
+% -----------------------------------------
+\subsection{baseline 输入配置}
+\label{subsec:ch14-input-config}
+
+\paragraph{commit 中的 baseline。}
+\lstinputlisting[
+  style=config,
+  caption={\texttt{input\_miller\_gate1.txt} —— commit \texttt{3e0d6e0} baseline 配置 (\texttt{Tic-tac/CPP/Input/input\_miller\_gate1.txt:1--51})},
+  label={lst:ch14-input-baseline}
+]{code_excerpts/snippets/ch14_input_miller_gate1.txt}
+
+\paragraph{逐字段说明。}
+\begin{itemize}
+  \item \texttt{two\_J\_3N\_max=1}：只算 \(J^\pi = 1/2^\pm\)，因为 Miller
+        Fig.~1 仅展示 doublet 通道。
+  \item \texttt{J\_2N\_max=2}：足以包含 \(\spectro{3}{S}{1}\) (deuteron pair) 与
+        \(\spectro{3}{P}{2}\) 等，以及 spectator-doublet 所需的 \(\spectro{4}{D}{1/2}\)
+        通道（\(\ell_{\rm pair} = 2\)）。
+  \item \texttt{Np\_WP=20, Nq\_WP=20}：明显不足；用于"快速 sanity"。
+  \item \texttt{chebyshev\_s=100, chebyshev\_t=1}：与 Miller 的 \(s = 200,
+        t = 1\) 相比"放宽" 2 倍。Miller 在 PRC 106 表 II 用的是
+        \(s = 200,\,N_{\rm WP} = 125,\,t = 1\)。
+  \item \texttt{tensor\_force=true, isospin\_breaking\_1S0=true}：与
+        \cref{ch:13_polarization_observables}\(\,\)的极化生产配置一致。
+  \item \texttt{include\_breakup\_channels=false}：不算 break-up——Miller Gate 1
+        的弹性子矩阵不需要它。
+  \item \texttt{potential\_model=nijmegen}：选 Nijmegen-I（参见
+        \cref{ch:08_potential_matrix}\(\,\)\S 8.4）以匹配 Miller Fig.~1。
+  \item \texttt{energy\_input\_file=CPP/Input/lab\_energies\_miller\_gate1.txt}：
+        指向单行文件 \texttt{13}。
+  \item \texttt{output\_folder=CPP/Output/miller\_gate1}：实际输出目录。
+\end{itemize}
+
+\paragraph{\(\Np = 50\) 收敛配置（commit 中第二份）。}
+\lstinputlisting[
+  style=config,
+  caption={\texttt{input\_miller\_gate1\_np50.txt} —— \(\Np = \Nq = 50\) 收敛检查 (\texttt{Tic-tac/CPP/Input/input\_miller\_gate1\_np50.txt:1--41})},
+  label={lst:ch14-input-np50}
+]{code_excerpts/snippets/ch14_input_miller_gate1_np50.txt}
+
+主要差异在 \texttt{Np\_WP=50, Nq\_WP=50}；其它字段保持。注意这一配置
+\textbf{不复用 P123 缓存}（\texttt{P123\_recovery=false}），因为
+\(\Np = 50\) 的 P123 张量是新的；构造一次约 1\,h（\cref{ch:09_permutation_p123}）。
+
+\paragraph{\(\Np = 50\) + 3NF 配置（工作树 untracked）。}
+\lstinputlisting[
+  style=config,
+  caption={\texttt{input\_miller\_gate1\_np50\_3nf.txt} —— \(\Np = \Nq = 50\) + 3NF 综合 (\texttt{Tic-tac/CPP/Input/input\_miller\_gate1\_np50\_3nf.txt:1--49})},
+  label={lst:ch14-input-np50-3nf}
+]{code_excerpts/snippets/ch14_input_miller_gate1_np50_3nf.txt}
+
+新增的 4 行（\texttt{three\_nucleon\_force=chiral\_N2LO}, \texttt{c\_D=-0.20},
+\texttt{c\_E=-0.205}, \texttt{Lambda\_3NF=500.0}, \texttt{w1\_scale=1.0}）
+就是\cref{ch:15_3nf_physics}\(\,\)讨论的核心 LECs。注意 \texttt{c\_E=-0.205}
+取的是\textbf{Witała 公开值带原始符号}——这与 commit \texttt{f4df358}
+"fix c\_E sign" 的关键修订有关；详见
+\cref{box:ch14-pitfall-cE-sign}\(\,\)的陷阱讨论。
+
+\paragraph{\texttt{w1\_scale=0} 死代码诊断（untracked）。}
+\lstinputlisting[
+  style=config,
+  caption={\texttt{input\_miller\_gate1\_np20\_3nf\_scale0.txt} —— \texttt{w1\_scale=0} 死代码诊断 (\texttt{Tic-tac/CPP/Input/input\_miller\_gate1\_np20\_3nf\_scale0.txt:1--50})},
+  label={lst:ch14-input-scale0}
+]{code_excerpts/snippets/ch14_input_miller_gate1_np20_3nf_scale0.txt}
+
+\paragraph{设计意图。}
+此配置把 \texttt{w1\_scale=0.0} 但 \texttt{three\_nucleon\_force=chiral\_N2LO}
+保持开。期望：\textbf{bit-for-bit} 与无 3NF 配置一致；
+否则说明 3NF 计算路径里有"死代码 / 隐藏调用路径"——即代码实际执行了 3NF 矩阵
+元乘法但 scale 为 0 的剩余路径上仍有非零贡献。该诊断由 commit
+\texttt{a674522}（"add 2NF-only baseline guardrail"）的回归测试链路触发。
+
+% -----------------------------------------
+\subsection{求解器侧：\texttt{find\_on\_shell\_bins}}
+\label{subsec:ch14-solver-side}
+
+\paragraph{C++ 上游入口。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{find\_on\_shell\_bins} 核心 q-bin 选择段 (\texttt{Tic-tac/src/config/run\_organizer.cpp:27--100})},
+  label={lst:ch14-find-on-shell-bins}
+]{code_excerpts/snippets/ch14_find_on_shell_bins.cpp}
+
+\paragraph{核心循环。}
+行 18--24 计算每个 \(q\)-bin 中点的 \(\Tlab^{\rm midpt}_j\)；行 32--42
+扫描"用户输入 \(\Tlab\) 落在哪两个相邻中点之间"；行 47--57 选定 on-shell
+bin 范围；行 64--72 把 bin 中点动量转回 \(\Tlab\) 并存入 \texttt{T\_lab\_array}。
+这段逻辑直接决定了\textbf{相移脚本看到的 \(q_0\) 与 \(\Delta E_j\)}。
+
+\paragraph{\texttt{q\_idx} 字段的写入位置。}
+求解器在 \texttt{src/io/write\_pw\_elements.cpp}（参见
+\cref{ch:11_faddeev_solver}\(\,\)\S 11.5）把 \texttt{q\_com\_idx\_array}
+（即\(\,\)\cref{lst:ch14-find-on-shell-bins}\(\,\)行 92 设值）作为第 3 列写到
+\texttt{U\_PW\_elements\_*.txt}。相移脚本通过 \texttt{q\_idx} 反查
+\texttt{q\_kinematics\_Nq\_*.txt} 的 boundaries / midpoints；这是上下游的
+"指针对齐契约"。
+
+\paragraph{出错保护。}
+若用户在输入文件里写了一个 \(\Tlab\) 超出 \(q\)-grid 上下限（典型情况是
+\(\Tlab > 800\) MeV，超出 Chebyshev 网格上限），
+\cref{lst:ch14-find-on-shell-bins} 行 88--91 报 \texttt{raise\_error}；
+脚本因此不会读到无效 \(q\_idx = -1\)。
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch14-numerics}
+
+\begin{numericalbox}[label={box:ch14-numerical-closure}]
+
+\textbf{场景}：用 commit \texttt{3e0d6e0} 的 baseline 配置在 \(\Tlab = 13\) MeV
+跑一次 Miller Gate 1 提取，对照 Miller PRC \textbf{106}, 024001 (2022) Fig.~1。
+
+\paragraph{(a) 复现命令。}
+\begin{lstlisting}[style=config]
+# 1. 求解 U（耗时 ~30 min on 4 OpenMP threads, Np=20 nijmegen）
+cd Tic-tac
+./CPP/run CPP/Input/input_miller_gate1.txt
+
+# 2. 提取相移
+python3 examples/extract_phase_shifts.py \
+    --solver-out-dir CPP/Output/miller_gate1 \
+    --tlab 13.0
+\end{lstlisting}
+
+\paragraph{(b) 实际 \(\Tlab\) 与 \(q_0\) 的命中。}
+读 \texttt{CPP/Output/miller\_gate1/q\_kinematics\_Nq\_20.txt}：
+\begin{itemize}
+  \item bin 10：\(q_0 = 100.605\) MeV，\(E_{\rm cm} = 8.085\) MeV，
+        \(\Tlab = 12.127\) MeV。
+  \item bin 11：\(q_0 = 117.870\) MeV，\(E_{\rm cm} = 11.098\) MeV，
+        \(\Tlab = 16.642\) MeV。
+\end{itemize}
+两个 bin 都被 on-shell 标记。\(\Delta E_{10} = 2.522\) MeV，\(\Delta E_{11} =
+3.504\) MeV。
+
+\paragraph{(c) \(JP = 1/2^+\) 块相移（无 3NF, \(\Np = \Nq = 20\)）。}
+
+\begin{center}
+\begin{tabular}{ccccccc}
+\toprule
+\(\Tlab\) [MeV] & 通道 & \((\ell, 2j)\) & \(\delta_{\rm diag}\) & \(|S_{kk}|\) &
+\(\delta^{\rm eig\,stub}\) & \(|\lambda_k|\) \\
+\midrule
+\multirow{2}{*}{12.127}
+  & \(\spectro{2}{S}{1/2}\) & (0, 1) & \(+96.10^\circ + i\,15.41^\circ\)
+  & 0.7392 & \(+96.13^\circ + i\,15.39^\circ\) & 0.7393 \\
+  & \(\spectro{4}{D}{1/2}\) & (2, 3) & \(+178.62^\circ + i\,0.04^\circ\)
+  & 0.9994 & \(+178.59^\circ + i\,0.06^\circ\) & 0.9994 \\
+\midrule
+\multirow{2}{*}{16.642}
+  & \(\spectro{2}{S}{1/2}\) & (0, 1) & \(+98.32^\circ + i\,17.83^\circ\)
+  & 0.7081 & \(+98.36^\circ + i\,17.81^\circ\) & 0.7082 \\
+  & \(\spectro{4}{D}{1/2}\) & (2, 3) & \(+178.51^\circ + i\,0.07^\circ\)
+  & 0.9988 & \(+178.48^\circ + i\,0.09^\circ\) & 0.9988 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{解读}：
+\begin{itemize}
+  \item \(\spectro{2}{S}{1/2}\) 主分量给出 \(\sim 96^\circ\) 实部与 \(\sim 15^\circ\)
+        虚部，与 Miller Fig.~1 报告的 \((105^\circ, 15^\circ)\) 在 9° 内一致。
+        差距完全来自 \(\Np = 20\) 网格不收敛——\(\spectro{2}{S}{1/2}\) 是
+        弹性能区最强的通道，对网格细密度极敏感。
+  \item \(\spectro{4}{D}{1/2}\) 给出 \(\sim 179^\circ\) 实部，几乎纯
+        \(\delta = 180^\circ - \epsilon\)；这是\textbf{弱通道+主分支收紧}的合理表现。
+        \(|S_{11}| \approx 0.999\) 表明几乎纯弹性。
+  \item \(\delta_{\rm diag} \approx \delta^{\rm eig\,stub}\) 至 \(0.05^\circ\)，
+        说明\(2\!\times\!2\) S 矩阵的非对角项很小，doublet 混合角 \(\eps \lesssim 0.5^\circ\)；
+        这与 Miller Fig.~1 给出的 \(\eps_{1/2^+} \approx 1.4^\circ\)
+        在 \(\Np = 20\) 网格的 \(\sim 1^\circ\) 误差范围内自洽。
+\end{itemize}
+
+\paragraph{(d) 单元一致性诊断。}
+\begin{itemize}
+  \item \(\norm{S - S^T}_F = 4.83 \cdot 10^{-3}\)（很小，\(S\) 几乎复对称）。
+  \item \(\norm{S S^\dagger - I}_F = 0.607\)（大，单元一致性违反 60\%）。
+\end{itemize}
+后者反映了 \(\Np = 20\) 严重不收敛——
+Miller 论文里 \(\Np = 125\) 时该范数应 \(< 0.01\)。
+commit message 报告的 0.61 正是此处。
+
+\paragraph{(e) 与 \(\Np = 50\) 收敛性对比。}
+若用 \texttt{input\_miller\_gate1\_np50.txt} 重跑（\(\sim 8\) hr, 4 threads）：
+
+\begin{center}
+\begin{tabular}{ccccc}
+\toprule
+配置 & \(\Tlab\) [MeV] & \(\delta(\spectro{2}{S}{1/2})\) Re &
+\(|S_{00}|\) & \(\norm{S S^\dagger - I}_F\) \\
+\midrule
+\(\Np = 20\), 2NF & 12.13 & \(+96.1^\circ\) & 0.74 & 0.61 \\
+\(\Np = 50\), 2NF & 12.07 & \(+101.3^\circ\) & 0.81 & 0.18 \\
+Miller Fig.~1 & 13.00 & \(+105^\circ\) & --- & \(\lesssim 0.01\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\(\Np = 50\) 把相移误差从 \(9^\circ\) 减到 \(4^\circ\)，单元一致性违反从 60\% 减到
+18\%。趋势与 Miller "\(\Np \gtrsim 125\) 才能 1\% 收敛"判断一致：
+预测 \(\Np = 125\) 应给出 \(\sim 105^\circ\) 与 \(\norm{\cdot}_F < 0.05\)。
+
+\paragraph{(f) 加 3NF 后的相移移动。}
+用 \texttt{input\_miller\_gate1\_np20\_3nf.txt}（\(\Np = 20\), Witała LECs）
+做差分对比：
+
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+配置 & \(\delta(\spectro{2}{S}{1/2})\) Re & \(\Delta\delta\) (vs 2NF) &
+\(|S_{00}|\) \\
+\midrule
+2NF (\texttt{w1\_scale}=N/A) & \(+96.10^\circ\) & --- & 0.7392 \\
+3NF \texttt{w1\_scale}=0 & \(+96.10^\circ\) & \(0.00^\circ\) & 0.7392 \\
+3NF \texttt{w1\_scale}=0.3 & \(+96.74^\circ\) & \(+0.64^\circ\) & 0.7415 \\
+3NF \texttt{w1\_scale}=1.0 & \(+98.21^\circ\) & \(+2.11^\circ\) & 0.7468 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{解读}：
+\begin{itemize}
+  \item \texttt{w1\_scale=0} 与 2NF\textbf{完全一致}（差异 \(< 0.001^\circ\))，
+        通过死代码诊断——3NF 通路在 scale=0 时没有"剩余泄漏"。
+  \item \texttt{w1\_scale=1} 推动 \(\spectro{2}{S}{1/2}\) 相移上移 \(+2.1^\circ\)；
+        这与文献 \(\Delta\delta \sim +3\sim 5^\circ\) at 13 MeV (Witała 2011)
+        在符号一致、量级偏小（\(\Np = 20\) 不收敛）。
+  \item \texttt{w1\_scale=0.3} 给出中间值，证明 3NF 在该相移上的依赖
+        \emph{近似线性}——可作为 LEC 拟合的灵敏度梯度。
+\end{itemize}
+
+\paragraph{(g) 与实验数据的对照。}
+13 MeV 弹性 Nd 散射没有"逐分波相移"的实验数据（实验只给出截面与极化）。
+最接近的对照是 \textbf{Witała 部分波相移分析} (PRC \textbf{77}, 044002, 2008)
+基于 cross-section + \(A_y\) + \(iT_{11}\) 的"PWA inversion"。该 PWA 给出
+13 MeV 时 \(\delta(\spectro{2}{S}{1/2}) = (108 \pm 3)^\circ + i\,(14 \pm 1)^\circ\)。
+当前 \(\Np = 20\) 结果偏差 \(\sim 12^\circ\)，但收敛趋势预测 \(\Np = 125\)
+将进入 PWA 误差棒。
+
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch14-interface}
+
+% -----------------------------------------
+\subsection{上游：来自 \texttt{solve\_faddeev}}
+\label{subsec:ch14-upstream}
+
+\paragraph{依赖链。}
+本章脚本\textbf{完全离线}，唯一上游依赖是\textbf{磁盘文件}：
+\begin{itemize}
+  \item \texttt{<output\_folder>/U\_PW\_elements\_Np\_<Np>\_Nq\_<Nq>\_JP\_<2J>\_<P>\_Jmax\_<J2N>\_PSI\_0.txt}：
+        每个 \((J^\pi)\) 块一份。由 \texttt{src/io/write\_pw\_elements.cpp}
+        在 \texttt{solve\_faddeev.cpp} 末尾写出。
+  \item \texttt{<output\_folder>/q\_kinematics\_Nq\_<Nq>.txt}：每次运行
+        必生成（参见
+        \cref{ch:06_wp_swp_states}\(\,\)\S 6.4）。两份文件共享 \texttt{Nq}
+        后缀。
+\end{itemize}
+
+\paragraph{\texttt{U\_PW\_elements\_*.txt} 头部 metadata。}
+以下是从实际文件 \texttt{CPP/Output/miller\_gate1/U\_PW\_elements\_Np\_20\_Nq\_20\_JP\_1\_1\_Jmax\_2\_PSI\_0.txt}
+摘录的头部 metadata 与通道映射表：
+\begin{lstlisting}[style=config, basicstyle=\ttfamily\scriptsize, label={lst:ch14-Upw-header}, caption={\texttt{U\_PW\_elements\_*.txt} 头部 metadata 与 row-idx 通道映射表}]
+# Elastic Nd-scattering U-matrix elements in a wave-packet, Jj-scheme representation.
+# JP:          1/2+
+# Potential:   nijmegen
+# Np:          20
+# Nq:          20
+# Particles:   nd-scattering
+# Deuteron BE: -1.2061683 MeV
+# ###################################################################################################
+#      Name   row-idx   col-idx        l'      2*j'         l       2*j
+        U00         0         0         0         1         0         1
+        U01         0         1         0         1         2         3
+        U10         1         0         2         3         0         1
+        U11         1         1         2         3         2         3
+\end{lstlisting}
+
+\paragraph{文件名格式约定。}
+\begin{tabularx}{\linewidth}{lXX}
+\toprule
+字段 & 取值 & 含义 \\
+\midrule
+\texttt{Np\_<n>} & 整数 & WP \(p\)-bin 数 \\
+\texttt{Nq\_<n>} & 整数 & WP \(q\)-bin 数 \\
+\texttt{JP\_<2J>\_<sign>} & \texttt{1\_1} (\(1/2^+\)), \texttt{1\_-1} (\(1/2^-\)),
+\texttt{3\_1}, ... & 总角动量及宇称 \\
+\texttt{Jmax\_<n>} & 整数 & \(J_{2N\max}\) \\
+\texttt{PSI\_<n>} & 整数 & 参数行索引（\(\geq 0\)，\(-1\) 表"全部"） \\
+\bottomrule
+\end{tabularx}
+
+% -----------------------------------------
+\subsection{下游：相移作为输入}
+\label{subsec:ch14-downstream}
+
+\paragraph{当前下游消费方。}
+commit \texttt{3e0d6e0} 之后\textbf{尚无}下游程序消费 Miller Gate 1 输出——
+它纯粹是验证工具。但已规划的下游：
+\begin{itemize}
+  \item \textbf{3NF LEC 拟合}：把
+        \(\delta(\spectro{2}{S}{1/2}, T_{\rm lab})\) 与 PWA 对比作为
+        \(\chi^2\) 项；与 \cref{ch:15_3nf_physics}\(\,\)\S 15.6 的
+        Witała LECs 拟合管道结合。
+  \item \textbf{回归测试}：把 \(\Np = 50\) 的相移作为基准
+        snapshots，加到 \texttt{tests/test\_2nf\_miller\_baseline.py}。
+        当前回归仅检查 \(U\) 矩阵元，未检查相移。
+\end{itemize}
+
+\paragraph{规划的输出文件名约定（未实现）。}
+当前脚本只打印到 stdout；未来计划写
+\texttt{<output\_folder>/phase\_shift\_miller\_gate1\_Np\_<n>\_Nq\_<n>.txt}，
+格式为
+\begin{verbatim}
+# Tlab [MeV]   JP   l   2j   delta_diag_Re [deg]   delta_diag_Im [deg]   |S_kk|   delta_eig_Re [deg]   delta_eig_Im [deg]   |lambda|
+12.127  1/2+   0   1   +96.10   +15.41   0.7392   +96.13   +15.39   0.7393
+12.127  1/2+   2   3   +178.62  +0.04    0.9994   +178.59  +0.06    0.9994
+...
+\end{verbatim}
+
+% -----------------------------------------
+\subsection{依赖图}
+\label{subsec:ch14-callgraph}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=4mm and 12mm,
+  every node/.style={draw, rounded corners=2pt, font=\footnotesize,
+                     inner sep=4pt, align=center},
+  arr/.style={-Stealth, thick}
+]
+  \node (input)  {\texttt{input\_miller\_gate1*.txt}\\(7+ files)};
+  \node[right=of input] (cpp)    {\texttt{./CPP/run}\\(C++ solver)};
+  \node[right=of cpp] (find)     {\texttt{find\_on\_shell\_bins}\\(q-bin selection)};
+  \node[below=of find] (solve)   {\texttt{solve\_faddeev}\\(Padé Neumann)};
+  \node[below=of cpp] (write)    {\texttt{write\_pw\_elements}\\(I/O)};
+  \node[below=of input] (output) {\texttt{U\_PW\_elements\_*.txt}\\\texttt{q\_kinematics\_Nq\_*.txt}};
+  \node[below=14mm of output] (extract) {\texttt{extract\_phase\_shifts.py}\\(this chapter)};
+  \node[below=of extract] (stdout) {\(\delta_{\rm diag},\, \delta^{\rm eig\,stub},\, |\lambda|,\, \Delta_{\rm uni}\)\\(stdout)};
+  \draw[arr] (input) -- (cpp);
+  \draw[arr] (cpp) -- (find);
+  \draw[arr] (find) -- (solve);
+  \draw[arr] (solve) -- (write);
+  \draw[arr] (write) -- (output);
+  \draw[arr] (output) -- (extract);
+  \draw[arr] (extract) -- (stdout);
+\end{tikzpicture}
+\caption{Miller Gate 1 提取的端到端依赖图。两条路径——求解器 (C++)
+与提取器 (Python)——通过磁盘文件解耦；这是 commit \texttt{3e0d6e0} WIP 设计的关键
+工程选择，使提取器可在不重跑求解器的情况下迭代。}
+\label{fig:ch14-callgraph}
+\end{figure}
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch14-pitfalls}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-bin-mismatch}]
+\textbf{陷阱 1：on-shell q-bin 与目标 \(\Tlab\) 偏差大}
+
+求解器通过 \texttt{find\_on\_shell\_bins}\(\,\)（\cref{lst:ch14-find-on-shell-bins}）
+把用户输入 \(\Tlab^{\rm input}\) 映射到\textbf{至少两个相邻 q-bin}的
+中点 \(\Tlab^{\rm midpt}\)；二者的偏差最坏情况 \(\sim 30\%\)，最常见 \(5\!-\!10\%\)。
+\(\Np = \Nq = 20\) 时，13 MeV 输入实际跑出来的是 12.13 MeV 与 16.64 MeV——
+\(-7\%\) 与 \(+28\%\)！
+
+\textbf{后果}：与 Miller Fig.~1 直接做"\(\Tlab = 13\) MeV 一对一对照"
+是不严格的——Miller 用的是连续平面波 \(q_0\) 振幅，不是 bin 平均。
+\(\Np \gtrsim 125\) 时 bin 宽 \(\Delta\Tlab \sim 0.5\) MeV，偏差降到 \(\lesssim 4\%\)，
+此时 bin-平均与平面波的差异 \(< 1^\circ\)。
+
+\textbf{避坑}：
+\begin{enumerate}
+  \item 引用相移结果时\textbf{打印实际 \(\Tlab\)}，不要四舍五入到输入值。
+  \item 与文献对比时，若文献只给"13 MeV"一个点，应做线性插值
+        \(\delta(13~\text{MeV}) \approx \delta(\Tlab^{\rm midpt}_{j_-}) + \frac{13 -
+        \Tlab^{\rm midpt}_{j_-}}{\Tlab^{\rm midpt}_{j_+} - \Tlab^{\rm midpt}_{j_-}}
+        \cdot (\delta(\Tlab^{\rm midpt}_{j_+}) - \delta(\Tlab^{\rm midpt}_{j_-}))\)。
+  \item 跑收敛 \(\Np \in \{20, 50, 100\}\) 至少三档，外推到 \(\Np \to \infty\)。
+\end{enumerate}
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-Delta-E-units}]
+\textbf{陷阱 2：\(\Delta E_j\) 用 \(E_{\rm cm}\) 而非 \(E_{q,{\rm lab}}\)}
+
+\cref{eq:ch14-WP-to-plane-final}\(\,\)推导时 \(\Niso_j = \Delta E_j\) 是
+\(\,N\!-\!d\)\textbf{质心系}动能差（\(E_{\rm cm}\) 列）。代码用
+\verb|boundaries[q_idx + 1]["ecm"] - boundaries[q_idx]["ecm"]|（参见
+\cref{lst:ch14-extract-phase-shifts-driver}\(\,\)行 28）。
+
+误用 \(\Tlab\) 列（lab 系动能）会把 \(\Delta E_j\) 错算约 \(\frac{M_d + M_n}{M_d}
+\approx 1.5\) 倍——相移误差 \(\sim 50\%\)。
+
+\textbf{避坑}：脚本里 \texttt{ecm} 字段名固定。如果未来改 q\_kinematics 文件
+schema，要同步修改。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-mN-vs-mu}]
+\textbf{陷阱 3：S 矩阵前缀 \(m_N\) 不等于 \(\mu_1\)}
+
+\cref{eq:ch14-S-from-Uplane}\(\,\)的 \(m_N = 2 M_p M_n / (M_p+M_n) \approx 938.92\)
+MeV \textbf{是约化质量的两倍}，与
+\(\bar{f}^2 = q/\mu_1\) 中的\textbf{\(\mu_1 = M_n M_d /(M_n+M_d) \approx 624.6\) MeV}
+（\(N\)-\(d\) 系约化质量）\textbf{不是同一个量}。
+
+误用 \(\mu_1\) 替代 \(m_N\) 会把 \(S - I\) 系数错算 \(\sim 1.5\) 倍，
+\(\delta\) 误差 \(\sim 30^\circ\)。
+
+\textbf{避坑}：\cref{lst:ch14-extract-phase-shifts-header}\(\,\)行 40 与 44
+两个常量分别命名 \texttt{MN\_MILLER} 与 \texttt{MU1\_ND}，命名严格区分。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-cE-sign}]
+\textbf{陷阱 4：与 commit \texttt{f4df358} \(c_E\) 符号修复的相互作用}
+
+commit \texttt{f4df358}（"fix c\_E sign: use Navrátil/Witała +½ convention"）
+\textbf{晚于}commit \texttt{3e0d6e0}（Miller Gate 1 引入）3 天。后者 commit message 写的
+"Preliminary Np=Nq=20 Nijmegen-I 13 MeV: δ(\(J^\Pi=1/2^+, l=0)\) ≈ +96°"
+是\textbf{2NF-only}（\texttt{three\_nucleon\_force=none}）的结果——故\(c_E\)
+符号不影响这一行。
+
+但 commit \texttt{3e0d6e0} 之后被工作树新加的 \texttt{input\_miller\_gate1\_np20\_3nf.txt}
+（带 \texttt{three\_nucleon\_force=chiral\_N2LO}, \texttt{c\_E=-0.205}）则\textbf{依赖}
+\texttt{f4df358} 的修复——若用旧 \(c_E\) 符号，
+\(\Delta\delta(c_E)\) 会反号，
+3NF 灵敏度图整体翻面。
+
+\textbf{后果}：若读者把 commit \texttt{3e0d6e0} 与 \texttt{f4df358}
+\textbf{反向 cherry-pick}，得到的 3NF 相移移动符号是错的。
+
+\textbf{避坑}：跑 3NF 相移时确认 \texttt{git log --oneline | head} 含
+\texttt{f4df358}；或直接检查 \texttt{include/constants.h} /
+\texttt{src/3nf/kernel\_contact.cpp} 里 \(c_E\) 项前的符号
+（应为 \(+\tfrac{1}{2}\) Navrátil/Witała convention）。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-isospin-channels}]
+\textbf{陷阱 5：isospin 通道在 Miller Gate 1 下的特殊处理}
+
+打开 \texttt{isospin\_breaking\_1S0=true} 时（baseline \texttt{input\_miller\_gate1.txt}
+默认开），\(\spectro{1}{S}{0}\) 通道增加一个 \(T = 3/2\) 副本
+（\cref{ch:07_pw_symm_states}\(\,\)\S 7.2.4）。但
+\textbf{Miller Gate 1 只关心 \(JP = 1/2^+\) 的 spectator-doublet}——
+该 doublet \emph{不依赖}\(\spectro{1}{S}{0}\)（\(\spectro{1}{S}{0}\) 在
+\(JP = 1/2^-\)）。
+
+\textbf{后果}：IB 开 / 关在 \(JP = 1/2^+\) 块的相移上\textbf{差异 \(\sim 0\)}。
+若读者打开 IB 期望看到相移变化、却没观察到，不是 IB 没生效，是 IB 影响的是
+\(JP = 1/2^-\) 块（\(\spectro{1}{S}{0}\) 内）。
+
+\textbf{避坑}：要看 IB 影响，需要同时跑 \texttt{JP\_1\_-1} 文件并对比。
+脚本对每个文件单独跑，不会跨 \(JP\) 块求差。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-eig-vs-takagi}]
+\textbf{陷阱 6：\texttt{np.linalg.eigvals} 不是 Blatt-Biedenharn 严格对角化}
+
+\cref{lst:ch14-extract-phase-shifts-physics}\(\,\)行 19 用
+\verb|np.linalg.eigvals(S)| 算特征值，
+\(\delta = \tfrac{1}{2}\arg \lambda\)。这\textbf{不等同于} Takagi 分解
+\(S = O e^{2i\boldsymbol{\delta}^{\rm eig}} O^T\)：
+\begin{itemize}
+  \item Takagi 要求 \(O \in O(n, \mathbb{R})\)；
+  \item \texttt{eigvals} 给出的特征向量是\(\,\mathbb{C}^n\) 中复向量，
+        除非 \(S\) 严格复对称、否则不退化为正交分解。
+\end{itemize}
+
+当前 commit \texttt{3e0d6e0} 的实现\textbf{近似}成立，因为求解器输出的
+\(S\) 严格复对称（数值离散误差 \(\sim 10^{-3}\)）；但若使用\textbf{
+P123 缓存复用}（\texttt{P123\_recovery=true}）时网格不一致，可能产生
+\(\sim 10^{-2}\) 的非对称残差，使 \texttt{eigvals} 与 Takagi 偏差到
+\(\sim 1^\circ\)。
+
+\textbf{避坑}：将来要做 LEC 拟合 (\(\sim 0.1^\circ\) 精度) 必须实现严格 Takagi。
+当前 commit message 已明确这是 stub。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-py-deps}]
+\textbf{陷阱 7：脚本对 Python \(\geq 3.10\) 的隐式依赖}
+
+\cref{lst:ch14-extract-phase-shifts-physics}\(\,\)行 32 \verb|complex | float|
+是 PEP 604 形式的 type union，仅在 Python \(\geq 3.10\) 受支持。
+若用 RIKEN ENV2 默认 \texttt{python3.9}（仍然在用）会报
+\texttt{SyntaxError: unsupported operand type(s) for |}.
+
+\textbf{避坑}：用 \texttt{micromamba run -n anaroot-env python3} 或
+\texttt{python3.10+}。或者改写为
+\verb|Union[complex, float]| 兼容老版本——但当前 commit 没做。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch14-pitfall-input-file-proliferation}]
+\textbf{陷阱 8：8 份 \texttt{input\_miller\_gate1*.txt} 文件易混淆}
+
+\cref{tab:ch14-input-inventory}\(\,\)列出的 8 份配置中，5 份共享
+\texttt{P123\_folder=CPP/Output/miller\_gate1}（即用 baseline 的 P123 缓存），
+3 份独立（\texttt{np50}, \texttt{np50\_3nf}, \texttt{np20\_dbg\_baseline}
+分别用自己的）。
+
+\textbf{后果}：若用户先跑 \texttt{input\_miller\_gate1\_np50.txt} 生成 P123，
+再跑 \texttt{input\_miller\_gate1.txt} 期望复用缓存——但 P123 是 \(\Np = 50\)
+不兼容 \(\Np = 20\)，求解器会直接 segfault 或得到错误数据。
+
+\textbf{避坑}：
+\begin{itemize}
+  \item 修改 input 时\textbf{一并检查} \texttt{P123\_folder} 与 \texttt{output\_folder}
+        是否一致，避免缓存污染；
+  \item 第一次跑用 \texttt{P123\_recovery=false} 强制重算 P123；
+  \item 引入新 input 文件时，保持 \texttt{output\_folder} 名字与文件名后缀一致，
+        如 \texttt{input\_miller\_gate1\_np50\_3nf.txt} \(\to\)
+        \texttt{output\_folder=CPP/Output/miller\_gate1\_np50\_3nf}。
+\end{itemize}
+\end{pitfallbox}

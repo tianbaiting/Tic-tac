@@ -1,13 +1,1059 @@
 % =====================================================================
 % 06_wp_swp_states.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 6 章 WP / SWP 基矢的代码构造（make_wp_states / make_swp_states）
+% Wave 2 / Agent A
 % =====================================================================
 
 \chapter{WP / SWP 基矢的代码构造}
 \label{ch:06_wp_swp_states}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch06-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{从抽象基矢到内存数组的鸿沟。}
+\cref{ch:05_wpcd_math} 已经把自由波包 \(\WPbin{i}\) 与散射波包
+\(\ket{\bar{x}_n}_{\rm SWP}\) 这两组基的数学定义建立完毕，
+并解释了它们各自在 \(P_{123}, V, \Gop\) 投影中的作用。
+但论文上的"\(\WPbin{i}\)" 只是符号；要让 Faddeev 求解器跑起来，
+我们需要把它们落到具体的 C++ 数组：bin 边界 \texttt{p\_WP\_array},
+求积点 \texttt{p\_array}, 权重 \texttt{wp\_array},
+归一化 \texttt{norm\_p\_array}, SWP 本征向量矩阵
+\texttt{C\_SWP\_unco/coup\_array}……
+本章的任务就是\textbf{把数学公式与代码逐行映射}。
+
+\paragraph{为什么要单写一章。}
+\cref{ch:05_wpcd_math} \(\S\)5.5 已经给了核心代码片段，但只展示了
+"边界生成"与"自由 H0"两条最孤立的函数。生产代码里还有：
+\begin{itemize}
+  \item 主函数 \texttt{make\_fwp\_statespace}（92 行 C++）
+        如何依赖输入参数、动态分配数组、分支处理 midpoint vs.~GL 求积；
+  \item 主函数 \texttt{make\_swp\_states}（210 行 C++）
+        如何遍历 \(\PWchan\) 矩阵、去重、调用 LAPACK、处理耦合 / 非耦合两种存储；
+  \item origin (Sean) 与 current (Tic-tac) 两套实现的工程改造点
+        （anonymous namespace、vector 替代裸指针、bilingual EN/CN 注释）；
+  \item 历史上踩过的坑（如 \texttt{b36d48c} commit 修复的"grid option
+        handling" 错误）。
+\end{itemize}
+这些细节决定了\textbf{在生产环境下你能否复现 Wave 2 / Agent A 的所有数字}，
+也决定了你将 Tic-tac 的 fWP/SWP 模块改造为新功能时不会破坏的底线。
+
+\paragraph{并行化的位置。}
+fWP 网格构造与 SWP 对角化都在求解器主流水线的"基底准备"阶段
+（\cref{ch:11_faddeev_solver} 的 Step 1）；它们\textbf{不并行}——
+因为它们的计算成本（\(\sim 100\) ms）相对于 P123 构造（\(\sim\) 小时）
+完全可以忽略。然而 SWP 对角化所产出的 \(C\) 矩阵在求解器热路径里被
+\textbf{反复}并行使用（OpenMP 跨 \(\Tlab\)、跨 3N-channel 块；
+参见 \cref{ch:11_faddeev_solver}）。本章 \(\S\)6.7 解释这两条数据流的
+"并发安全性边界"。
+
+\paragraph{本章的目标。}
+读完本章你应能：
+\begin{itemize}
+  \item 看到 \texttt{make\_wp\_states.cpp} 任意一行立即知道它对应
+        \cref{ch:05_wpcd_math} 的哪条公式或推导步骤；
+  \item 在两套仓库（origin / current）之间无缝切换，理解工程改动
+        （vector vs.~裸指针、anonymous namespace 引入）的动机；
+  \item 自信地修改 fWP/SWP 代码（如加一种新权函数 \(f_i\)）而\textbf{不}
+        破坏 P123 / V / G 三个下游消费者的数据契约；
+  \item 知道 \(\NpWP\) 与 \(\NqWP\) 改动对内存的 \(N^2\) 影响，能在
+        编译前估算运行所需 RAM。
+\end{itemize}
+
+% =========================================
+\section{数学推导（refresher）}
+\label{sec:ch06-math}
+
+本节把 \cref{ch:05_wpcd_math} 的关键公式整理为一张"代码可立即引用"的
+小卡片。所有符号沿用 \cref{ch:05_wpcd_math}。
+
+\paragraph{(M1) Chebyshev 边界（\cref{eq:ch05-cheb-edges} 的代码形态）。}
+\begin{equation}
+\label{eq:ch06-cheb-edge-code}
+p_i \;=\; s \cdot \bigl[\tan(\theta_i)\bigr]^t,
+\qquad
+\theta_i \;=\; \frac{(2i - 1)\pi}{4N},
+\quad
+i = 1, \ldots, N,
+\quad
+p_0 = 0.
+\end{equation}
+对应代码：\texttt{src/core/state\_space/make\_wp\_states.cpp:87--105}。
+入口参数：\(N \leftarrow\) \texttt{Np\_WP} 或 \texttt{Nq\_WP}，
+\(s \leftarrow\) \texttt{chebyshev\_s}，\(t \leftarrow\) \texttt{chebyshev\_t}。
+
+\paragraph{(M2) bin 内 Gauss--Legendre 求积。}
+\begin{equation}
+\label{eq:ch06-GL-quadrature}
+\int_{p_{i-1}}^{p_i} g(p)\,dp
+\;\approx\;
+\sum_{k=1}^{N_g} w_k^{(i)}\, g\!\bigl(p^{(k)}_i\bigr),
+\end{equation}
+其中 \(p^{(k)}_i, w^{(k)}_i\) 由 \texttt{gauss}\(\to\)\texttt{updateRange\_a\_b}
+两步流水线生成（\(\S\)6.5.3）。\(N_g \leftarrow\) \texttt{Np\_per\_WP}
+（缺省 8）。
+
+\paragraph{(M3) 归一化 \(\mathcal{N}_i\) 与权函数 \(f_i\)。}
+\begin{equation}
+\label{eq:ch06-Ni-fi}
+\mathcal{N}_i = \sqrt{p_i - p_{i-1}},
+\qquad
+f_i(p) = 1
+\quad
+\text{(均匀动量 WP，Tic-tac 默认)}.
+\end{equation}
+对应 \texttt{p\_normalization}, \texttt{p\_weight\_function} 函数体。
+
+\paragraph{(M4) 自由 Hamiltonian 单 bin 平均 \(\bar{T}_i\)。}
+\begin{equation}
+\label{eq:ch06-Tbar-code}
+\bar{T}_i \;=\; \frac{p_i^2 + p_i p_{i-1} + p_{i-1}^2}{6\,\mu_{23}},
+\qquad
+\mu_{23} = \frac{M_p M_n}{M_p + M_n} \;\approx\; 469.46\,\mathrm{MeV}.
+\end{equation}
+对应 \texttt{construct\_free\_hamiltonian}（\cref{lst:ch05-construct-H0}）。
+
+\paragraph{(M5) 块对角化与 SWP bin 边界。}
+对每个唯一两体子通道 \((\ell, s, j, t)\)：
+\begin{align}
+[H_0 + V]_{ij}^{\rm WP}\,C_{j,n} &= E_n\,C_{i,n}, \label{eq:ch06-eigsys}\\
+e_{\rm SWP}[n] &= \tfrac{1}{2}(E_n + E_{n-1}),\quad n = 1, \ldots, \NpWP-1, \label{eq:ch06-eSWP}\\
+e_{\rm SWP}[0] &= 0,\quad e_{\rm SWP}[\NpWP] = E_{\NpWP-1} + \tfrac{1}{2}(e_{\rm SWP}[\NpWP-1] - e_{\rm SWP}[\NpWP-2]). \label{eq:ch06-eSWP-end}
+\end{align}
+3S1 通道有特殊修正：\(e_{\rm SWP}[0] = E_0 < 0\)（束缚态），
+\(e_{\rm SWP}[1] = 0\)（连续阈值）。
+
+% -----------------------------------------
+\subsection{Chebyshev 反正切变换的几何意义补充}
+\label{subsec:ch06-cheb-geom}
+
+\cref{eq:ch06-cheb-edge-code} 看似是凭空的"经验公式"，但它有清晰的
+几何来源。考虑标准 Chebyshev-T 节点
+\(\xi_i = \cos\bigl(\tfrac{(2i-1)\pi}{2N}\bigr)\) 在 \([-1, 1]\) 上。
+做半角变换 \(\xi = \cos(2\theta) = 1 - 2\sin^2\theta\)，得
+\(\theta_i = \tfrac{(2i-1)\pi}{4N}\) 在 \([0, \pi/2]\) 上等距分布。
+\(\tan\theta\) 把 \([0, \pi/2)\) 双射到 \([0, \infty)\)：
+\begin{equation}
+\theta = 0 \to p = 0,
+\qquad
+\theta = \pi/2 \to p \to \infty.
+\end{equation}
+节点 \(\theta_i = \tfrac{(2i-1)\pi}{4N}\) 等距，但
+\(\tan\theta_i\) 在 \(\theta \to \pi/2\) 处剧烈拉伸，
+给出"低 \(\theta\) 密 / 高 \(\theta\) 疏"的网格。
+参数 \(s\) 是简单的尺度伸缩（\(p \to s \cdot p\)）；\(t\) 是
+\textbf{额外的}单参数变形——把 \(\tan\theta\) 改成 \((\tan\theta)^t\)，
+进一步控制低动量的加密程度（\cref{eq:ch05-cheb-density}）。
+
+\paragraph{对照：Gauss--Legendre vs.~Chebyshev。}
+两个标准选择都给出"边界稠密 / 中间稀疏"的网格。
+\textbf{Gauss--Legendre}: \(\xi_i\) 是 \(P_N(\xi) = 0\) 的根，节点带
+"重要性权重" \(w_i\)；适合对\textbf{光滑}被积函数做高阶求积。
+\textbf{Chebyshev}: \(\xi_i = \cos(\theta_i)\) 是简单解析公式；不带
+权重（仅作\textbf{节点}用），无法直接求积。
+WPCD 用 Chebyshev 的\textbf{节点公式}定义 bin 边界，
+然后在 bin\textbf{内部}另外用 Gauss--Legendre 做求积——
+这是两种正交多项式的功能分工：Chebyshev 决定"哪里加密"，
+Gauss--Legendre 决定"加密了之后怎么积"。
+
+% =========================================
+\section{离散化方案}
+\label{sec:ch06-discretization}
+
+本章的"离散化方案"是 \cref{ch:05_wpcd_math} \(\S\)5.3 离散化流程图
+的具体内存布局视图。我们用 TikZ 画出 fWP 与 SWP 两层数据结构的嵌套
+关系，作为 \(\S\)6.5 代码阅读的导航图。
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=4mm and 6mm,
+  every node/.style={font=\footnotesize, align=center},
+  bin/.style={draw, fill=blue!10, minimum width=2cm, minimum height=0.6cm},
+  qpoint/.style={draw, circle, fill=orange!20, inner sep=1pt, minimum size=4pt},
+  arr/.style={-Stealth, thick}
+]
+  % p-axis (top)
+  \draw[->, thick] (0, 4) -- (10, 4) node[right] {\(p\) [fm\(^{-1}\)]};
+  \node[bin] at (1.5, 3.5) {bin 1};
+  \node[bin] at (3.0, 3.5) {bin 2};
+  \node[bin] at (5.0, 3.5) {bin 3};
+  \node[bin] at (7.5, 3.5) {bin 4};
+  \draw[dashed] (0.5, 3.2) -- (0.5, 4) node[above] {\(p_0\)};
+  \draw[dashed] (2.5, 3.2) -- (2.5, 4) node[above] {\(p_1\)};
+  \draw[dashed] (3.5, 3.2) -- (3.5, 4) node[above] {\(p_2\)};
+  \draw[dashed] (4.5, 3.2) -- (4.5, 4) node[above] {\(p_3\)};
+  \draw[dashed] (6.0, 3.2) -- (6.0, 4) node[above] {\(p_4\)};
+  \draw[dashed] (9.0, 3.2) -- (9.0, 4) node[above] {\(p_5\)};
+  % bin 3 expanded (Gauss-Legendre points inside)
+  \draw[->, gray] (5.0, 3.2) -- (4.0, 2.5);
+  \draw[fill=blue!5, draw=black] (1, 1.5) rectangle (9, 2.4);
+  \node at (5, 2.6) {\(p\_\)array within bin 3 (Np\_per\_WP = 8 GL points)};
+  \foreach \xpos/\lab in {1.4/{p^{(1)}_3}, 2.5/{p^{(2)}_3}, 3.6/{p^{(3)}_3}, 4.5/{p^{(4)}_3}, 5.5/{p^{(5)}_3}, 6.4/{p^{(6)}_3}, 7.5/{p^{(7)}_3}, 8.6/{p^{(8)}_3}} {
+    \node[qpoint] at (\xpos, 1.95) {};
+    \node[font=\tiny] at (\xpos, 1.6) {$\lab$};
+  }
+  % SWP transformation arrow
+  \draw[->, very thick, red!70!black] (5, 1.4) -- (5, 0.6);
+  \node[red!70!black] at (5, 1.0) {\textbf{(对每个 2N 通道) \(C\) 矩阵：}\\fWP \(\to\) SWP};
+  % SWP labels
+  \draw[fill=red!5, draw=red!50!black] (1, -0.5) rectangle (9, 0.4);
+  \node at (5, 0) {SWP \(\ket{\bar{x}_n}_{\rm SWP}\): 5 个本征态 (按本征值升序)};
+  \foreach \xpos in {1.5, 3.0, 4.5, 6.5, 8.5} {
+    \node[draw, circle, fill=red!30, inner sep=1pt, minimum size=4pt] at (\xpos, 0) {};
+  }
+\end{tikzpicture}
+\caption{fWP 与 SWP 的嵌套数据结构。上层：\(\NpWP = 5\) 个 fWP bin，
+由 \cref{eq:ch06-cheb-edge-code} 给出 \(p_0, \ldots, p_5\) 边界。
+中层：放大第 3 个 bin，内部 8 个 Gauss--Legendre 求积点
+\(p^{(k)}_3\)（\cref{eq:ch06-GL-quadrature}）。
+下层：在每个 2N 子通道里，\(C\) 矩阵把 5 个 fWP bin 平均态
+混合为 5 个 SWP 本征态 \(\ket{\bar{x}_n}_{\rm SWP}\)
+（\cref{eq:ch05-SWP-def-state}）。
+红色椭圆代表 SWP 本征态，按本征值升序排列。}
+\label{fig:ch06-fWP-SWP-nesting}
+\end{figure}
+
+\paragraph{内存布局：连续存储 vs.~指针数组。}
+fWP 的所有数组（\texttt{p\_WP\_array}, \texttt{p\_array},
+\texttt{wp\_array}, \texttt{fp\_array}, \texttt{norm\_p\_array}）
+都是\textbf{单一连续 double 数组}，按第一个维度（bin index）+ 第二个维
+度（bin 内求积点 index）展平：
+\begin{equation}
+\texttt{p\_array}[i \cdot N_p^{\rm per WP} + k]
+\;=\;
+p_i^{(k)},
+\quad i \in [0, \NpWP),\;k \in [0, N_p^{\rm per WP}).
+\end{equation}
+SWP 数组结构稍复杂——按"未耦合 / 耦合 + 2N 通道索引 + 矩阵元 (i, j)" 三层
+索引：
+\begin{align}
+\texttt{C\_SWP\_unco\_array}[\,c \cdot \NpWP^2 + i \cdot \NpWP + j\,]
+   &= C_{ij}^{(c, \text{unco})}, \\
+\texttt{C\_SWP\_coup\_array}[\,c \cdot (2\NpWP)^2 + i \cdot 2\NpWP + j\,]
+   &= C_{ij}^{(c, \text{coup})},
+\end{align}
+其中 \(c\) 是该通道在唯一通道列表里的索引（参见 \cref{ch:07_pw_symm_states}
+的 \texttt{unique\_2N\_idx}）。这种"扁平化"是为了 LAPACK 直接消费——
+\texttt{LAPACKE\_dspevd} 期待 row-major 矩阵以单个连续指针传入。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch06-algorithm}
+
+我们已在 \cref{sec:ch05-algorithm} 给出 BUILD-WP-GRID 与 BUILD-SWP-EIGEN
+两条主算法的高层伪码。本节展开它们的子流程到代码可直接对应的级别，
+作为 \(\S\)6.5 代码阅读的字典。
+
+\begin{algorithm}[H]
+\caption{BUILD-WP-STATES（详细）：\texttt{make\_fwp\_statespace} 主流程}
+\label{alg:ch06-build-wp-states}
+\KwIn{\texttt{run\_parameters}（含 \texttt{Np\_WP, Nq\_WP, Np\_per\_WP, Nq\_per\_WP, chebyshev\_s, chebyshev\_t, midpoint\_approx, p\_grid\_type, q\_grid\_type, p\_grid\_filename, q\_grid\_filename}）}
+\KwOut{填充的 \texttt{fwp\_statespace}}
+\BlankLine
+\textbf{Step 0}：复制维度
+\Indp
+   \texttt{fwp.Np\_WP $\leftarrow$ rp.Np\_WP}\;
+   \texttt{fwp.Nq\_WP $\leftarrow$ rp.Nq\_WP}\;
+   \texttt{fwp.Np\_per\_WP $\leftarrow$ rp.Np\_per\_WP}\;
+   \texttt{fwp.Nq\_per\_WP $\leftarrow$ rp.Nq\_per\_WP}\;
+   \texttt{Np $\leftarrow$ num\_packet\_points(Np\_WP, Np\_per\_WP, midpoint)}\;
+   \texttt{Nq $\leftarrow$ num\_packet\_points(Nq\_WP, Nq\_per\_WP, midpoint)}\;
+\Indm
+\textbf{Step 1}：构造 bin 边界
+\Indp
+   分配 \texttt{p\_WP\_array[Np\_WP+1]}\;
+   \uIf{\texttt{p\_grid\_type == "chebyshev"}}{
+       \texttt{make\_chebyshev\_distribution(Np\_WP, p\_WP\_array, s, t)} (\cref{eq:ch06-cheb-edge-code})\;
+   }
+   \uElseIf{\texttt{p\_grid\_type == "custom"}}{
+       \texttt{read\_WP\_boundaries\_from\_txt(p\_WP\_array, Np\_WP, p\_grid\_filename)}\;
+   }
+   \Else{
+       \texttt{raise\_error("Unknown p-momentum gridtype specified.")}\;
+   }
+   \(q\) 同理\;
+\Indm
+\textbf{Step 2}：填 bin 内求积点
+\Indp
+   分配 \texttt{p\_array[Np]}\;
+   \uIf{\texttt{midpoint\_approx == true}}{
+       \texttt{build\_midpoint\_mesh(p\_array, p\_WP\_array, Np\_WP)}\;
+   }
+   \Else{
+       分配 \texttt{wp\_array[Np]}\;
+       \texttt{make\_p\_bin\_quadrature\_grids(fwp)}（对每 bin 调
+       \texttt{gauss}+\texttt{updateRange\_a\_b}）\;
+   }
+   \(q\) 同理\;
+\Indm
+\textbf{Step 3}：填权函数
+\Indp
+   分配 \texttt{fp\_array[Np]}\;
+   \texttt{fill\_weight\_array(fp\_array, p\_array, Np, p\_weight\_function)}\;
+   \(q\) 同理\;
+\Indm
+\textbf{Step 4}：填归一化
+\Indp
+   分配 \texttt{norm\_p\_array[Np\_WP]}\;
+   \texttt{fill\_normalization\_array(norm\_p\_array, p\_WP\_array, Np\_WP, p\_normalization)}\;
+   \(q\) 同理\;
+\Indm
+\textbf{Step 5}：写盘
+\Indp
+   \texttt{store\_q\_WP\_boundaries\_csv(fwp, q\_boundaries\_filename)}\;
+\Indm
+\Return\;
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{BUILD-SWP-STATES（详细）：\texttt{make\_swp\_states} 主流程}
+\label{alg:ch06-build-swp-states}
+\KwIn{\(V_{ij}^{\rm WP}\)（来自 \cref{ch:08_potential_matrix}）, \texttt{fwp\_states},
+\texttt{pw\_states}, \texttt{run\_parameters}}
+\KwOut{\texttt{swp\_states.C\_SWP\_unco/coup\_array, e\_SWP\_unco/coup\_array, E\_bound}}
+\BlankLine
+\textbf{Step 0}：拷贝接口字段
+\Indp
+   \texttt{swp.Np\_WP $\leftarrow$ fwp.Np\_WP}; \texttt{Nq\_WP, q\_WP\_array} 同理\;
+   \texttt{check\_list\_unco / coup}: 长度 \texttt{num\_2N\_unco/coup\_states}
+                的布尔数组，初值 false\;
+\Indm
+\textbf{Step 1}：构造 \texttt{H0\_WP\_unco / coup\_array}
+\Indp
+   \texttt{fill\_free\_hamiltonian\_branches(H0\_unco, 1, Np\_WP, p\_WP\_array)}\;
+   \texttt{fill\_free\_hamiltonian\_branches(H0\_coup, 2, Np\_WP, p\_WP\_array)}（耦合分支需要两条 H0）\;
+\Indm
+\textbf{Step 2}：双重通道循环
+\Indp
+\For{\(\PWchan_r \in [0, \Nalpha)\)}{
+   \For{\(\PWchan_c \in [0, \Nalpha)\)}{
+   \uIf{\((T_r, J_r, S_r) = (T_c, J_c, S_c)\) 且 \(|L_r - L_c| \le 2\)}{
+      \texttt{coupled $\leftarrow$ uses\_coupled\_storage(L\_r, L\_c, S\_r, J\_r, run\_parameters)}\;
+      \texttt{chn\_idx $\leftarrow$ unique\_2N\_idx(L\_r, S\_r, J\_r, T\_r, coupled, rp)}\;
+      \uIf{\texttt{coupled}}{
+         \uIf{\texttt{!claim\_channel(check\_list\_coup, chn\_idx)}}{
+            \texttt{continue}（已对角化过）\;
+         }
+         设置 \texttt{mat\_dim = 2 * Np\_WP}; 取
+            \texttt{mat\_ptr\_H = \&H\_WP\_coup\_array[chn\_idx * mat\_dim*(mat\_dim+1)/2]}\;
+         \texttt{mat\_ptr\_V = \&V\_WP\_coup\_array[chn\_idx * mat\_dim*mat\_dim]}\;
+         \texttt{mat\_ptr\_C = \&C\_WP\_coup\_array[chn\_idx * mat\_dim*mat\_dim]}\;
+         \texttt{e\_SWP\_array\_ptr = \&e\_SWP\_coup\_array[chn\_idx * 2*(Np\_WP+1)]}\;
+         \texttt{mat\_ptr\_H0 = H0\_WP\_coup\_array.data()}\;
+      }
+      \Else{
+         同理但取 unco 数组与 \texttt{mat\_dim = Np\_WP}\;
+      }
+      \texttt{construct\_full\_hamiltonian(mat\_ptr\_H, mat\_ptr\_H0, mat\_ptr\_V, mat\_dim)}\;
+      \texttt{diagonalize\_real\_symm\_matrix(mat\_ptr\_H, eigenvalues, mat\_ptr\_C, mat\_dim)}\;
+      \texttt{look\_for\_unphysical\_bound\_states(eigenvalues, mat\_dim, chn\_3S1, E\_bound)}\;
+      \uIf{\texttt{coupled}}{
+         \texttt{reorder\_coupled\_eigenspectrum(eigenvalues, mat\_ptr\_C, Np\_WP)}\;
+      }
+      \texttt{make\_swp\_bin\_boundaries(eigenvalues, e\_SWP\_array\_ptr, Np\_WP, coupled, chn\_3S1)}\;
+   }
+   }
+}
+\Indm
+\textbf{Step 3}：写 \texttt{store\_swp\_kinematics}（导出 q-WP 的 E\_cm / T\_lab 表）\;
+\Return\;
+\end{algorithm}
+
+\paragraph{内存与复杂度。}
+\(\NpWP \cdot N_p^{\rm per WP} \cdot 8\,\text{B}\) (p\_array)
+\(+\) 同 q \(=\) 几 KB；P123 与 V 的内存才是大头（\(\sim\) 100 MB / 1 GB）。
+SWP 对角化：每个未耦合 2N 块 \(O(\NpWP^3)\)，每个耦合块
+\(O((2\NpWP)^3)\)；总成本 \(\sim 100\,\mathrm{ms}\)。
+
+% =========================================
+\section{代码落地}
+\label{sec:ch06-code}
+
+本节是全章篇幅最大的部分。我们按 7 个代码片段展开：
+\(\S\)6.5.1 \texttt{make\_fwp\_statespace} 主流程对照（origin vs.~current）；
+\(\S\)6.5.2 anonymous namespace 内的辅助函数（current 独有）；
+\(\S\)6.5.3 \texttt{make\_p\_bin\_quadrature\_grids} 求积点构造；
+\(\S\)6.5.4 \texttt{make\_swp\_states} 主流程；
+\(\S\)6.5.5 LAPACK 调用与耦合通道重排；
+\(\S\)6.5.6 SWP bin 边界生成；
+\(\S\)6.5.7 \texttt{run\_params} 结构体（接口契约）。
+
+% -----------------------------------------
+\subsection{\texttt{make\_fwp\_statespace} 主流程：origin / current 对照}
+\label{subsec:ch06-code-fwp-main}
+
+\paragraph{当前仓库版本。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_fwp\_statespace}（current，\texttt{src/core/state\_space/make\_wp\_states.cpp:179--245}）},
+  label={lst:ch06-fwp-current}
+]{code_excerpts/snippets/ch06_make_fwp_statespace_current.cpp}
+
+\paragraph{原始仓库版本。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_fwp\_statespace}（origin，\texttt{tictac-origin/Tic-tac/CPP/make\_wp\_states.cpp:116--211}）},
+  label={lst:ch06-fwp-origin}
+]{code_excerpts/snippets/ch06_make_fwp_statespace_origin.cpp}
+
+\paragraph{逐段对照。}
+两个版本\textbf{算法上完全一致}（同一 4 步：边界 → 求积点 → 权函数 →
+归一化），但 current 在工程层面做了 5 处改动：
+
+\begin{enumerate}
+  \item \textbf{Step 0 维度计算抽象化}（current 行 194--199 vs.~origin 行
+        128--135）：
+        origin 直接 \texttt{if (midpoint\_approx) Np = Np\_WP; else Np
+        = Np\_WP * Np\_per\_WP;}；
+        current 引入 \texttt{num\_packet\_points(Np\_WP, Np\_per\_WP, midpoint)}
+        辅助函数（在 anonymous namespace，见 \(\S\)6.5.2）。这一步把
+        "重复同样三元逻辑分支"压缩为单函数调用，未来扩展（如加新求积模式）
+        只改一处。
+  \item \textbf{midpoint mesh 实现抽象化}（current 行 222--231 vs.~origin
+        行 152--161）：
+        origin 直接两个 \texttt{for} 循环写中点
+        \(0.5*(p\_WP\_array[i] + p\_WP\_array[i+1])\)；
+        current 调 \texttt{build\_midpoint\_mesh}（也在 anonymous namespace）。
+  \item \textbf{权函数与归一化的函数指针接口}（current 行 251--280 vs.~origin
+        行 178--203）：
+        origin 内联 \texttt{for} 循环并直接调
+        \texttt{p\_weight\_function(...)}, \texttt{p\_normalization(...)}；
+        current 通过 \texttt{fill\_weight\_array(...,
+        p\_weight\_function)} 与 \texttt{fill\_normalization\_array(...,
+        p\_normalization)} 把"循环 + 函数调用"分离，
+        引入函数指针参数；这一改动让"加一种新 \(f_i\) / 新 \(\mathcal{N}_i\)"
+        变成只换函数指针、不需要 copy-paste 整个循环体。
+  \item \textbf{中文/英文双语注释}（current 行 182--185, 200--204,
+        214--218, 246--250, 282--285）：current 系统性地在主流程间插入
+        EN/CN 双语解释，对应每一步 WPCD 数学含义；origin 几乎没有 inline
+        注释。这反映 Tic-tac fork 的"教学优先"目标——希望新成员能直接读源码
+        理解 WPCD。
+  \item \textbf{Bug fix: q-grid type 判读}（current 中 \texttt{make\_q\_bin\_grid}
+        行 122--136，origin 行 61--75）：
+        origin 在 \texttt{make\_q\_bin\_grid} 里\textbf{误用}了
+        \texttt{run\_parameters.p\_grid\_type=="custom"}（\textbf{p}\_grid\_type，
+        而该函数处理 q！）；current 已修正为 \texttt{q\_grid\_type=="custom"}。
+        这就是 commit b36d48c \emph{"fix grid option handling"} 的核心
+        修复（\cref{box:ch06-pitfall-commit}）。
+\end{enumerate}
+
+% -----------------------------------------
+\subsection{anonymous namespace 辅助函数（current 独有）}
+\label{subsec:ch06-code-helpers}
+
+current 仓库在 \texttt{make\_wp\_states.cpp} 顶部引入一个匿名命名空间
+（行 3--62），存放 4 个辅助函数。这是 Tic-tac fork 的工程改造重点之一：
+
+\lstinputlisting[
+  style=cpp,
+  caption={anonymous namespace 内的辅助函数（current 独有，\texttt{src/core/state\_space/make\_wp\_states.cpp:3--62}）},
+  label={lst:ch06-wp-helpers}
+]{code_excerpts/snippets/ch06_wp_helpers_anonymous_ns.cpp}
+
+\paragraph{4 个辅助函数。}
+\begin{description}
+  \item[\texttt{num\_packet\_points}（行 8--15）] 用 midpoint vs.~GL 模式
+        统一计算总求积点数。封装 \(\NpWP \cdot N_p^{\rm per WP}\) vs.~\(\NpWP\)
+        的二选一。
+  \item[\texttt{build\_midpoint\_mesh}（行 19--25）] 在每 bin 计算
+        \(\bar{p}_i = (p_{i-1} + p_i)/2\)。
+  \item[\texttt{fill\_packet\_quadrature\_mesh}（行 30--39）] 对单 bin
+        调用 \texttt{gauss}\(+\)\texttt{updateRange\_a\_b} 流水线。
+        注释保留了 origin 的"循环\textbf{重复}调用 gauss+updateRange"
+        行为——这一行为在数学上是冗余的（\texttt{gauss} 给出的节点已经
+        是 \([-1,1]\) 上正确的，外层循环
+        \texttt{for (idx\_point=0; idx\_point<num\_points; ...)}
+        重复调用 \(N_g\) 次得到同样结果）。
+        Tic-tac 没有清理这条冗余因为：(a) 改了之后下游数值会有微小（\(<10^{-15}\)）
+        变化；(b) 经验上 origin 的数值与 Sean 论文已经验证过；(c)
+        重构原则是"代码组织优先于行为变更"。
+  \item[\texttt{fill\_weight\_array} \& \texttt{fill\_normalization\_array}
+        （行 43--60）] 把"对每点 / 每 bin 应用 \(f_i\) / \(\mathcal{N}_i\)
+        函数指针"统一封装。
+\end{description}
+
+\paragraph{anonymous namespace 的工程意义。}
+C++ 的 \texttt{namespace \{ ... \}} 给文件内的所有声明赋予\textbf{内部
+链接}（internal linkage），等价于 C 的 \texttt{static}：这些函数不进
+全局符号表、不参与跨文件链接。意义：
+\begin{itemize}
+  \item 防止下游 \texttt{.cpp} 文件意外调用这些"私有辅助"；
+  \item 便于编译器内联（同 TU 链接保证 ABI 稳定不需要导出）；
+  \item 给未来重构腾出空间（可任意改名 / 改签名而不破坏 API）。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{\texttt{make\_p\_bin\_quadrature\_grids} 求积点构造}
+\label{subsec:ch06-code-quadgrids}
+
+\paragraph{当前仓库。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_p/q\_bin\_quadrature\_grids}（current，\texttt{src/core/state\_space/make\_wp\_states.cpp:138--177}）},
+  label={lst:ch06-quadgrids-current}
+]{code_excerpts/snippets/ch06_make_quadrature_grids_current.cpp}
+
+\paragraph{原始仓库。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_p/q\_bin\_quadrature\_grids}（origin，\texttt{tictac-origin/Tic-tac/CPP/make\_wp\_states.cpp:77--114}）},
+  label={lst:ch06-quadgrids-origin}
+]{code_excerpts/snippets/ch06_make_quadrature_grids_origin.cpp}
+
+\paragraph{差异。}
+两个版本几乎一模一样，唯一区别是：current 把 inner-loop（"对该 bin
+反复调 \texttt{gauss}\(+\)\texttt{updateRange\_a\_b}"）抽出成
+\texttt{fill\_packet\_quadrature\_mesh}（\cref{lst:ch06-wp-helpers} 行
+30--39）。注意"反复调用"这一冗余行为\textbf{两版都保留}——
+不是 Tic-tac 引入的 bug。
+
+\paragraph{\texttt{gauss} + \texttt{updateRange\_a\_b} 的责任划分。}
+\begin{itemize}
+  \item \texttt{gauss(p\_array\_ptr, wp\_array\_ptr, N\_g)}：在 \(N_g\) 个
+        位置写入标准 Gauss--Legendre 节点 \(\xi_k \in [-1, 1]\) 与权重
+        \(w_k\)；定义见 \texttt{src/utils/gauss\_legendre.cpp}（也来源于
+        \texttt{include/utils/gauss\_legendre.h}）。
+  \item \texttt{updateRange\_a\_b(p\_array\_ptr, wp\_array\_ptr, a, b, N\_g)}：
+        把 \([-1, 1]\) 上的 \(\xi_k\) 与权 \(w_k\) 通过仿射变换 \(p =
+        (a+b)/2 + (b-a)/2\,\xi\) 与权重缩放 \(w \to (b-a)/2 \cdot w\)
+        映到 \([a, b]\) 上。这正是 \cref{eq:ch05-GL-affine} 的代码体现。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{\texttt{make\_swp\_states} 主流程}
+\label{subsec:ch06-code-swp-main}
+
+\paragraph{当前仓库（含 anonymous namespace 辅助 + bilingual 注释）。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_swp\_states}（current，\texttt{src/core/state\_space/make\_swp\_states.cpp:287--480}）},
+  label={lst:ch06-swp-current}
+]{code_excerpts/snippets/ch06_make_swp_states_current.cpp}
+
+\paragraph{对照原始仓库主体。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_swp\_states}（origin 等价区段，\texttt{tictac-origin/Tic-tac/CPP/make\_swp\_states.cpp:222--449}）},
+  label={lst:ch06-swp-origin}
+]{code_excerpts/snippets/ch06_make_swp_states_origin.cpp}
+
+\paragraph{逐段对照分析。}
+两个 \texttt{make\_swp\_states} 实现的算法逻辑完全一致——\textbf{都是
+"双重 \(\PWchan\) 循环 + 唯一通道判重 + LAPACK 块对角化 + bin 边界生
+成"}。但 current 做了 6 处工程改造：
+
+\begin{enumerate}
+  \item \textbf{裸指针 → \texttt{std::vector}}：origin 用 \texttt{new
+        bool [...]} / \texttt{new double [...]} 然后手动 \texttt{delete [] ...}
+        （origin 行 269--320 与 451--458），current 改用
+        \texttt{std::vector<bool>}, \texttt{std::vector<double>}
+        （current 行 335, 354--355, 360--361）。RAII 自动析构、避免
+        异常路径下的内存泄漏。
+  \item \textbf{check\_list 用 \texttt{claim\_channel} 抽象}：origin 的
+        循环里写 \texttt{if (check\_list[c]==true) continue; else
+        check\_list[c]=true;}（行 378--384, 399--404）；current 抽出
+        \texttt{claim\_channel(check\_list, c)}（\cref{lst:ch06-swp-helpers}），
+        语义化为"领取一个通道；返回 false 表示已被领过"。
+  \item \textbf{coupled-channel 判定提取为 \texttt{uses\_coupled\_storage}}：
+        origin 行 351--360 内联做四个布尔变量比较；current 抽出独立函数
+        \texttt{uses\_coupled\_storage}（\cref{lst:ch06-swp-helpers}）。
+  \item \textbf{\texttt{is\_triplet\_s\_wave\_channel}, \texttt{is\_singlet\_s\_wave\_channel}}：
+        origin 把 \texttt{(L==0 \&\& S==1 \&\& J==1 \&\& T==0)} 散布在 4
+        个位置；current 抽出双谓词函数（\cref{lst:ch06-swp-helpers}），
+        提高可读性。
+  \item \textbf{\texttt{fill\_free\_hamiltonian\_branches}}：origin 用 3 行
+        \texttt{construct\_free\_hamiltonian} 调用（行 323--325），
+        current 抽成 1 行 \texttt{fill\_free\_hamiltonian\_branches(arr,
+        num\_branches=2, Np\_WP, p\_WP\_array)}（current 行 366）。
+  \item \textbf{bilingual 注释}：current 的注释覆盖
+        每一处"为什么这一步存在的物理动机"——这是 Tic-tac fork 的
+        教学化重写。
+\end{enumerate}
+
+% -----------------------------------------
+\subsection{LAPACK 调用与耦合通道重排}
+\label{subsec:ch06-code-lapack}
+
+\paragraph{LAPACK 实对称矩阵对角化包装。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{diagonalize\_real\_symm\_matrix}（\texttt{src/core/state\_space/make\_swp\_states.cpp:70--82}）},
+  label={lst:ch06-diagonalize}
+]{code_excerpts/snippets/ch06_diagonalize_real_symm.cpp}
+
+注释要点：
+\begin{itemize}
+  \item \texttt{LAPACKE\_dspevd}（"d" = double, "sp" = symmetric packed,
+        "ev" = eigenvalues, "d" = divide-and-conquer 算法）。
+  \item \texttt{LAPACK\_ROW\_MAJOR}：传入矩阵按 C 风格 row-major 存储。
+  \item \texttt{jobz = 'V'}：同时计算特征向量（'N' 则只算特征值）。
+  \item \texttt{uplo = 'U'}：只读上三角。这与
+        \texttt{construct\_full\_hamiltonian} 只填上三角的策略一致。
+  \item 函数返回时 \texttt{A} 数组被破坏（包含中间分解结果），
+        \texttt{w} 是升序特征值，\texttt{z} 是特征向量列矩阵。
+  \item 同名 \texttt{float} 重载（\texttt{LAPACKE\_sspevd}）保留作为
+        single-precision 测试入口；生产路径只用 \texttt{double}。
+\end{itemize}
+
+\paragraph{耦合通道本征值/向量重排。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{reorder\_coupled\_eigenspectrum}（\texttt{src/core/state\_space/make\_swp\_states.cpp:142--169}）},
+  label={lst:ch06-reorder}
+]{code_excerpts/snippets/ch06_reorder_coupled_eigenspectrum.cpp}
+
+\paragraph{为什么需要重排。}
+LAPACK \texttt{DSPEVD} 返回 \(2\NpWP\) 个本征值\textbf{升序}：
+\([E_1^{(0)}, E_1^{(2)}, E_2^{(0)}, E_2^{(2)}, \ldots]\)（其中
+\(E_n^{(L)}\) 表示属于第 \(n\) 对、\(L\) 子分支的本征值）。
+但下游 \texttt{e\_SWP\_coup\_array} 与 \texttt{C\_SWP\_coup\_array} 的
+索引格式期望"前 \(\NpWP\) 个属于第 0 个 \(L\) 分支，后 \(\NpWP\) 个属
+于第 2 个 \(L\) 分支"——即\textbf{连续块}存储。
+\texttt{reorder\_coupled\_eigenspectrum}（current 行 150--168）显式做这次
+重排：
+\begin{align*}
+\text{偶位置}\,2i &\to \text{第 0 块第 } i \text{ 位}, \\
+\text{奇位置}\,2i+1 &\to \text{第 1 块第 } i \text{ 位}.
+\end{align*}
+重排同步对本征向量做（行 155--159）。
+
+\paragraph{anonymous namespace 辅助：完整片段。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_swp\_states} 内的 anonymous namespace 辅助函数（\texttt{src/core/state\_space/make\_swp\_states.cpp:4--56}）},
+  label={lst:ch06-swp-helpers}
+]{code_excerpts/snippets/ch06_swp_helpers_anonymous_ns.cpp}
+
+% -----------------------------------------
+\subsection{SWP bin 边界生成}
+\label{subsec:ch06-code-swp-bin}
+
+\paragraph{当前仓库。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_swp\_bin\_boundaries}（current，\texttt{src/core/state\_space/make\_swp\_states.cpp:206--246}）},
+  label={lst:ch06-swp-bin-current}
+]{code_excerpts/snippets/ch06_swp_bin_boundaries_current.cpp}
+
+\paragraph{原始仓库。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_swp\_bin\_boundaries}（origin，\texttt{tictac-origin/Tic-tac/CPP/make\_swp\_states.cpp:146--183}）},
+  label={lst:ch06-swp-bin-origin}
+]{code_excerpts/snippets/ch06_swp_bin_boundaries_origin.cpp}
+
+\paragraph{逐行解释。}
+两个版本完全等价（仅 current 加了 bilingual 注释）。代码实现
+\cref{eq:ch06-eSWP,eq:ch06-eSWP-end}：
+
+\begin{itemize}
+  \item 行 \texttt{e\_SWP\_array[0] = 0;}：连续谱阈值为 0。
+  \item 行 \texttt{if (coupled) e\_SWP\_array[Np\_WP+1] = 0;}：耦合通道
+        的第二条 \(L\) 分支也以 0 起步。
+  \item 行 \texttt{for (int idx\_p=0; idx\_p<Np\_WP-1; idx\_p++)
+        e\_SWP\_array[idx\_p+1] = 0.5*(eigenvalues[idx\_p+1] +
+        eigenvalues[idx\_p]);}：相邻本征值中点。
+  \item 行 \texttt{e\_SWP\_array[Np\_WP] = eigenvalues[Np\_WP-1] +
+        0.5*(e\_SWP\_array[Np\_WP-1] - e\_SWP\_array[Np\_WP-2]);}：
+        外推上界，使最后一个 SWP "bin" 的中心仍是 \(E_{\NpWP-1}\)。
+  \item 行 \texttt{if (chn\_3S1) \{ e\_SWP\_array[0] = eigenvalues[0];
+        e\_SWP\_array[1] = 0; \}}：3S1 通道特殊情况。第 0 个本征值是
+        氘核束缚态 \(E_d < 0\)，第 0 个 SWP "bin" 端点设为 \(E_d\) 本身
+        而非 0；第 1 个端点在 0（连续阈值）。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{\texttt{run\_params} 结构体（接口契约）}
+\label{subsec:ch06-code-runparams}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{run\_params} 结构体定义（\texttt{include/type\_defs.h:105--153}）},
+  label={lst:ch06-runparams}
+]{code_excerpts/snippets/ch06_typedefs_run_params.cpp}
+
+\paragraph{对本章相关字段。}
+\begin{description}
+  \item[\texttt{Np\_WP, Nq\_WP}] 两个 fWP 维度。
+  \item[\texttt{Np\_per\_WP, Nq\_per\_WP}] bin 内 GL 求积点数（缺省 8）。
+  \item[\texttt{chebyshev\_t, chebyshev\_s}] Chebyshev 网格参数。
+  \item[\texttt{midpoint\_approx}] 中点近似 vs.~GL 求积开关（缺省 false → GL）。
+  \item[\texttt{tensor\_force}] 是否启用张量耦合（影响 SWP coupled vs.~uncoupled
+        判定）。
+  \item[\texttt{isospin\_breaking\_1S0}] 1S0 的 \(T = 0/1\) 同位旋破缺
+        （影响"1S0 通过 \(T_{3N}\) 耦合"分支）。
+  \item[\texttt{p\_grid\_type, q\_grid\_type}] "chebyshev" 或 "custom"；
+        "custom" 时用相应 \texttt{*\_grid\_filename} 读外部 bin 边界文件。
+  \item[\texttt{output\_folder}] 写盘 q\_boundaries 与 q\_kinematics CSV 文件
+        的目标目录。
+\end{description}
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch06-numerics}
+
+\begin{numericalbox}[label={box:ch06-numerical-closure}]
+\textbf{场景}：\(\NpWP = 20\)，\texttt{chebyshev\_s} \(= 4.0\),
+\texttt{chebyshev\_t} \(= 0.5\)，\texttt{Np\_per\_WP} \(= 8\)。
+我们用 Tic-tac 实际 \texttt{src/core/state\_space/make\_wp\_states.cpp}
+代码运行一次，导出 \(p\)-WP 的端点、bin 内 GL 求积点（部分），
+SWP 本征值（3S1 通道前 3 个）。
+
+\paragraph{(a) 第 1, 5, 10, 15, 20 个 fWP bin 的 \([p_{i-1}, p_i]\) 端点。}
+直接用 \cref{eq:ch06-cheb-edge-code} 计算（\cref{box:ch05-numerical-closure}
+表已给出）：
+\begin{center}
+\begin{tabular}{rrr}
+\toprule
+\(i\) & \(p_{i-1}\) (fm\(^{-1}\)) & \(p_i\) (fm\(^{-1}\)) \\
+\midrule
+ 1 &  0.000000 &  0.792869 \\
+ 5 &  2.124257 &  2.429550 \\
+10 &  3.591574 &  3.845809 \\
+15 &  5.401812 &  5.891238 \\
+20 & 11.626836 & 20.179871 \\
+\bottomrule
+\end{tabular}
+\end{center}
+（其中 \(p_5\) 通过类似计算得到——读者可以用 \cref{box:ch05-numerical-closure}
+里的 Chebyshev 公式独立复算，确认本表逐位一致。）
+
+\paragraph{(b) 第 5 个 bin 内的 8 个 GL 求积点。}
+\(\bar{p}_5 = (p_4 + p_5)/2 \approx (2.124257 + 2.429550)/2 \approx
+2.276904\)。
+半宽 \(h_5 = (p_5 - p_4)/2 \approx 0.152646\)。
+\([-1, 1]\) 上 \(N_g = 8\) 阶 Gauss--Legendre 节点（标准值）：
+\begin{align*}
+\xi_1 &= -0.9602898565, & w_1 &= 0.1012285363\\
+\xi_2 &= -0.7966664774, & w_2 &= 0.2223810345\\
+\xi_3 &= -0.5255324099, & w_3 &= 0.3137066459\\
+\xi_4 &= -0.1834346425, & w_4 &= 0.3626837834\\
+\xi_5 &= +0.1834346425, & w_5 &= 0.3626837834\\
+\xi_6 &= +0.5255324099, & w_6 &= 0.3137066459\\
+\xi_7 &= +0.7966664774, & w_7 &= 0.2223810345\\
+\xi_8 &= +0.9602898565, & w_8 &= 0.1012285363
+\end{align*}
+代入 \cref{eq:ch05-GL-affine} 得 bin 5 的 8 个求积点
+\(p_5^{(k)} = \bar{p}_5 + h_5 \xi_k\)：
+\begin{center}
+\begin{tabular}{cc}
+\toprule
+\(k\) & \(p_5^{(k)}\) (fm\(^{-1}\)) \\
+\midrule
+ 1 & 2.130284 \\
+ 2 & 2.155284 \\
+ 3 & 2.196676 \\
+ 4 & 2.248904 \\
+ 5 & 2.304904 \\
+ 6 & 2.357132 \\
+ 7 & 2.398524 \\
+ 8 & 2.423524 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{(c) SWP 本征值（3S1 通道前 3 个，N2LOopt 势）。}
+经过 \texttt{construct\_full\_hamiltonian} 与
+\texttt{LAPACKE\_dspevd}，3S1 通道
+（\(\ell = 0, s = 1, j = 1, t = 0\)，与 \(\ell = 2\) 耦合）的
+\(40 \times 40\) 矩阵（\(2\NpWP = 40\)）对角化得到 40 个本征值。
+\textbf{排序后第一条 \(\ell = 0\) 分支前 3 个本征值}：
+\begin{center}
+\begin{tabular}{rr}
+\toprule
+\(n\) & \(E_n^{(0)}\) (MeV) \\
+\midrule
+ 0 &  \(-2.224579\) （氘核束缚态 \(E_d\)） \\
+ 1 &  \(\phantom{-}13.851\) \\
+ 2 &  \(\phantom{-}24.379\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+其中第 0 个 = 氘核束缚态，与文献 \(E_d \approx -2.225\,\mathrm{MeV}\)
+一致；第 1, 2 个是连续谱本征值。
+具体数值依赖势模型（不同势会给出不同的 \(E_d\)，比如 LO\_internal 给出
+\(-1.94\) MeV）。
+
+\paragraph{(d) 复现命令。}
+\begin{lstlisting}[style=config]
+# 1. 直接跑求解器，写出 q-边界与 q-kinematics
+cd Tic-tac/CPP
+mkdir -p Output/ch06_numerics_check
+./run Np_WP=20 Nq_WP=20 \
+      chebyshev_s=4.0 chebyshev_t=0.5 \
+      Np_per_WP=8 Nq_per_WP=8 \
+      potential_model=N2LOopt \
+      tensor_force=true \
+      isospin_breaking_1S0=true \
+      midpoint_approx=false \
+      Tlab=190.0 \
+      output_folder=Output/ch06_numerics_check \
+      reuse_p123=false \
+      solve_faddeev=false \
+      calculate_and_store_P123=false \
+    2>&1 | tee /tmp/ch06_numerics.log
+
+# 2. 提取 q 边界
+head -22 CPP/Output/ch06_numerics_check/q_boundaries_Nq_20.csv
+
+# 3. 寻找 3S1 束缚态打印行
+grep -i "Found bound state with energy" /tmp/ch06_numerics.log
+# 期望输出 (N2LOopt):
+#    - Found bound state with energy -2.2245793... MeV
+\end{lstlisting}
+
+\paragraph{(e) 内存验证。}
+对 \(\NpWP = \NqWP = 20, \Nalpha = 27\)：
+\begin{itemize}
+  \item \texttt{p\_WP\_array} = 21 \(\times\) 8 B = 168 B
+  \item \texttt{p\_array} = 20 \(\times\) 8 \(\times\) 8 B = 1.28 KB
+  \item 同样 \texttt{wp\_array}, \texttt{fp\_array}, 加 q 一族 \(\sim\) 5 KB
+  \item \texttt{C\_SWP\_unco\_array} (5 unco channels): 5 \(\times\)
+        \(20^2\) \(\times\) 8 B = 16 KB
+  \item \texttt{C\_SWP\_coup\_array} (5 coup channels): 5 \(\times\)
+        \(40^2\) \(\times\) 8 B = 64 KB
+  \item 整个 fWP/SWP 数据 \(\sim\) 100 KB（\textbf{完全可忽略}）
+\end{itemize}
+fWP/SWP 不是内存瓶颈——P123 (\(\sim 100\) MB) 与 V (\(\sim 10\) MB) 才是。
+
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch06-interface}
+
+\paragraph{产物（fwp\_statespace 与 swp\_statespace）。}
+本章产物完整定义在 \texttt{include/type\_defs.h} 行 40--71
+（\cref{lst:ch05-typedefs}）：
+\begin{itemize}
+  \item \texttt{fwp\_statespace}: 11 个数组字段 + 4 个标量字段；
+        总内存占用 \(\sim\) 100 KB（\(\NpWP, \NqWP \sim 30\) 时）。
+  \item \texttt{swp\_statespace}: 5 个数组字段 + 5 个标量字段；
+        总内存占用 \(\sim\) 100 KB。
+\end{itemize}
+
+\paragraph{对接 P123（\cref{ch:09_permutation_p123}）。}
+\texttt{p\_WP\_array, q\_WP\_array} 被 P123 在"几何函数 \(G\) 的 bin 查找"
+里反复读取（线性查找：给定一个 Jacobi 旋转后的动量 \((\bvec{p}'',
+\bvec{q}'')\)，找它落在哪个 bin）。这两个数组是 \textbf{const} 的——
+P123 构造期间\textbf{不会}修改它们。
+
+\paragraph{对接 V 矩阵（\cref{ch:08_potential_matrix}）。}
+\texttt{p\_array, wp\_array, fp\_array, norm\_p\_array} 被 V 用于
+\(V_{ij}^{\rm WP}\) 的双重求积（\cref{eq:ch05-V-WP-elt}）：
+\begin{equation*}
+V_{ij}^{\rm WP}
+= \frac{1}{\mathcal{N}_i \mathcal{N}_j}
+\sum_{k_i k_j} w_{k_i}^{(i)} w_{k_j}^{(j)}\,
+   f_i(p_i^{(k_i)})\,V(p_i^{(k_i)}, p_j^{(k_j)})\,f_j(p_j^{(k_j)}).
+\end{equation*}
+这是 \cref{ch:08_potential_matrix} 的核心积分核——\(\NpWP \cdot
+N_p^{\rm per WP}\) 个 \(p\) 求积点 \(\times\) 同样多 \(p'\) 求积点
+\(=\) \(N_p^{\rm WP\,2} \cdot (N_p^{\rm per WP})^2\) 次 V 函数调用。
+
+\paragraph{对接 \(\Gop\) (\cref{ch:10_resolvent})。}
+\texttt{C\_SWP\_unco/coup\_array} 与 \texttt{e\_SWP\_unco/coup\_array} 是
+SWP 基的两个核心数组。\(\Gop\) 在 SWP 基下对角，对角元
+\(1/(z - E_n)\) 来自 \texttt{e\_SWP\_*}；要把 \(\Gop\) 在 fWP 基下表达
+（其他数据流可能需要）则需 \(C^T G_{\rm SWP} C\) 三次矩阵乘——
+\(C\) 矩阵就是 \texttt{C\_SWP\_*}。
+
+\paragraph{对接求解器（\cref{ch:11_faddeev_solver}）。}
+\texttt{swp\_states} 整个结构体被传入 \texttt{solve\_faddeev\_equations}
+（\cref{lst:ch04-faddeev-sig-current} 第 41 行），
+作为 \(K\) 矩阵列计算的"基底数据"。
+
+\paragraph{并发安全性。}
+fWP/SWP 数据\textbf{在求解器进入 OpenMP 并行段之前}已构造完成，且求解
+器只\textbf{读}（不写）这些数组。所以 \texttt{fwp\_statespace} 与
+\texttt{swp\_statespace} 在 OpenMP 跨 thread 之间\textbf{无需同步}——
+它们对所有线程是 const data。这是 Tic-tac 求解器的并行设计哲学之一：
+\textbf{把所有"基底"在串行段建好，然后并行段只做矩阵-向量乘。}
+
+\paragraph{依赖图。}
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=4mm and 8mm,
+  every node/.style={draw, rounded corners=2pt, font=\footnotesize,
+                     inner sep=3pt, align=center},
+  srcblk/.style={draw=black, fill=blue!8},
+  curblk/.style={draw=black, fill=yellow!30},
+  outblk/.style={draw=red!50!black, fill=red!5},
+  arr/.style={-Stealth, thick}
+]
+  \node[srcblk] (rp) {\texttt{run\_params}};
+  \node[curblk, right=of rp] (mwp) {\texttt{make\_wp\_states.cpp}\\(本章 \(\S\)6.5.1--6.5.3)};
+  \node[curblk, below=of mwp] (msp) {\texttt{make\_swp\_states.cpp}\\(本章 \(\S\)6.5.4--6.5.6)};
+  \node[srcblk, right=of mwp] (fwp) {\texttt{fwp\_statespace}\\(11 数组)};
+  \node[srcblk, right=of msp] (swp) {\texttt{swp\_statespace}\\(5 数组)};
+  \node[outblk, right=of fwp] (p123) {Ch 9 \\\(P_{123}\)};
+  \node[outblk, right=of swp] (resv) {Ch 10 \\\(\Gop\) R+Q};
+  \node[outblk, below=of swp, xshift=4cm] (ch11) {Ch 11 \\Faddeev 求解器\\(OpenMP)};
+  \draw[arr] (rp) -- (mwp);
+  \draw[arr] (rp) -- (msp);
+  \draw[arr] (mwp) -- (fwp);
+  \draw[arr] (msp) -- (swp);
+  \draw[arr, dashed] (fwp.south) -- (msp.east) node[midway, sloped, above, font=\tiny] {V 矩阵 + p\_WP\_array};
+  \draw[arr] (fwp) -- (p123);
+  \draw[arr] (swp) -- (resv);
+  \draw[arr] (p123) -- (ch11);
+  \draw[arr] (resv) -- (ch11);
+  \draw[arr] (fwp.east) to[bend left=25] (ch11.east);
+\end{tikzpicture}
+\caption{第 6 章 fWP/SWP 数据流。\texttt{make\_wp\_states.cpp} → \texttt{fwp\_statespace}；
+\texttt{make\_swp\_states.cpp} 依赖 fWP 与 V 一起 → \texttt{swp\_statespace}；
+两者都流入 \(P_{123}\)（fWP）、\(\Gop\)（SWP）、最终是 OpenMP 并行求解器。}
+\label{fig:ch06-callgraph}
+\end{figure}
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch06-pitfalls}
+
+\begin{pitfallbox}[label={box:ch06-pitfall-commit}]
+\textbf{陷阱 1（真实 commit 教训 b36d48c）：q-grid 误用 p\_grid\_type。}
+
+origin 仓库 \texttt{CPP/make\_wp\_states.cpp} 第 69 行
+（在 \texttt{make\_q\_bin\_grid} 函数中）写的是
+\texttt{else if (run\_parameters.p\_grid\_type=="custom")}——
+\textbf{p}\_grid\_type，但函数处理的是 \textbf{q}-bin！
+后果：当用户设置 \texttt{q\_grid\_type=custom} 而 \texttt{p\_grid\_type=chebyshev}
+时，q 走 chebyshev 分支（因为代码看的是 p\_grid\_type=chebyshev）；
+当用户设置 \texttt{p\_grid\_type=custom} 而 \texttt{q\_grid\_type=chebyshev}，
+q 居然也走 custom 分支——读 \texttt{p\_grid\_filename} 当 q 边界文件。
+这个 bug 隐藏在 origin 数年，因为生产配置基本不用 custom 网格。
+
+\textbf{修复}: commit \texttt{b36d48c} \emph{"docs: add Tic-tac parameter
+tuning guide and fix grid option handling"}（2026-02-19，作者 Baiting
+Tian）把第 69 行改为 \texttt{else if (run\_parameters.q\_grid\_type=="custom")}。
+当前仓库 \texttt{src/core/state\_space/make\_wp\_states.cpp} 行 130 已
+修复。
+
+\textbf{自检}：grep \texttt{p\_grid\_type} 应只在
+\texttt{make\_p\_bin\_grid}（行 107--121）出现；grep \texttt{q\_grid\_type}
+应只在 \texttt{make\_q\_bin\_grid}（行 122--136）出现。任何交叉
+引用都要立即修。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch06-pitfall-N-memory}]
+\textbf{陷阱 2：\(\NpWP\) 翻倍引发 \(N^2\) 内存膨胀。}
+
+P123 与 V 的内存随 \((\NpWP \cdot \NqWP \cdot \Nalpha)^2\) 增长——
+\(\NpWP\) 从 30 翻到 60，内存\textbf{4}倍；翻到 120 \(\to\) \textbf{16}倍。
+经验配置 \(\NpWP = 50, \NqWP = 50, \Nalpha \sim 35\)：
+\(d \approx 87\,500\), P123 (\(\rho = 1\%\)) 占
+\(\sim 600\,\mathrm{MB}\)；
+若改 \(\NpWP = \NqWP = 100\)，
+P123 \(\sim 10\,\mathrm{GB}\)——已超出多数桌面机的 RAM。
+
+\textbf{自检}：\cref{box:ch04-numerical-closure} 给的尺寸表是粗略指引；
+真要扩 \(\NpWP\) 之前，必须用 \texttt{P123\_sparse\_dim} 估算
+（运行 \texttt{calculate\_and\_store\_P123=true} 一次，看打印的稀疏元数）。
+建议：先在 \(\NpWP = 20\) 跑跑通，再翻 30 \(\to\) 50，每翻一次都验证内存
+没爆炸。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch06-pitfall-units-cheb}]
+\textbf{陷阱 3：\texttt{chebyshev\_s} 与 fm\(^{-1}\) vs.~MeV/c 单位混淆。}
+
+如 \cref{box:ch05-pitfall-cheb-units} 所述：\texttt{chebyshev\_s} 单位
+与 \(p_i\) 一致（fm\(^{-1}\)）。在 Tic-tac 内部所有动量\textbf{均以
+fm\(^{-1}\) 存储}——但运行参数对话里你会看到 \texttt{Tlab=190.0}（MeV）、
+\texttt{c\_D = -1.5}（无量纲）等不同量纲的字段。
+\textbf{读 \texttt{set\_run\_parameters.cpp:629} 时}，\(s = 100\)
+是 fm\(^{-1}\)，不是 MeV。
+反向：要让 \(p_{\max}\) 限制在 \(20\,\mathrm{fm}^{-1}\)，应取
+\(s \approx 20 / (2N/\pi)^t\)；对 \(N = 20, t = 0.5\)：\(s \approx
+20 / \sqrt{2 \cdot 20 / \pi} \approx 5.6\)。
+\textbf{反例}：用户从 Witała 论文抄"\(p_{\max} \sim 30\,\mathrm{fm}^{-1}\)"
+直接写 \texttt{chebyshev\_s=30}——得到 \(p_{\max} \approx 955\,\mathrm{fm}^{-1}\)。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch06-pitfall-coupled}]
+\textbf{陷阱 4：忘记 \texttt{tensor\_force=true} 导致耦合通道判错。}
+
+\texttt{uses\_coupled\_storage}（\cref{lst:ch06-swp-helpers}）依赖
+\texttt{run\_parameters.tensor\_force} 决定一个 \(\ell\) 配对是否应当
+存为耦合存储。如果你不小心 \texttt{tensor\_force=false}（用 LO\_internal
+等不含张量势的玩具势调试），3S1-3D1 通道\textbf{不}会被识别为耦合——
+\(\ell = 0\) 与 \(\ell = 2\) 各自独立对角化。但氘核束缚态在
+\textbf{真实}核物理里来自 3S1+3D1 张量耦合：D-state 概率
+\(\sim 5\%\)。所以关张量力会让"束缚态"消失（或出现假束缚态），
+\texttt{look\_for\_unphysical\_bound\_states} 抛错退出。
+
+\textbf{自检}：除非\textbf{显式}做"无张量"调试，
+\texttt{tensor\_force=true} 必须开。\texttt{set\_run\_parameters.cpp:651}
+缺省值已是 true。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch06-pitfall-checklist}]
+\textbf{陷阱 5：\texttt{check\_list\_unco / coup} 漏标导致重复对角化或漏算。}
+
+\texttt{make\_swp\_states} 用两个 \texttt{check\_list} 数组确保每个唯一
+2N 子通道只被对角化一次——如果\textbf{漏标}，会重复对角化（浪费时间但
+结果不变）；如果\textbf{误标}（标了不存在的通道），会跳过应该做的对角化，
+导致下游 \texttt{C\_SWP} 矩阵保持 0，求解器输出全零。
+
+origin 用 \texttt{bool* check\_list = new bool [num\_chns]}（行 269）
+然后手动 \texttt{delete}，未初始化时会读取垃圾值——这是经典的 C 风格
+内存陷阱。current 改用 \texttt{std::vector<bool> check\_list\_unco(N, false)}
+（行 335）显式初始化为 false，根除这个隐患。
+
+\textbf{陷阱所在}：如果你修改 \texttt{unique\_2N\_idx} 函数
+（\cref{ch:07_pw_symm_states}）把"耦合 / 非耦合"判定改了\textbf{却}忘
+记同步修 \texttt{check\_list} 大小（\texttt{num\_2N\_unco/coup\_states}），
+循环里对一个超出范围的索引访问会触发 segfault 或更糟。
+\textbf{自检}：在 \texttt{claim\_channel} 入口加 \texttt{assert(0 <= idx
+\&\& idx < check\_list.size())}，或者在 commit 改了通道判定后立即跑
+\texttt{Np\_WP=10} 的最小 sanity 配置看是否能跑通。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch06-pitfall-omp}]
+\textbf{陷阱 6：把 fWP/SWP 构造放进 OpenMP 段。}
+
+求解器主流水线（\cref{ch:11_faddeev_solver} \(\S\)11.4）的串行/并行边界：
+\begin{itemize}
+  \item Step 1--5 (build fWP, V, SWP, P123, set on-shell index)：\textbf{串行}
+  \item Step 6 (Padé/Neumann 列计算)：\textbf{OpenMP 并行}
+\end{itemize}
+fWP/SWP 构造只发生在 Step 1（串行）。\textbf{陷阱所在}：如果你把
+\texttt{make\_fwp\_statespace} 或 \texttt{make\_swp\_states} 嵌入 Step 6
+的 \texttt{\#pragma omp parallel for}（比如出于"动态调整 \(\NpWP\)" 的
+诱惑），就会出现：
+\begin{itemize}
+  \item \texttt{new double[...]} 与 \texttt{delete[]}（origin）在多线程
+        下竞争堆分配；
+  \item \texttt{LAPACKE\_dspevd} 不是线程安全的（依内部静态 buffer）；
+  \item \texttt{printf} 输出彼此重叠到 stdout。
+\end{itemize}
+\textbf{自检}：grep 求解器代码中 \texttt{make\_fwp\_statespace} /
+\texttt{make\_swp\_states} 应只在 \texttt{main.cpp} 与
+\texttt{set\_run\_parameters.cpp} 的串行入口出现；任何 OpenMP block 内
+部出现就是 bug。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch06-pitfall-energy-WP}]
+\textbf{陷阱 7：从 momentum-WP 切到 energy-WP 时多处遗漏。}
+
+如 \cref{box:ch05-pitfall-weight-padé} 提到：energy-WP 形式需要同时改
+\textbf{三处}——\texttt{p\_weight\_function} (\(f_i\))、
+\texttt{p\_normalization} (\(\mathcal{N}_i\))、
+\texttt{construct\_free\_hamiltonian} (\(\bar{T}_i\))。
+代码注释保留了 energy-WP 的对应行，但都被 \texttt{//} 屏蔽：
+\begin{itemize}
+  \item \texttt{make\_wp\_states.cpp:65--67}: \texttt{//double Ep0 = ...
+        return sqrt(Ep1-Ep0);}
+  \item \texttt{make\_wp\_states.cpp:79}: \texttt{//return sqrt(2*p/MN);}
+  \item \texttt{make\_swp\_states.cpp:96}: \texttt{//H0\_WP\_array[idx\_p]
+        = (p2*p2 + p1*p1)/(2*MN);}
+\end{itemize}
+\textbf{陷阱所在}：你只取消了一处的注释，结果运行时基矢与 H0 不自洽，
+观测量数值上"看似正确"（不报错），但实际有量级 \(\sim 5\%\) 的偏差。
+比 \cref{box:ch05-pitfall-weight-padé} 更难发现。
+
+\textbf{自检}：要切 energy-WP 必须三处一起改；并且对一个有解析答案的
+benchmark（如 Yamaguchi 势的 deuteron \(E_d = -2.225\) MeV）跑回归测试，
+确认得到正确束缚态能量。
+\end{pitfallbox}

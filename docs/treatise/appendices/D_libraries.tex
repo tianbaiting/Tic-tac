@@ -1,9 +1,696 @@
 % =====================================================================
 % appendices/D_libraries.tex
-% Wave 0 占位 —— 待 Wave 7 子代理补全
+% Wave 7 — GSL / LAPACK / HDF5 接口最简手册
 % =====================================================================
 
 \chapter{GSL / LAPACK / HDF5 接口最简手册}
 \label{app:D_libraries}
 
-\textbf{[Wave 0 占位 —— 附录内容由 Wave 7 子代理填写]}
+\noindent\textit{本附录摘要}：Tic-tac 的数值核心由三大外部库驱动：
+\textbf{GSL}（GNU Scientific Library，提供 Wigner 系数、特殊函数、
+1D/2D 积分、根求与简单线性代数）、\textbf{LAPACK / BLAS}（稠密线性代数与
+矩阵-矩阵乘法）、以及 \textbf{HDF5}（P123 缓存与 metadata 存储）。
+Tic-tac 大量使用这些库，但只调用其 \emph{很小一部分} 的 API；本附录把那"很小
+一部分"完整列出，并给出每个库 1--2 段最小示例 + 真实代码片段 + 常见编译
+链接错误（含 conda toolchain 注意事项）。读完本附录，应当能：
+(i) 看懂 \texttt{src/io/disk\_io\_routines.cpp} 中所有 \texttt{H5*} 调用；
+(ii) 在新的工具程序里直接复制 \texttt{cdouble*} 求解 $A x = b$ 的代码；
+(iii) 解决"\texttt{undefined reference to \_\_gsl\_*}" 等典型链接错误。
+
+
+% =====================================================================
+\section{GSL：GNU Scientific Library}
+\label{sec:appD:gsl}
+
+% ---------------------------------------------------------------------
+\subsection{Tic-tac 实际使用的 GSL 子集}
+
+Tic-tac 全仓库对 GSL 的依赖集中在以下五个 header：
+
+\begin{center}
+\begin{tabular}{ll p{8.5cm}}
+\toprule
+Header & 用途 & 典型调用 \\
+\midrule
+\texttt{gsl/gsl\_sf\_coupling.h}  & Wigner 角动量系数 &
+  \texttt{gsl\_sf\_coupling\_3j}, \texttt{\_6j}, \texttt{\_9j} \\
+\texttt{gsl/gsl\_sf.h}            & 一般特殊函数 &
+  \texttt{gsl\_sf\_pow\_int}（整数幂） \\
+\texttt{gsl/gsl\_math.h}          & 数学常数与宏 &
+  \texttt{M\_PI}, \texttt{GSL\_NAN} \\
+\texttt{gsl/gsl\_complex\_math.h} & 复数算术 & 罕用，主要 \texttt{gsl\_complex} 兼容 \\
+\texttt{gsl/gsl\_errno.h}         & 错误码与默认 handler & 启动期可关闭 abort handler \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{未使用}的 GSL 模块（USER 期望可能误以为用到的）：
+\begin{itemize}
+\item \texttt{gsl\_eigen\_*}：在 SWP 构造中曾用过的"实对称矩阵 Jacobi 对角化"，
+      但 \emph{当前 Tic-tac 已切换到 LAPACK \texttt{dsyev}}（理由：性能 + 与
+      其他 LAPACK 调用栈一致）；
+\item \texttt{gsl\_integration\_*}：自适应 1D 积分；Tic-tac 的求积全部由
+      手写 Gauss--Legendre 例程承担（参见附录 \ref{app:C_quadrature}），
+      不引 GSL；
+\item \texttt{gsl\_linalg\_*}：dense LU/Cholesky；同样被 LAPACK 替代；
+\item \texttt{gsl\_fit}：\texttt{disk\_io\_routines.h} 中 include 但实际未调用，
+      属遗留 header。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\subsection{Wigner 系数 API}
+
+GSL 把 Wigner $3j$、$6j$、$9j$ 全部用 \emph{两倍量子数} 调用约定（避免半整数浮点
+比较）。三个函数均返回 \texttt{double}：
+
+\begin{lstlisting}[style=cpp,caption={GSL Wigner 系数核心 API。}]
+double gsl_sf_coupling_3j(int two_j1, int two_j2, int two_j3,
+                          int two_m1, int two_m2, int two_m3);
+double gsl_sf_coupling_6j(int two_j1, int two_j2, int two_j3,
+                          int two_j4, int two_j5, int two_j6);
+double gsl_sf_coupling_9j(int two_j1, int two_j2, int two_j3,
+                          int two_j4, int two_j5, int two_j6,
+                          int two_j7, int two_j8, int two_j9);
+\end{lstlisting}
+
+例如要计算 Clebsch--Gordan 系数
+$\langle j_1 m_1; j_2 m_2 | j_3 m_3\rangle$，由其与 $3j$ 符号的关系：
+\begin{equation}
+  \langle j_1 m_1; j_2 m_2 | j_3 m_3\rangle
+  = (-1)^{j_1-j_2+m_3}\sqrt{2j_3+1}\,
+    \begin{pmatrix} j_1 & j_2 & j_3 \\ m_1 & m_2 & -m_3 \end{pmatrix}.
+\end{equation}
+Tic-tac 的实现位于
+\texttt{CPP/General\_functions/coupling\_coefficients.cpp:1--32}：
+
+\lstinputlisting[style=cpp,caption={\texttt{CPP/General\_functions/coupling\_coefficients.cpp:1--32}：CG/3j/6j/9j wrapper。},label={lst:appD:gsl_wigner}]
+{code_excerpts/snippets/appD_gsl_coupling.cpp}
+
+\paragraph{API 注意点}\
+
+\begin{itemize}
+\item \textbf{选择规则违反时 GSL 返回 0}（不是错误），如三角不等式
+      $|j_1-j_2|>j_3$；
+\item \textbf{域外参数（负 $2j$）会触发 \texttt{GSL\_EDOM}}，默认 handler 调用
+      \texttt{abort()}。Tic-tac 在 \texttt{main.cpp} 启动时也未禁用 handler，
+      故出错会立即段错——这反而是好的"早失败"行为；
+\item \textbf{大 $j$ 性能}：GSL 用预制查表 + 递推，$j\le 100$ 都是 $\mu$s 级；
+      Tic-tac 的 partial-wave 通道数 $\Nalpha$ 在 $J\le 5/2$ 时 $\sim 30$，
+      Wigner 调用占总时间 $<1\%$。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\subsection{最小示例：GSL Wigner 自检}
+
+下面的程序计算几个简单 $3j$、$6j$ 值并与解析值核对：
+
+\begin{lstlisting}[style=cpp,caption={GSL Wigner 最小工作示例。}]
+// mwe_gsl.cpp
+#include <cstdio>
+#include <cmath>
+#include <gsl/gsl_sf_coupling.h>
+
+int main() {
+    // <1/2 1/2; 1/2 -1/2 | 0 0> = 1/sqrt(2)
+    double cg = std::sqrt(1.0)
+              * gsl_sf_coupling_3j(1, 1, 0,  1, -1, 0);  // 注意 2j 约定
+    std::printf("3j(1/2 1/2 0; 1/2 -1/2 0) = %.10f, expected 1/sqrt(2) = %.10f\n",
+                cg, 1.0/std::sqrt(2.0));
+    // 6j{1 1 1; 1 1 1} = 1/6
+    double sj = gsl_sf_coupling_6j(2,2,2, 2,2,2);
+    std::printf("6j{1 1 1; 1 1 1} = %.10f (expected 1/6 = %.10f)\n",
+                sj, 1.0/6.0);
+    return 0;
+}
+\end{lstlisting}
+
+\begin{lstlisting}[style=config,caption={编译 \& 运行。}]
+g++ -std=c++17 mwe_gsl.cpp -lgsl -lgslcblas -lm -o mwe_gsl
+./mwe_gsl
+# 期望输出：
+# 3j(1/2 1/2 0; 1/2 -1/2 0) = 0.7071067812, expected 1/sqrt(2) = 0.7071067812
+# 6j{1 1 1; 1 1 1} = 0.1666666667 (expected 1/6 = 0.1666666667)
+\end{lstlisting}
+
+\textbf{陷阱}：$3j$ 约定中 $m_3$ 取\emph{负号}（即 $\sqrt{2j_3+1}\times 3j(\dots,-m_3)$ 才是
+CG 系数）。不同教科书在此处分两派；Tic-tac 选 Edmonds 约定，与 GSL 一致。
+
+% ---------------------------------------------------------------------
+\subsection{GSL 错误处理与启停}
+
+GSL 默认错误 handler 是 \texttt{gsl\_strerror} + \texttt{abort()}。在长时间
+运行的求解器（如 24 小时 P123 构造）中，若某个边界 Wigner 调用偶发 \texttt{EDOM}，
+可关闭默认 handler 改为返回错误码：
+
+\begin{lstlisting}[style=cpp]
+#include <gsl/gsl_errno.h>
+gsl_set_error_handler_off();   // 全局生效；后续所有 GSL 调用都改为返回 status
+\end{lstlisting}
+
+Tic-tac 当前 \emph{未}调用此函数，理由是宁愿 abort 也不要把数据问题压到后端。
+若要做大规模 sweep（连续提交 100 个 input），建议在 \texttt{main.cpp} 头部加上
+\texttt{gsl\_set\_error\_handler\_off()} 并对错误码做显式检查。
+
+
+% =====================================================================
+\section{LAPACK 与 BLAS：稠密线性代数}
+\label{sec:appD:lapack}
+
+% ---------------------------------------------------------------------
+\subsection{层级关系}
+
+\begin{itemize}
+\item \textbf{BLAS}（Basic Linear Algebra Subprograms）：低层"积木"——向量内积、
+      矩阵-向量乘、矩阵-矩阵乘。Tic-tac 通过 \texttt{cblas.h} 调用其
+      C 接口（CBLAS）；
+\item \textbf{LAPACK}：高层算法——LU、QR、SVD、特征值。Tic-tac 通过
+      \texttt{lapacke.h} 调用其 C 接口（LAPACKE，参数全用行/列序枚举显式声明）。
+\item \textbf{典型供应商}：OpenBLAS、Intel MKL、Netlib reference。
+      Conda 环境下默认 OpenBLAS，linux 系统 \texttt{liblapacke + liblapack + libopenblas}。
+\end{itemize}
+
+\textbf{重要事实}：CBLAS 与 LAPACKE \emph{不要求} 同一供应商；它们完全可以
+分别从 \texttt{libopenblas} 与 \texttt{liblapack} 解析。但调用顺序矩阵布局
+（\texttt{LAPACK\_ROW\_MAJOR} vs \texttt{LAPACK\_COL\_MAJOR}）必须统一，
+否则会得到\emph{无声错误}（结果数值看似正常但物理意义乱）。
+
+% ---------------------------------------------------------------------
+\subsection{Tic-tac 调用的 LAPACK/BLAS 子集}
+
+\begin{center}
+\begin{tabular}{l l p{7.5cm}}
+\toprule
+名称 & 类别 & 用途（Tic-tac 内位置） \\
+\midrule
+\texttt{cblas\_dgemv} & BLAS L2 & matrix-vector 乘法（$U$-amplitude 重组） \\
+\texttt{cblas\_sgemm}, \texttt{dgemm}, \texttt{cgemm}, \texttt{zgemm} & BLAS L3
+                        & matrix-matrix 乘法（势 $\times$ Green、Padé sum） \\
+\texttt{cblas\_cdotu\_sub}, \texttt{zdotu\_sub} & BLAS L1 & 复数向量内积 \\
+\texttt{LAPACKE\_dgetrf}, \texttt{sgetrf}, \texttt{cgetrf}, \texttt{zgetrf}
+                        & LAPACK & LU 分解（行交换 pivot） \\
+\texttt{LAPACKE\_dgetrs}, \texttt{sgetrs}, \texttt{cgetrs}, \texttt{zgetrs}
+                        & LAPACK & 用预先 LU 分解求解 $A x = b$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{核心观察}：Tic-tac 几乎只用 \texttt{*gemm}（矩阵乘）和 \texttt{*getrf+*getrs}
+（dense 解）。\textbf{未使用} \texttt{dsyev}（实对称特征值；曾用于 SWP 现已替换为
+内部例程）、\texttt{zheev}（厄米特征值）、\texttt{zgesv}（直接稠密复求解，等价于
+\texttt{zgetrf+zgetrs}）。读者若要扩展 Tic-tac 加入新功能（如 SWP 用对角化
+$\Hop_0$），可直接调 \texttt{LAPACKE\_dsyev}：
+
+\begin{lstlisting}[style=cpp]
+// 实对称矩阵 A (NxN, row-major) 的特征值与特征向量
+char jobz = 'V', uplo = 'U';
+double w[N];                                     // 特征值
+lapack_int info = LAPACKE_dsyev(LAPACK_ROW_MAJOR, jobz, uplo,
+                                N, A, N, w);     // A 被原地覆盖为特征向量
+if (info != 0) { /* 处理错误：info<0 illegal arg, info>0 不收敛 */ }
+\end{lstlisting}
+
+% ---------------------------------------------------------------------
+\subsection{真实包装层}
+
+Tic-tac 把上述底层调用封装在 \texttt{matrix\_routines.cpp} 内（行 4--75）。
+读者只需要面对 \texttt{dot\_MM}、\texttt{solve\_MM} 等 C++ 风格函数：
+
+\lstinputlisting[style=cpp,caption={\texttt{CPP/General\_functions/matrix\_routines.cpp:4--75}：BLAS/LAPACK wrapper。},label={lst:appD:lapack_blas}]
+{code_excerpts/snippets/appD_lapack_blas.cpp}
+
+\paragraph{逐行注解}\
+
+\begin{enumerate}
+\item \texttt{dot\_MV} (line 4--13)：实双精度 matrix-vector，
+      $C\leftarrow A\cdot B$，$A$ 是 $M\times N$、$B$ 是 $N$ 向量、
+      $C$ 是 $M$ 向量；\texttt{LDA = N}（列宽 stride）；
+\item \texttt{cdot\_VV} (line 16--25)：复数向量点积。注意 \texttt{reinterpret\_cast<float*>}
+      技巧——\texttt{std::complex<float>} 内存布局是 \emph{两个 float 紧排}，
+      与 BLAS 的 "complex = pair of reals" 兼容；
+\item \texttt{dot\_MM} float/double (line 27--32) 与 \texttt{cdot\_MM} (line 34--43)：
+      行主序的 4 个矩阵-矩阵乘法变体；$\alpha=1, \beta=0$；
+\item \texttt{solve\_MM} (line 45--74)：$A\cdot X=B$ 的稠密求解，$A,B$ 都被覆盖。
+      实 float、实 double、复 float、复 double 四份重载——签名一致、内部
+      \texttt{LAPACKE\_*getrf}+\texttt{*getrs} 一致——只是元素类型替换。
+      \textbf{这正是 Faddeev 求解器中 dense Padé 重求和的工作马}：每次 Padé
+      迭代要解一个稠密 $\NpWP\NqWP\Nalpha$ 维的复线性系统，类型是 \texttt{cdouble}，
+      故调用的是 \texttt{zgetrf+zgetrs}。
+\end{enumerate}
+
+\paragraph{$A x = b$ 与 $A X = B$ 的统一接口}
+LAPACK 的 \texttt{*getrs} 既支持单 RHS（$b$ 是向量）也支持多 RHS（$B$ 是矩阵）。
+Tic-tac 总传 $B$ 为 $N\times N$，意即"同时解 $N$ 个右端"——这等价于
+\emph{矩阵求逆 + 紧凑乘法}，但比显式 \texttt{*getri} 数值上更稳定。
+
+% ---------------------------------------------------------------------
+\subsection{为什么不用 \texttt{zgesv}？}
+
+USER 可能注意到 LAPACK 还提供 \texttt{zgesv}（"complex GEneral SolVe"），
+其文档称 \texttt{zgesv = zgetrf + zgetrs}。Tic-tac 显式拆开两步是为了：
+\begin{itemize}
+\item 在某些场景下要复用 LU 分解（如对同一 $A$ 解多次不同 $b$）；目前虽未使用，
+      但接口已留好；
+\item 显式拆分让 pivot vector \texttt{ipiv[]} 可见，便于 debugging（例如在
+      \texttt{determinant()} 中需要它的内容来确定符号）。
+\end{itemize}
+事实上，\texttt{determinant} (line 76--94) 就是利用 \texttt{ipiv[]} 与 LU 对角元
+计算行列式，演示了"显式 LU"的用途。
+
+% ---------------------------------------------------------------------
+\subsection{最小示例：\texttt{zgesv} 风格的复线性求解}
+
+\begin{lstlisting}[style=cpp,caption={LAPACK 复双精度稠密线性求解最小示例。}]
+// mwe_lapack.cpp
+#include <cstdio>
+#include <complex>
+#include <lapacke.h>
+
+int main() {
+    constexpr int N = 3;
+    using cd = std::complex<double>;
+    cd A[9] = { {2,0}, {1,1}, {0,0},
+                {1,-1}, {3,0}, {1,0},
+                {0,0}, {1,0}, {4,0} };          // 行主序
+    cd B[3] = { {1,0}, {2,1}, {3,0} };
+    lapack_int ipiv[3];
+    lapack_int info = LAPACKE_zgetrf(LAPACK_ROW_MAJOR, N, N,
+        reinterpret_cast<lapack_complex_double*>(A), N, ipiv);
+    if (info) { std::fprintf(stderr, "getrf info=%d\n", info); return 1; }
+    info = LAPACKE_zgetrs(LAPACK_ROW_MAJOR, 'N', N, 1,
+        reinterpret_cast<const lapack_complex_double*>(A), N, ipiv,
+        reinterpret_cast<lapack_complex_double*>(B), 1);
+    if (info) { std::fprintf(stderr, "getrs info=%d\n", info); return 1; }
+    std::printf("x = (%.4f%+.4fi, %.4f%+.4fi, %.4f%+.4fi)\n",
+        B[0].real(), B[0].imag(),
+        B[1].real(), B[1].imag(),
+        B[2].real(), B[2].imag());
+    return 0;
+}
+\end{lstlisting}
+
+\begin{lstlisting}[style=config,caption={编译。}]
+g++ -std=c++17 mwe_lapack.cpp -llapacke -llapack -lblas -o mwe_lapack
+./mwe_lapack
+\end{lstlisting}
+
+% ---------------------------------------------------------------------
+\subsection{常见 LAPACK/BLAS 链接错误}
+
+\begin{itemize}
+\item \texttt{undefined reference to `cblas\_dgemm'}：未链 \texttt{-lblas}（或 \texttt{-lopenblas}）；
+\item \texttt{undefined reference to `LAPACKE\_dgetrf'}：未链 \texttt{-llapacke}；
+      仅链 \texttt{-llapack} 是不够的，因为 LAPACKE 是分离的 C 接口层；
+\item \texttt{lapacke.h: No such file or directory}：装 \texttt{liblapacke-dev}（Debian）
+      或 \texttt{lapack-dev} 等元包，单独装 \texttt{lapack-libs} 不带 header；
+\item \textbf{运行时段错}：行/列序混用是头号嫌疑——把 \texttt{LAPACK\_COL\_MAJOR} 错当
+      \texttt{LAPACK\_ROW\_MAJOR}，会用 stride $N$ 解释 stride $1$ 的内存。
+\end{itemize}
+
+
+% =====================================================================
+\section{HDF5：层级数据存储}
+\label{sec:appD:hdf5}
+
+% ---------------------------------------------------------------------
+\subsection{为什么选 HDF5？}
+
+Tic-tac 的 P123（三体置换算符）矩阵是\emph{巨型}稀疏对象：典型尺寸
+$\sim 10^{8}$ 非零元、$\sim 1$~GB 磁盘。一次构造耗时 30~min--6~h。
+若每次跑求解器都重算 P123，开发节奏完全无法接受；因此 P123 在第一次构造后
+\textbf{以稀疏 COO 格式存为 \texttt{.h5} 文件，后续相同 partial-wave 配置直接
+读盘}。HDF5 提供：
+\begin{itemize}
+\item 二进制紧致存储，跨平台 endian-safe；
+\item 对单文件内多个数据集（dataset）/表（table）/属性的目录树管理；
+\item 通过 \texttt{H5LT}/\texttt{H5TB} 高层 API 写"带 schema 的表"，
+      不用手撸 binary blob；
+\item 单线程版本（\texttt{libhdf5\_serial}）已足够 Tic-tac 用，无需 MPI 并行 IO。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\subsection{P123 缓存的层级 schema}
+
+Tic-tac 把每个 (J, $\pi$) 通道的 P123 存成一个独立 \texttt{.h5} 文件，
+顶层 layout：
+
+\begin{verbatim}
+P123_J{2J}_pi{P}.h5
+├── /Nalpha               (scalar, int)         partial-wave 通道数
+├── /Np_WP                (scalar, int)         p-bin 数
+├── /Nq_WP                (scalar, int)         q-bin 数
+├── /P123_sparse_dim      (scalar, ULL)         非零元 NNZ
+├── /p boundaries         (table, Np_WP+1 rows) p-bin 边界
+├── /q boundaries         (table, Nq_WP+1 rows) q-bin 边界
+├── /pw_table             (table, Nalpha rows)  L,S,J,T,l,2j,2T 列
+├── /sparse_val           (1D, double, NNZ)     非零矩阵元值
+├── /sparse_row           (1D, int,    NNZ)     行索引
+└── /sparse_col           (1D, int,    NNZ)     列索引
+\end{verbatim}
+
+每次写入流程：\texttt{H5Fcreate} $\to$ 写标量 $\to$ 写 boundaries 表 $\to$
+写 PW 表 $\to$ 写稀疏矩阵 3 列 $\to$ \texttt{H5Fclose}。
+读入流程对称：\texttt{H5Fopen}（\texttt{H5F\_ACC\_RDONLY}）$\to$ 读标量
+（用于 \emph{校验}：读的 \texttt{Nalpha,Np\_WP,Nq\_WP} 必须与当前 run 的
+\texttt{run\_parameters} 一致，否则 raise\_error）$\to$ 分配数组 $\to$
+读三列 $\to$ \texttt{H5Fclose}。
+
+% ---------------------------------------------------------------------
+\subsection{C 风格 HDF5 API（H5Lite 与原生交错）}
+
+Tic-tac 同时使用：
+\begin{itemize}
+\item \textbf{原生 H5}：\texttt{H5Fcreate, H5Fopen, H5Dcreate, H5Dwrite, H5Dread,
+      H5Sclose, H5Dclose, H5Fclose}——用于标量与原始数组；
+\item \textbf{H5 Table (HL)}：\texttt{H5TBmake\_table, H5TBread\_table}——
+      用于"带 schema 的多列表"，如 bin boundaries（index, mesh\_value）与
+      partial-wave table（10 个量子数列）。
+\end{itemize}
+
+\paragraph{标量 IO 范例。}
+下面节选自 \texttt{src/io/disk\_io\_routines.cpp:1286--1334}，把单个 \texttt{int}
+写到已开 \texttt{file\_id} 下的命名 dataset：
+
+\lstinputlisting[style=cpp,caption={\texttt{src/io/disk\_io\_routines.cpp:1286--1334}：标量 \texttt{int} 写/读。},label={lst:appD:h5_int}]
+{code_excerpts/snippets/appD_h5_int_io.cpp}
+
+\paragraph{逐行解读}\
+
+\begin{enumerate}
+\item \texttt{H5Screate\_simple(rank=1, dim={1}, NULL)}：建一个 1D、长度 1 的
+      data\emph{space}（描述形状）；
+\item \texttt{H5Dcreate(file\_id, name, H5T\_NATIVE\_INT, ...)}：建一个 data\emph{set}
+      （命名 + 类型 + 形状）；
+\item \texttt{H5Dwrite(\dots, H5S\_ALL, H5S\_ALL, \dots)}：把 \texttt{N\_h5}
+      数组写入 dataset；\texttt{H5S\_ALL} 表示"用全部 source/destination 形状"，
+      不做 hyperslab 选择；
+\item 写完必须 \texttt{H5Dclose} + \texttt{H5Sclose}（关闭 dataspace），
+      否则 HDF5 会留 leak（大多 H5 实现允许文件层关闭时清理，但写多个数据集
+      时栈式资源管理更安全）。
+\end{enumerate}
+
+\paragraph{P123 顶层封装。}
+下面是 P123 完整存储的入口函数（节选 \texttt{src/io/disk\_io\_routines.cpp:1078--1165}）：
+
+\lstinputlisting[style=cpp,caption={\texttt{src/io/disk\_io\_routines.cpp:1078--1165}：P123 \texttt{.h5} 缓存写入流程。},label={lst:appD:h5_p123}]
+{code_excerpts/snippets/appD_h5_p123_store.cpp}
+
+整段流程是一个清晰的"打开-写多个 dataset-关闭"模板。注意：
+\begin{itemize}
+\item 第 1124 行 \texttt{write\_ULL\_integer\_to\_h5} 用
+      \texttt{H5T\_NATIVE\_ULLONG} 而不是 \texttt{H5T\_NATIVE\_INT}，
+      因为 NNZ 可能 $>2^{31}$，必须 64-bit；
+\item P123 矩阵元用 \texttt{double}，不是 \texttt{float}；P123 是几何系数（实数），
+      不需要 complex；
+\item 行/列索引用 \texttt{int}（通常 32-bit）；这隐含 $\NpWP\NqWP\Nalpha < 2^{31}$
+      的限制——目前最大配置 $\sim 10^{6}$，远未触发。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\subsection{HDF5 高层 Table API：\texttt{H5TB\_*}}
+
+P123 文件中的 boundaries 与 PW table 用 \texttt{H5TBmake\_table}：
+
+\begin{lstlisting}[style=cpp,caption={H5 Table API 概览。}]
+herr_t H5TBmake_table(
+    const char *table_title,       // 表的可读标题（写入文件 attr）
+    hid_t   loc_id,                // 表所在 group_id 或 file_id
+    const char *dset_name,         // dataset 名（如 "p boundaries"）
+    hsize_t nfields,               // 列数
+    hsize_t nrecords,              // 行数
+    size_t  type_size,             // 单行结构体 sizeof(...)
+    const char *field_names[],     // 列名数组
+    const size_t *field_offset,    // 每列字段在结构体中的字节偏移（HOFFSET）
+    const hid_t *field_types,      // 每列 H5 native 类型
+    hsize_t chunk_size,            // 内部 chunk 大小（性能调优）
+    void   *fill_data,             // NULL 表示无默认值
+    int     compress,              // 0/1 是否启 deflate
+    const void *data               // 实际数据指针
+);
+\end{lstlisting}
+
+Tic-tac 总用 \texttt{compress=0}（不压缩；P123 文件 $\sim 1$~GB 但读速比解压快）。
+\texttt{HOFFSET(struct, member)} 由 HDF5 提供，等价于 \texttt{offsetof()}，
+用于把"行结构体"的字段映射到 HDF5 表列。
+
+\paragraph{读表样例。}
+\texttt{H5TBread\_table} 一次读出整张表，调用方需先按结构体形状准备
+缓冲区。Tic-tac 在 \texttt{read\_WP\_boundaries\_from\_h5} 中如此：
+\begin{lstlisting}[style=cpp]
+bounds_mesh_table p_h5[N_WP+1];
+status = H5TBread_table(file_id, mesh_name, dst_size,
+                        dst_offset, dst_sizes, p_h5);
+for (int i=0; i<N_WP+1; i++) WP_boundaries[i] = p_h5[i].mesh_table;
+\end{lstlisting}
+
+% ---------------------------------------------------------------------
+\subsection{Tic-tac 的 \texttt{src/io/} wrapper 设计原则}
+
+\texttt{disk\_io\_routines.cpp/.h} 把 H5 暴露为面向"业务对象"的 API，
+不让上层直接面对 \texttt{hid\_t}：
+
+\begin{itemize}
+\item \texttt{store\_sparse\_permutation\_matrix\_for\_3N\_channel\_h5(P123\_*, pw\_states, filename)}\\
+      $\to$ "把 P123 在 3N 通道里写到文件"——不需要懂 H5；
+\item \texttt{read\_sparse\_permutation\_matrix\_for\_3N\_channel\_h5(...)}\\
+      $\to$ 对称读取；
+\item \texttt{write\_integer\_to\_h5(int, name, file\_id)} / \texttt{read\_integer\_from\_h5(int\&, name, filename)}\\
+      $\to$ 单标量；写入接受 file\_id（已开），读取接受 filename（自开自关）。
+      这个不对称是"批量写一次性、读取按需"的实际需求驱动的；
+\item 错误检查通过 \texttt{check\_h5\_write\_call(status)} 等小工具完成，
+      触发后立即 raise\_error 终止——HDF5 错误几乎都是文件系统/版本不一致导致，
+      不应该 silently 失败。
+\end{itemize}
+
+\paragraph{头文件依赖}：\texttt{src/io/disk\_io\_routines.h} 用如下两个 include
+路径：
+\begin{lstlisting}[style=cpp]
+#include "hdf5/serial/hdf5.h"
+#include "hdf5/serial/hdf5_hl.h"
+\end{lstlisting}
+这是 Debian/Ubuntu 的 \texttt{libhdf5-dev} 默认 layout（\texttt{/usr/include/hdf5/serial/}）。
+Conda toolchain 则把 hdf5 装到 \texttt{\$CONDA\_PREFIX/include/hdf5.h}（不带
+\texttt{serial/} 前缀），这是一个常见跨平台 portability 问题，下一节专述。
+
+% ---------------------------------------------------------------------
+\subsection{Conda HDF5 自动检测（top-level Makefile）}
+\label{sec:appD:conda_hdf5}
+
+Tic-tac 的 top-level \texttt{Makefile}（行 52--75）实现了一套
+"conda > 系统 hdf5\_serial > 系统 hdf5" 的优先级检测：
+
+\lstinputlisting[style=config,caption={\texttt{Makefile:52--75}：HDF5 与 conda toolchain 自动检测。},label={lst:appD:conda_make}]
+{code_excerpts/snippets/appD_makefile_hdf5.mk}
+
+\paragraph{逻辑解读}\
+
+\begin{enumerate}
+\item \texttt{HDF5\_HAVE\_SERIAL\_PC := \$(shell pkg-config --exists hdf5-serial \&\& echo yes)}：
+      检测系统 \texttt{hdf5-serial.pc} 是否存在；
+\item \texttt{ifneq (\$(strip \$(CONDA\_PREFIX)),)}：如果当前 shell 在某个
+      conda env 里（环境变量 \texttt{CONDA\_PREFIX} 非空），\textbf{优先用} conda
+      的 hdf5：\texttt{-I\$(CONDA\_PREFIX)/include} 与 \texttt{-L\$(CONDA\_PREFIX)/lib}，
+      并加 \texttt{-Wl,-rpath} 让 binary 运行时也走 conda lib；
+\item 链接库选 \texttt{-lhdf5\_hl\_cpp -lhdf5\_cpp -lhdf5\_hl -lhdf5}（无 \_serial 后缀）；
+\item 如果不在 conda 但系统有 \texttt{hdf5-serial}，链接 \texttt{-lhdf5\_serial\_*}；
+\item 否则 fallback 到 \texttt{-lhdf5\_*}（默认 hdf5，可能是 mpi 版）。
+\end{enumerate}
+
+\paragraph{为什么需要这个？}
+Conda 的 hdf5 包名约定与 Debian 不同：conda 用 \texttt{libhdf5\_cpp.so}，
+Debian \texttt{libhdf5-dev} 提供 \texttt{libhdf5\_serial\_cpp.so}（带 serial
+后缀避免与 mpi 版冲突）。同一份源码若硬编码 \texttt{-lhdf5\_serial\_cpp}，
+在 conda env 里就会 \texttt{cannot find -lhdf5\_serial\_cpp} 链接失败。
+Tic-tac 用 Makefile 探测自动切换，开发者无需手动改 \texttt{LDLIBS}。
+
+\paragraph{CMake 路径的对应处理。}
+\texttt{CMakeLists.txt:31} 写 \texttt{find\_package(HDF5 REQUIRED COMPONENTS CXX HL)}，
+该模块会自动尊重 \texttt{CMAKE\_PREFIX\_PATH}（如果 user 设了
+\texttt{export CMAKE\_PREFIX\_PATH=\$CONDA\_PREFIX}），亦能优先从 conda 解析。
+若 CMake 仍找不到，可显式 \texttt{cmake -DHDF5\_DIR=\$CONDA\_PREFIX/share/cmake/hdf5 ..}。
+
+% ---------------------------------------------------------------------
+\subsection{最小示例：写一个 HDF5 文件}
+
+下面用纯 C 接口写一个含 1 个标量与 1 个一维数组的 HDF5 文件：
+
+\begin{lstlisting}[style=cpp,caption={HDF5 最小工作示例。}]
+// mwe_h5.cpp
+#include <cstdio>
+#include "hdf5.h"      // conda-style; Debian 用 "hdf5/serial/hdf5.h"
+
+int main() {
+    hid_t file_id = H5Fcreate("mwe.h5", H5F_ACC_TRUNC,
+                              H5P_DEFAULT, H5P_DEFAULT);
+
+    // 写标量 N=42
+    int N = 42;
+    hsize_t scalar_dim[1] = {1};
+    hid_t  ss = H5Screate_simple(1, scalar_dim, NULL);
+    hid_t  ds = H5Dcreate(file_id, "/N", H5T_NATIVE_INT, ss,
+                          H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    H5Dwrite(ds, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &N);
+    H5Dclose(ds); H5Sclose(ss);
+
+    // 写一维 double 数组
+    double data[5] = {1.0, 2.0, 3.0, 4.0, 5.0};
+    hsize_t arr_dim[1] = {5};
+    ss = H5Screate_simple(1, arr_dim, NULL);
+    ds = H5Dcreate(file_id, "/data", H5T_NATIVE_DOUBLE, ss,
+                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    H5Dwrite(ds, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
+    H5Dclose(ds); H5Sclose(ss);
+
+    H5Fclose(file_id);
+    std::printf("wrote mwe.h5\n");
+    return 0;
+}
+\end{lstlisting}
+
+\begin{lstlisting}[style=config,caption={编译（系统 hdf5\_serial）。}]
+g++ -std=c++17 mwe_h5.cpp \
+    -I/usr/include/hdf5/serial \
+    -L/usr/lib/x86_64-linux-gnu/hdf5/serial \
+    -lhdf5 -lhdf5_hl \
+    -o mwe_h5
+./mwe_h5
+h5dump mwe.h5     # 检查
+\end{lstlisting}
+
+\begin{lstlisting}[style=config,caption={编译（conda env）。}]
+g++ -std=c++17 mwe_h5.cpp \
+    -I$CONDA_PREFIX/include \
+    -L$CONDA_PREFIX/lib -Wl,-rpath,$CONDA_PREFIX/lib \
+    -lhdf5 -lhdf5_hl \
+    -o mwe_h5
+./mwe_h5
+\end{lstlisting}
+
+% =====================================================================
+\section{常见编译/链接错误总览}
+\label{sec:appD:link_errors}
+
+\begin{pitfallbox}[title={GSL/LAPACK/HDF5 三库的高频踩坑}]
+\begin{enumerate}
+
+\item \texttt{undefined reference to `gsl\_sf\_coupling\_3j'}\\
+      \emph{原因}：未链 \texttt{-lgsl}。\\
+      \emph{修复}：加 \texttt{-lgsl -lgslcblas}（顺序很重要——gsl 依赖 gslcblas）。
+
+\item \texttt{undefined reference to `cblas\_dgemm'}\\
+      \emph{原因}：链了 \texttt{-lgsl} 但缺 BLAS。\\
+      \emph{修复}：补 \texttt{-lblas} 或 \texttt{-lopenblas}。
+      Tic-tac 默认链 \texttt{-lblas}，故对 OpenBLAS 兼容机器无问题。
+
+\item \texttt{LAPACKE\_dgetrf} undefined\\
+      \emph{原因}：仅链 \texttt{-llapack}。\\
+      \emph{修复}：加 \texttt{-llapacke}。LAPACKE 与 LAPACK 是\emph{独立库}，
+      前者是 C 接口（Fortran ABI 包装），不能省。
+
+\item \texttt{hdf5/serial/hdf5.h: No such file}\\
+      \emph{原因}：conda env 装了 hdf5 但 \texttt{Makefile} 仍硬编码 Debian 路径。\\
+      \emph{修复}：检查 \texttt{disk\_io\_routines.h:32-33} 的 include；
+      或确保 \texttt{CONDA\_INCLUDE := -I\$(CONDA\_PREFIX)/include} 已生效，
+      头文件 include 改为 \texttt{<hdf5.h>}（无前缀）——这是 Tic-tac 已知
+      portability bug 之一，实际工程里现在两种 layout 同时存在，靠 \texttt{-I}
+      路径排序解决。
+
+\item \texttt{cannot find -lhdf5\_serial\_cpp}\\
+      \emph{原因}：conda env 没有 \texttt{\_serial} 后缀的库。\\
+      \emph{修复}：依赖 \texttt{Makefile:59-67} 的 \texttt{ifneq (\$(CONDA\_PREFIX),)}
+      自动切换到 \texttt{-lhdf5\_cpp}；如果你 \emph{在 conda 里} 但变量没生效，
+      \texttt{conda activate <env>} 后再 \texttt{make}。
+
+\item \texttt{libhdf5.so.X: cannot open shared object}\\
+      \emph{原因}：编译时找到 conda 的 hdf5、运行时却找系统的。\\
+      \emph{修复}：必须在链接时加 \texttt{-Wl,-rpath,\$(CONDA\_PREFIX)/lib}
+      把 conda 路径烙进 binary（Tic-tac \texttt{Makefile:61} 已做此事）。
+
+\item \emph{HDF5 版本 mismatch warning}：\texttt{Warning! ***HDF5 library version
+      mismatched error***}\\
+      \emph{原因}：编译用的 header 与 link 用的 \texttt{libhdf5.so} 版本不一致。\\
+      \emph{修复}：清理多版本 hdf5（特别是混装 system + conda + spack 时）；
+      用 \texttt{ldd ./tic-tac | grep hdf5} 确认运行时链接的 .so 路径。
+
+\item \texttt{H5Fcreate failed} 但没明显错误码\\
+      \emph{原因}：通常是文件已被另一个进程打开；HDF5 默认非并发安全
+      （除非 SWMR 模式或 MPI-IO）。\\
+      \emph{修复}：避免两个 Tic-tac 实例同时写同一 P123 文件；或加文件锁。
+
+\item LAPACK 调用 \texttt{info > 0}\\
+      \emph{原因}：矩阵奇异（LU 中 pivot 为零）或不收敛（特征值）。\\
+      \emph{修复}：检查输入矩阵是否真的非奇异；Faddeev 求解中
+      $A=I-K\Gop_0\Vop$ 在能量靠近 spurious 极时可能数值奇异，
+      Padé 重求和会跳过这种点。
+
+\item BLAS 段错（segfault）\\
+      \emph{原因}：99\% 是行/列序混用或 leading dimension（LDA）错。\\
+      \emph{修复}：所有 LAPACKE 调用统一 \texttt{LAPACK\_ROW\_MAJOR}，
+      LDA = 列数；CBLAS 调用统一 \texttt{CblasRowMajor}。
+
+\end{enumerate}
+\end{pitfallbox}
+
+% =====================================================================
+\section{依赖关系总图}
+
+\begin{center}
+\begin{tabular}{l p{6cm} p{5cm}}
+\toprule
+库 & Tic-tac 中位置 & 系统包名 (Debian / conda) \\
+\midrule
+GSL          & Wigner 系数；偶用特殊函数。
+             & \texttt{libgsl-dev / gsl} \\
+BLAS         & matrix-vector 与 matrix-matrix 乘（hot path）。
+             & \texttt{libblas-dev / openblas / blas} \\
+LAPACK       & dense LU + solve；\texttt{determinant}。
+             & \texttt{liblapack-dev / lapack} \\
+LAPACKE      & C 接口层。
+             & \texttt{liblapacke-dev / lapack} \\
+HDF5         & P123 缓存与 metadata；可选 PW table。
+             & \texttt{libhdf5-dev / hdf5} \\
+HDF5\_HL     & H5TB / H5LT 高层 table API。
+             & 与 hdf5 同包 \\
+HDF5\_CXX    & 实际未直接调 C++ class，但 link 兼容性需要。
+             & 同上 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{头文件 vs 库 vs 运行时三层各自匹配规则}\
+
+\begin{itemize}
+\item \textbf{编译期}（\texttt{-I}）：决定 header 路径，影响 ABI 与
+      \texttt{H5T\_NATIVE\_*} 等宏的字面值；
+\item \textbf{链接期}（\texttt{-L} \texttt{-l}）：决定 \texttt{.so}/\texttt{.a}
+      的物理路径；
+\item \textbf{运行期}（\texttt{LD\_LIBRARY\_PATH} 或 \texttt{rpath}）：决定 binary
+      实际加载哪份 .so。
+\end{itemize}
+三层版本必须一致，否则 HDF5 会在 \texttt{H5Fcreate} 处直接 abort 并打印
+"library version mismatched"。Conda 用户务必：
+\begin{itemize}
+\item 编译前 \texttt{conda activate <env>}（让 \texttt{CONDA\_PREFIX} 生效）；
+\item 编译后 \texttt{ldd ./tic-tac | grep -E '(hdf5|gsl|lapack)'} 核对路径；
+\item 跨节点提交时把 \texttt{LD\_LIBRARY\_PATH} 写入 PBS/SLURM 脚本。
+\end{itemize}
+
+% =====================================================================
+\section{小结}
+
+\begin{itemize}
+\item \textbf{GSL} 在 Tic-tac 仅用于 Wigner $3j/6j/9j$ 与少量特殊函数；
+      接口稳、性能不是瓶颈、链接最简单（\texttt{-lgsl -lgslcblas}）；
+\item \textbf{LAPACK + BLAS} 是 hot path——\texttt{*gemm} 与 \texttt{*getrf+*getrs}
+      撑起 Faddeev 求解中的所有稠密线性代数；
+      Tic-tac 用 \texttt{matrix\_routines.cpp} 把所有 4 种类型（实/复 $\times$
+      single/double）统一在 C++ 重载函数里；
+\item \textbf{HDF5} 仅用于 P123 缓存（与少量 metadata），但其 schema 设计
+      非常体现"长 run 工程性能与诊断"——含 NNZ、Nalpha、bin boundaries、
+      pw\_table 等关键校验字段，使得"读到的 P123 是否与当前 run 一致"
+      可被快速判定；
+\item \textbf{Conda toolchain 自动检测}（\texttt{Makefile:52--75}）是一个
+      实际部署中至关重要、但对新手不可见的细节；本附录把它单列一节，
+      避免读者在迁移到 conda env 时反复踩坑；
+\item 三库的常见错误绝大多数集中在"链接顺序、行/列序、版本一致"三处，
+      \cref{sec:appD:link_errors} 提供了快速对照表。
+\end{itemize}

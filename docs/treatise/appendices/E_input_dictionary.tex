@@ -1,9 +1,795 @@
 % =====================================================================
 % appendices/E_input_dictionary.tex
-% Wave 0 占位 —— 待 Wave 7 子代理补全
+% Wave 7 / Appendix E —— 完整输入参数字典
+% 字典基于 src/config/set_run_parameters.cpp 与 include/type_defs.h（run_params struct）
 % =====================================================================
 
 \chapter{完整输入参数字典}
 \label{app:E_input_dictionary}
 
-\textbf{[Wave 0 占位 —— 附录内容由 Wave 7 子代理填写]}
+本附录是 Tic-tac 求解器（即 \texttt{./CPP/run} 与等价的 CMake 产物 \texttt{build/bin/tic-tac}）在工程意义下的“真理之书”。它逐字段地反向工程
+\texttt{src/config/set\_run\_parameters.cpp}（相同副本位于 \texttt{CPP/set\_run\_parameters.cpp}），并配合 \texttt{include/type\_defs.h} 中的 \texttt{run\_params}
+结构体，完整列出当前可用的输入键。所有参数都满足以下三条性质：
+\begin{enumerate}
+  \item 可通过 \texttt{key=value} 形式从命令行设置；
+  \item 可通过 \texttt{<inputfile>.txt} 中的 \texttt{key=value} 行设置；
+  \item 命令行与文件混用时，按出现顺序“从左到右”覆盖（晚出现者胜出）。
+\end{enumerate}
+
+\textbf{术语约定}：本附录中“当前实现”指 \texttt{src/config/set\_run\_parameters.cpp}（截至最近一次提交 \texttt{3e0d6e0}），“默认值”指 \texttt{set\_default\_values()}
+中显式赋值；“类型”指 \texttt{run\_params} 结构体中的字段类型；“归属章节”指本书中讨论该参数的主章节。
+
+\section{阅读指南}
+\label{sec:appE_reading_guide}
+
+\subsection{参数解析流程}
+
+求解器启动时按下列顺序处理输入：
+\begin{enumerate}
+  \item \texttt{set\_default\_values(run\_parameters)} —— 将所有字段写入硬编码默认值；
+  \item 遍历 \texttt{argv[1..argc-1]}：
+    \begin{itemize}
+      \item 以 \texttt{.txt} 结尾者，调用 \texttt{use\_input\_list()} → \texttt{read\_input\_list\_and\_set\_parameters()} 逐行解析；
+      \item 含 \texttt{=} 的形如 \texttt{key=value} 者，调用 \texttt{read\_and\_set\_parameter()} 直接覆写；
+      \item \texttt{-h}/\texttt{--help} 者打印用法并立即退出；
+      \item 否则视为非法参数，仅打印告警跳过。
+    \end{itemize}
+  \item 完成解析后做\textbf{兼容性检查}：
+    \begin{itemize}
+      \item \texttt{parallel\_run==true \&\& channel\_idx==-1} → 报错退出；
+      \item \texttt{P123\_omp\_num\_threads > Nq\_WP} → 静默截断为 \texttt{Nq\_WP}；
+      \item \texttt{two\_J\_3N\_max} 为偶数或非正 → 报错退出（\texttt{Cannot have even two\_J\_3N\_max!}）。
+    \end{itemize}
+\end{enumerate}
+
+\subsection{布尔与数值的合法形式}
+
+\begin{itemize}
+  \item \textbf{布尔类型}：仅接受字符串字面量 \texttt{true} / \texttt{false}（小写、不含空格），其他取值（如 \texttt{1}/\texttt{0}/\texttt{TRUE}）会触发
+        \texttt{raise\_error(...)} 并立即退出；
+  \item \textbf{整数类型}：使用 \texttt{std::stoi} 解析，允许带正负号；行末注释（如 \texttt{Np\_WP=50 \# baseline}）会被识别为非法字符并触发
+        \texttt{stoi} 异常，因此输入文件中\textbf{不要在 \texttt{key=value} 行尾加注释}；
+  \item \textbf{浮点类型}：使用 \texttt{std::stod} 解析，支持 \texttt{1.0e2}、\texttt{-0.205} 等形式；
+  \item \textbf{字符串类型}：直接保存，会调用 \texttt{std::remove\_if(::isspace)} 去除所有空白字符（即\textbf{包含空格的路径会被吞空格}）；
+  \item \textbf{空 value}：若 \texttt{=} 右侧仅有空白，整行被跳过（参数保持上一次的值）。
+\end{itemize}
+
+\subsection{典型错误信号}
+
+\begin{itemize}
+  \item \texttt{Unrecognised run option entered: ...} —— 拼写错误，会被忽略；
+  \item \texttt{Invalid value for input parameter ...} —— 布尔参数取值不合法；
+  \item \texttt{Cannot have even two\_J\_3N\_max!} —— \texttt{two\_J\_3N\_max} 必须是正奇数；
+  \item \texttt{Parallel run specified ... no channel index} —— \texttt{parallel\_run=true} 时缺 \texttt{channel\_idx}；
+  \item \texttt{Program mismatch with number of wave-packets in input WP-boundaries file} —— 自定义网格文件长度与 \texttt{Np\_WP+1}/\texttt{Nq\_WP+1} 不一致。
+\end{itemize}
+
+\section{角动量截断（state-space truncation）}
+\label{sec:appE_jtrunc}
+
+\subsection{\texttt{two\_J\_3N\_max}}
+
+\begin{description}
+  \item[类型] \texttt{int}（\texttt{run\_params.two\_J\_3N\_max}）
+  \item[默认值] \texttt{1}
+  \item[物理含义] 三体系统总角动量 \(J_{3N}\) 的截断，存储为 \(2J_{3N}\)（避免半整数）。例如 \texttt{two\_J\_3N\_max=3} 表示
+        \(J_{3N}\in\{1/2,3/2\}\)，\texttt{two\_J\_3N\_max=5} 表示 \(J_{3N}\in\{1/2,3/2,5/2\}\)。
+  \item[合法范围] 必须为\textbf{正奇数}；否则 \texttt{set\_run\_parameters} 中显式 \texttt{raise\_error}。
+  \item[影响模块] 状态空间构造（\texttt{src/core/state\_space/make\_pw\_symm\_states.cpp}）；P123 矩阵尺寸；通道循环与并行划分（\texttt{channel\_idx}）。
+  \item[归属章节] \cref{sec:appE_jtrunc} 仅作字典；详见正文 Ch.~3 / Ch.~7。
+  \item[推荐值] 验证收敛时按 \texttt{1 → 3 → 5} 阶梯。截断 \(J_{3N}\le 1/2\) 适用于快速冒烟测试，对 \(\Tlab\approx 190\,\mathrm{MeV}\) 的极化观测量
+        通常需要 \(J_{3N}\le 7/2\) 才接近收敛；Miller \emph{Gate C} 收敛档位即 \texttt{two\_J\_3N\_max=3}。
+  \item[耦合关系] 与 \texttt{J\_2N\_max} 决定通道总数 \(\Nalpha\)；P123 矩阵存储与 \texttt{P123\_folder} 的缓存\textbf{绝对不能跨 \texttt{two\_J\_3N\_max} 复用}。
+  \item[典型症状] 取偶数立即报错；取过小（如 \texttt{1}）时高能 \(\iTeleven\) 与 \(\Ttwentyzero\) 相对参考曲线明显偏低。
+\end{description}
+
+\subsection{\texttt{J\_2N\_max}}
+
+\begin{description}
+  \item[类型] \texttt{int}
+  \item[默认值] \texttt{3}
+  \item[物理含义] 两体子系统总角动量 \(j_{2N}\) 的截断；包含 \(j_{2N}=0,1,\dots,\texttt{J\_2N\_max}\) 的所有部分波。
+  \item[合法范围] 非负整数；零有意义（仅 \(s\)-波）但物理上偏窄。
+  \item[影响模块] \texttt{construct\_symmetric\_pw\_states}；2N 唯一索引 \(\rho\)（\cref{ch07_unique_2N_idx_current}）；势矩阵块尺寸。
+  \item[推荐值] 复现验证档位 \texttt{J\_2N\_max=3}；扫描成本时可降到 \texttt{2}（Miller Gate 1 的快查档位）；\texttt{1} 仅用于 \(\Lambda\) 极弱、纯 \(\spectro{1}{S}{0}\!+\!\spectro{3}{S}{1}\!-\!\spectro{3}{D}{1}\) 的玩具测试。
+  \item[耦合关系] 与 \texttt{two\_J\_3N\_max} 共同确定 \(\Nalpha\)；与 \texttt{tensor\_force} 共同决定耦合块出现位置（耦合块只能出现在 \(j_{2N}\ge 1\)）。
+  \item[典型症状] 偏低导致中等能量（\(\Tlab\sim 70\)–\(135\,\mathrm{MeV}\)）极化观测量缺失高分波贡献；偏高显著增加 P123 体积。
+\end{description}
+
+\section{动量波包离散化}
+\label{sec:appE_wp_grid}
+
+\subsection{\texttt{Np\_WP}}
+
+\begin{description}
+  \item[类型] \texttt{int}
+  \item[默认值] \texttt{50}
+  \item[物理含义] \(p\)（pair 相对动量）方向的波包 bin 数；势矩阵和 SWP 投影按此分块。
+  \item[合法范围] 正整数；与显存/内存 \(\sim N_{p}^{2} N_{q} \Nalpha\) 立方级耦合。
+  \item[影响模块] \texttt{make\_wp\_states.cpp}（边界）、\texttt{make\_potential\_matrix.cpp}（势矩阵）、\texttt{make\_swp\_states.cpp}（SWP）、整个 P123 维度。
+  \item[推荐值] 收敛档 \texttt{50}；快速调参/扫参 \texttt{20–30}；冒烟测试 \texttt{8}。
+  \item[耦合关系] P123 缓存仅在 \texttt{Np\_WP} / \texttt{Nq\_WP} 完全一致时可重用；\texttt{p\_grid\_type=custom} 时必须配合 \texttt{p\_grid\_filename} 给出 \(\texttt{Np\_WP}+1\) 行边界。
+  \item[典型症状] 取过小时势矩阵在排斥芯附近欠采样，\(\diffXS\) 在大角度误差大；取过大时内存/磁盘吃紧（P123 文件 \(\sim\)GB 量级）。
+\end{description}
+
+\subsection{\texttt{Nq\_WP}}
+
+\begin{description}
+  \item[类型] \texttt{int}
+  \item[默认值] \texttt{50}
+  \item[物理含义] \(q\)（spectator 相对动量）方向的波包 bin 数；同时\textbf{决定 on-shell 能量分辨率}。
+  \item[合法范围] 正整数。
+  \item[影响模块] 同上 + \texttt{run\_organizer.cpp}（on-shell bin 搜索）：实际求解的 \(\Tlab\) 是 \texttt{Nq\_WP-1} 个 q-bin 中点的离散值，不会精确等于
+        \texttt{energy\_input\_file} 中的请求值。
+  \item[推荐值] 同 \texttt{Np\_WP}；如果只关心若干特定 \(\Tlab\) 不需要扫描全谱，建议改用 \texttt{q\_grid\_type=custom} 精确放置 bin。
+  \item[耦合关系] OpenMP 线程被截断为 \(\min(\texttt{P123\_omp\_num\_threads},\texttt{Nq\_WP})\)；\texttt{Nq\_WP}<\(N_\text{thread}\) 时会触发 stdout 提示。
+  \item[典型症状] 离散误差导致 “solver Tlab 与 input Tlab 偏差 \(\sim 30\,\mathrm{MeV}\)”，参见 \texttt{solver\_validation\_tlab\_*.json}。
+\end{description}
+
+\subsection{\texttt{Np\_per\_WP} 与 \texttt{Nq\_per\_WP}}
+
+\begin{description}
+  \item[类型] \texttt{int} / \texttt{int}
+  \item[默认值] \texttt{8} / \texttt{8}
+  \item[物理含义] 每个 \(p\)/\(q\) bin 内的 Gauss–Legendre 节点数，用于 \(\langle x_i|V|x_j\rangle\) 的求积。
+  \item[合法范围] 正整数；\(\le 16\) 时 GL 权重表内置稳定。
+  \item[影响模块] 仅在 \texttt{midpoint\_approx=false} 时生效；势矩阵元素的物理精度。
+  \item[推荐值] 主流潜在模型保持 \texttt{8}；\(\Lambda\) 极强或 \(N^3\)LO 的高动量尾部建议升到 \texttt{12}。
+  \item[耦合关系] 与 \texttt{midpoint\_approx} 互斥：后者为 \texttt{true} 时这两参数被忽略。
+  \item[典型症状] 取 \texttt{1} 实质等价 mid-point 近似；耦合矩阵元在排斥芯附近震荡。
+\end{description}
+
+\subsection{\texttt{Nphi}}
+
+\begin{description}
+  \item[类型] \texttt{int}
+  \item[默认值] \texttt{48}
+  \item[物理含义] P123（permutation operator）计算中 \((p',q')\)–\((p,q)\) 参数化里 \(\phi\) 角的求积点数。
+  \item[合法范围] 正偶数；建议 \(\ge 24\)。
+  \item[影响模块] \texttt{make\_permutation\_matrix.cpp} 内 \texttt{calculate\_WP\_overlap}；P123 噪声水平。
+  \item[推荐值] 默认 \texttt{48} 已足够大多数情形；高 \(J_{3N}\) 或细网格时升到 \texttt{64}。
+  \item[典型症状] 取过小导致 P123 行对称性偏差、Faddeev 解的 Padé 收敛阶差 \(\nudif\) 不稳定。
+\end{description}
+
+\subsection{\texttt{Nx}}
+
+\begin{description}
+  \item[类型] \texttt{int}
+  \item[默认值] \texttt{48}
+  \item[物理含义] P123 几何函数 \(G_{\alpha\alpha'}(p,p',q,q',x)\) 中 \(x=\cos\theta_{pq}\) 角积分的 Gauss–Legendre 节点数。
+  \item[合法范围] 正偶数。
+  \item[影响模块] 同 \texttt{Nphi}；与之协同决定 P123 元素的求积误差。
+  \item[推荐值] 与 \texttt{Nphi} 取同值；先 \texttt{48 → 64} 平移检验。
+  \item[典型症状] 取过小导致 \(P_{123}\) 矩阵的 \(\Pop=\Pop^\dagger\) 检验偏差超过 \(10^{-6}\)。
+\end{description}
+
+\subsection{\texttt{chebyshev\_s} 与 \texttt{chebyshev\_t}}
+
+\begin{description}
+  \item[类型] \texttt{double} / \texttt{double}
+  \item[默认值] \texttt{100} / \texttt{1}
+  \item[物理含义] Chebyshev 网格变换 \(p_i = s\cdot\tan\!\big[(2i-1)\pi/(4N)\big]^{t}\) 的尺度 \(s\)（\si{MeV}）和稀疏指数 \(t\)。
+  \item[合法范围] \(s>0\)，\(t\ge 1\)。\(t<1\) 时低动量端 bin 极窄、高动量端 bin 极宽，会抹掉散射信息。
+  \item[影响模块] \texttt{make\_chebyshev\_distribution}（\texttt{ch05\_chebyshev\_distribution\_current.cpp}）；与 \texttt{p\_grid\_type=chebyshev} / \texttt{q\_grid\_type=chebyshev} 联动。
+  \item[推荐值] 标准 \(s=100\) 覆盖到 \(\sim 600\,\mathrm{MeV}\)；高能（\(\Tlab=190\,\mathrm{MeV}\) 完整谱）建议 \(s=150\)–\(200\)。\(t\) 通常保持 \texttt{1}。
+  \item[耦合关系] 与 \texttt{Np\_WP} / \texttt{Nq\_WP} 共同决定 bin 中点分布；与 \texttt{p\_grid\_type=custom} 互斥。
+  \item[典型症状] \(s\) 太小则高动量 bin 缺失，\(\Tlab>3 s^2/(2\mu_2)\) 的请求被映射到最后一个 bin（\textbf{严重失真}）；\(t\ne 1\) 通常仅在收敛研究中使用。
+\end{description}
+
+\subsection{\texttt{p\_grid\_type} / \texttt{q\_grid\_type}}
+
+\begin{description}
+  \item[类型] \texttt{string} / \texttt{string}
+  \item[默认值] \texttt{chebyshev} / \texttt{chebyshev}
+  \item[物理含义] \(p\)/\(q\) 网格边界的来源。
+  \item[合法范围] \texttt{chebyshev}（按 \texttt{chebyshev\_s}/\texttt{chebyshev\_t} 解析生成）或 \texttt{custom}（从文本文件读入）。
+  \item[影响模块] \texttt{make\_wp\_states.cpp} 入口处的分支；如取其他字符串则报错 \texttt{Program mismatch with number of wave-packets...} 或类似。
+  \item[推荐值] 想精确控制 on-shell 命中（如把请求 \(\Tlab\) 放在 bin 中心）就用 \texttt{custom}；否则保持 \texttt{chebyshev}。
+\end{description}
+
+\subsection{\texttt{p\_grid\_filename} / \texttt{q\_grid\_filename}}
+
+\begin{description}
+  \item[类型] \texttt{string} / \texttt{string}
+  \item[默认值] \texttt{""}（空字符串）
+  \item[物理含义] \texttt{*\_grid\_type=custom} 时读取的边界文件路径；每行一个边界值（单位 \si{MeV}），共 \(\texttt{Np\_WP}+1\)（或 \(\texttt{Nq\_WP}+1\)）行，单调递增。
+  \item[合法范围] 任意可读文件；空字符串在 \texttt{chebyshev} 模式下被忽略，在 \texttt{custom} 模式下导致运行时错误。
+  \item[影响模块] \texttt{read\_wp\_boundaries\_from\_file}；\texttt{set\_wp\_normalisations}（依赖边界差求权重）。
+  \item[典型症状] 行数不对触发 \texttt{Program mismatch with number of wave-packets in input WP-boundaries file}；非单调或重复值导致权重为零或负，进而 NaN。
+\end{description}
+
+\subsection{\texttt{midpoint\_approx}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{false}
+  \item[物理含义] 用 bin 中点 \(\bar p_i = (p_i + p_{i+1})/2\) 替代 bin 内 GL 求积，把 \(\langle x_i|V|x_j\rangle\) 退化为 \(V(\bar p_i,\bar p_j)\)。
+  \item[影响模块] \texttt{construct\_potential\_matrix}；势矩阵元素的物理精度。
+  \item[推荐值] 仅用于调试快速跑通管线；生产计算保持 \texttt{false}。
+  \item[典型症状] 在 \(\Tlab\sim 100\,\mathrm{MeV}\) 上下 \(\diffXS\) 偏差几 \%；\(\Ay\) 形状失真。
+\end{description}
+
+\section{物理模型选择}
+\label{sec:appE_models}
+
+\subsection{\texttt{potential\_model}}
+
+\begin{description}
+  \item[类型] \texttt{string}
+  \item[默认值] \texttt{LO\_internal}
+  \item[物理含义] 两体 NN 势模型选择。
+  \item[合法值与简介]
+    \begin{itemize}
+      \item \texttt{LO\_internal} —— 内置 chiral LO（\(\Lambda=450\,\mathrm{MeV}\)，含 \(C_{1S0}\)/\(C_{3S1}\) 接触项），见 \texttt{src/interactions/chiral\_LO\_internal.cpp}；
+      \item \texttt{N2LOopt} —— Optimized N2LO（Ekström 等），\texttt{chiral\_N2LOopt.cpp}；
+      \item \texttt{Idaho\_N3LO} —— Idaho N3LO（Entem–Machleidt 2003），\texttt{chiral\_Idaho\_N3LO.cpp}；
+      \item \texttt{nijmegen} —— Nijmegen/Bonn 现象学势（F77 库 \texttt{src/interactions/nijmegen/pnijm.f}）；
+      \item \texttt{malfliet\_tjon} —— Malfliet–Tjon 玩具势，\texttt{malfliet\_tjon.cpp}，仅用于解析或回归测试。
+    \end{itemize}
+  \item[影响模块] \texttt{potential\_model\_factory}（\texttt{ch01\_potential\_model\_factory.cpp}）；势矩阵元的实际函数体。
+  \item[耦合关系] 与 \texttt{tensor\_force}、\texttt{isospin\_breaking\_1S0} 共同决定 1S0/3SD1 通道结构。
+  \item[典型症状] 拼写错误（如 \texttt{IDAHO\_N3LO} 大写）会被 factory 回退到 \texttt{LO\_internal} 并打印 NOTE，\textbf{很容易被忽视}；在 Miller Gate 1 中曾观察到误用 \texttt{LO\_internal} 复现 \texttt{nijmegen} 数据曲线（见附录 \cref{app:F_pitfalls_future}）。
+\end{description}
+
+\subsection{\texttt{tensor\_force}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{true}
+  \item[物理含义] 是否在 NN 势中保留张量耦合（即 \(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 等耦合通道）。
+  \item[合法值] \texttt{true}/\texttt{false}。
+  \item[影响模块] 决定 SWP 通道分类（uncoupled vs coupled），影响 \texttt{num\_2N\_unco\_states}/\texttt{num\_2N\_coup\_states}；on-shell 索引检索分支（\texttt{run\_organizer.cpp}）。
+  \item[推荐值] 物理计算保持 \texttt{true}；纯 \(s\)-波玩具检验时可关。
+  \item[典型症状] 关掉张量耦合后氘核束缚态消失（\(E_d\to 0\)），\texttt{find\_on\_shell\_bins} 中 \texttt{E\_bound} 失真。
+\end{description}
+
+\subsection{\texttt{isospin\_breaking\_1S0}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{true}
+  \item[物理含义] 是否在 \(\spectro{1}{S}{0}\) 通道引入 \(pp/np/nn\) 电荷依赖破缺（即 \(V_{pp}\ne V_{np}\ne V_{nn}\)）。
+  \item[合法值] \texttt{true}/\texttt{false}。
+  \item[影响模块] 通道生成（\texttt{make\_pw\_symm\_states.cpp}）；与实验比较时的 \(\diffXS\) 大角度行为。
+  \item[推荐值] 与实验比较保持 \texttt{true}；\(2\)NF-only Triton 束缚能等基准量按惯例使用 \texttt{false}（与 Nogga benchmark 表对齐）。
+\end{description}
+
+\section{三核子力（3NF）}
+\label{sec:appE_threenf}
+
+3NF 相关参数是 2025 年中后期新增字段，旧版 \texttt{input.txt} 默认不出现，因此在缺省情况下 \texttt{three\_nucleon\_force=none}，求解器逐比特退化为纯 2NF 路径（与
+引入 3NF 之前的解一致，详见 \cref{ch15_run_params_3nf}）。
+
+\subsection{\texttt{three\_nucleon\_force}}
+
+\begin{description}
+  \item[类型] \texttt{string}
+  \item[默认值] \texttt{none}
+  \item[物理含义] 选择 3NF 模型族。
+  \item[合法值] \texttt{none}（关闭，零开销）；\texttt{chiral\_N2LO}（Epelbaum/Witała chiral N2LO 3NF：1PE-CT \(c_D\)、2PE \(c_1,c_3\)、contact \(c_E\)）；\texttt{gaussian\_stub}（高斯包络的占位 3NF，仅用于 L2/L3 自检）。
+  \item[影响模块] \texttt{tnf\_factory}（\texttt{ch15\_tnf\_factory.cpp}）；进入 \texttt{solve\_faddeev\_equations} 的 \texttt{three\_nucleon\_force\_model*} 指针；
+        当为 \texttt{none} 时使用 null-object 短路（\texttt{three\_nucleon\_force\_none.h}）。
+  \item[典型症状] 拼写为 \texttt{N2LO} 或 \texttt{chiralN2LO} 会回退到 \texttt{none}，与“没设”无差别——\textbf{务必 grep 启动日志的 \texttt{Three-nucleon force} 行确认}。
+\end{description}
+
+\subsection{\texttt{c\_D} 与 \texttt{c\_E}}
+
+\begin{description}
+  \item[类型] \texttt{double} / \texttt{double}
+  \item[默认值] \texttt{0.0} / \texttt{0.0}
+  \item[物理含义] Chiral N2LO 3NF 的两个低能常数（LECs）：\(\cD\) 乘 1\(\pi\)-exchange–contact 项，\(\cE\) 乘三体接触项。\textbf{符号约定}：本仓库采用
+        Navrátil/Witała 的 \(+\tfrac12\) 接触前因子（提交 \texttt{f4df358}），与 Epelbaum 2002 (E2002) eq.~(2.10) 中的 \(-\tfrac12\) 仅相差整体符号——若读者看到旧文献的 \(c_E\)，请视约定调整。
+  \item[合法范围] 物理上 \(|\cD|,|\cE|\lesssim 5\)，常用拟合为 \(\cD\in[-2,2]\)，\(\cE\in[-1,1]\)。
+  \item[影响模块] \texttt{src/interactions/chiral\_N2LO\_3NF\_*.cpp}；进入 \texttt{W1\_1pe\_contact}（\(\cD\)）与 \texttt{W1\_contact}（\(\cE\)）。
+  \item[依赖] 仅在 \texttt{three\_nucleon\_force=chiral\_N2LO} 时生效；其它模型下被忽略，但仍会被存入 \texttt{run\_params}。
+  \item[典型症状] 大值未配套增大 \texttt{two\_J\_3N\_max} 时，Padé 加速 Neumann 级数发散（参见 \texttt{solve\_faddeev} 内的 \(\nudif\) 单调判据）。
+\end{description}
+
+\subsection{\texttt{c\_1} 与 \texttt{c\_3}（隐式）}
+
+\(c_1, c_3\) 不通过键值读入，而是在 \texttt{chiral\_N2LO\_3NF\_ctor.cpp} 中根据 \texttt{potential\_model} 选择：
+\begin{itemize}
+  \item \texttt{Idaho\_N3LO} 时调用 \texttt{set\_lecs\_idaho()}（\texttt{ch15\_lecs\_idaho.h}）：\(c_1=-0.81,\,c_3=-3.20\,\mathrm{GeV}^{-1}\)；
+  \item \texttt{N2LOopt} 时调用 \texttt{set\_lecs\_n2loopt()}；
+  \item 其它势模型 + \texttt{chiral\_N2LO} 3NF 时使用与 N2LOopt 相同的 LEC 表格。
+\end{itemize}
+单位换算见 \cite{Navratil2007} 与提交 \texttt{ddbb389}（\texttt{fix c\_i unit conversion}）。
+
+\subsection{\texttt{Lambda\_3NF}}
+
+\begin{description}
+  \item[类型] \texttt{double}（\si{MeV}）
+  \item[默认值] \texttt{500.0}
+  \item[物理含义] Chiral N2LO 3NF 的高斯调制截断；regulator 形式为 \(\exp\!\big[-(\,p^2+q^2\,)^{2}/\Lambda_{3\mathrm{NF}}^4\big]\)，对应 E2002 eq.~(3.19) 的 squared-Gaussian 形式（提交 \texttt{5cf16ab}）。
+  \item[合法范围] 物理上 \(\in[400,650]\,\mathrm{MeV}\)；外推到 \(<300\) 或 \(>800\) 时与势的 \(\Lambda_{2N}\) 显著失配。
+  \item[影响模块] \texttt{build\_pw\_statespace}（3NF 工具链）、\texttt{kernel\_*} 系列。
+\end{description}
+
+\subsection{\texttt{w1\_scale}}
+
+\begin{description}
+  \item[类型] \texttt{double}
+  \item[默认值] \texttt{1.0}
+  \item[物理含义] \textbf{诊断旋钮}：在把 \(W^{(1)}\) 加入 Faddeev 核之前整体乘上的标量。\(w_1=0\) 完全关闭 3NF（与 \texttt{three\_nucleon\_force=none} 等价但保留管线开销）；\(w_1=1.0\) 为物理强度。
+  \item[影响模块] \texttt{tnf\_kernel\_context.w1\_scale}（\texttt{src/core/faddeev\_solver/solve\_faddeev.h}）。
+  \item[使用场景] 用来定位 “使 Padé 收敛同时保持 LEC 相对结构” 的归一化区间；调研 3NF 灵敏度时配合 \texttt{w1\_scale=0/0.3/1.0} 三档扫描（见 \texttt{input\_miller\_gate1\_np20\_3nf\_scale*.txt}）。
+\end{description}
+
+\section{求解器与求解控制}
+\label{sec:appE_solver_ctrl}
+
+\subsection{\texttt{calculate\_and\_store\_P123}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{true}
+  \item[物理含义] 是否计算 \(P_{123}\) 矩阵并把稀疏 CSC 表示写入 \texttt{P123\_folder}（HDF5 \texttt{P123\_sparse\_*.h5}）。
+  \item[影响模块] \texttt{make\_permutation\_matrix.cpp}；与 \texttt{P123\_recovery} 互斥（恢复模式下不重复计算）。
+  \item[推荐值] 首次跑新网格/新通道时必须 \texttt{true}；后续复用应改为 \texttt{false} 并设好 \texttt{P123\_folder}。
+\end{description}
+
+\subsection{\texttt{P123\_recovery}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{false}
+  \item[物理含义] 从已存在的 TFC 子文件（thread-file-chunk）拼接 \(P_{123}\)，常用于多节点分布式生成 + 单节点合并的工作流。
+  \item[影响模块] \texttt{merge\_thread\_files\_current}（\texttt{ch09\_merge\_thread\_files\_current.cpp}）。
+  \item[兼容性] 与 \texttt{calculate\_and\_store\_P123=true} 同时为 \texttt{true} 时按 recovery 优先（详见 \texttt{read\_and\_set\_parameter}）。
+\end{description}
+
+\subsection{\texttt{include\_breakup\_channels}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{false}
+  \item[物理含义] 是否计算并保存三体 breakup（\(p+n+p\) 出射）振幅。代价显著：U-matrix 行数从 \(\Nalpha\cdot N_d\) 扩展到包含所有 on-shell 三体构型。
+  \item[影响模块] \texttt{store\_breakup\_amplitudes}；输出 \texttt{U\_BU\_PW\_*.txt}。
+  \item[当前状态] 已经接入但极少回归测试（提交 \texttt{50ce1ae}：“Results untested”）。
+\end{description}
+
+\subsection{\texttt{solve\_faddeev}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{true}
+  \item[物理含义] 是否真正运行 Faddeev/AGS 求解；为 \texttt{false} 时只生成 P123（与 \texttt{calculate\_and\_store\_P123=true} 配套用作离线 P123 仓库）。
+  \item[兼容性] \texttt{solve\_faddeev=false \&\& calculate\_and\_store\_P123=false} 时程序无事可做（不会 raise，但输出空目录）。
+\end{description}
+
+\subsection{\texttt{solve\_dense}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{false}
+  \item[物理含义] 用密集 LAPACK \texttt{zgesv} 直接求解 \((1-K)U=K_0\)，而非 Padé 加速 Neumann。极慢、内存吃紧（\(\sim\Nalpha^2 N_p^2 N_q^2\) 复双精度），但对调试重要——它会落盘 \(K\)、\(U\) 全矩阵。
+  \item[推荐值] 仅用于排查 Padé 不收敛（提交 \texttt{4d120d5} 所述场景）。
+\end{description}
+
+\subsection{\texttt{production\_run}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{true}
+  \item[物理含义] 调试开关：\texttt{false} 时 \(P_{123}\) 元素被替换为低成本占位值（保持稀疏布局），用以快速跑通求解器接口。\textbf{关掉后任何物理结果都不可信}。
+\end{description}
+
+\section{并行与运行时}
+\label{sec:appE_runtime}
+
+\subsection{\texttt{parallel\_run}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{false}
+  \item[物理含义] 启用“通道并行”模式：每个进程只处理单一 3N 通道索引（多机部署时配合 SLURM array job）。
+  \item[必填依赖] 必须配 \texttt{channel\_idx>=0}；否则 \texttt{set\_run\_parameters} 直接 \texttt{raise\_error}。
+\end{description}
+
+\subsection{\texttt{channel\_idx}}
+
+\begin{description}
+  \item[类型] \texttt{int}
+  \item[默认值] \texttt{-1}
+  \item[物理含义] \(0\)-基的 3N 通道索引；\texttt{parallel\_run=true} 时指定本进程负责的通道；其他情形可置 \texttt{-1}。
+\end{description}
+
+\subsection{\texttt{P123\_omp\_num\_threads}}
+
+\begin{description}
+  \item[类型] \texttt{int}
+  \item[默认值] \texttt{omp\_get\_max\_threads()}
+  \item[物理含义] 计算 \(P_{123}\) 时 OpenMP 线程数；启动时若 \(>\texttt{Nq\_WP}\) 会自动截断。
+  \item[依赖] 与 \texttt{OMP\_NUM\_THREADS} 环境变量平行存在；显式键值优先。
+\end{description}
+
+\section{参数扫描（parameter walk）}
+\label{sec:appE_param_walk}
+
+这一族字段是\textbf{两体势 LEC 拟合}场景使用的批处理接口；普通验证流程用不到。
+
+\subsection{\texttt{parameter\_walk}}
+
+\begin{description}
+  \item[类型] \texttt{bool}
+  \item[默认值] \texttt{false}
+  \item[物理含义] 启用势参数扫描——读 \texttt{parameter\_file}，每行一个参数集（空格分隔），逐行重新构建势矩阵并求 U-matrix。
+\end{description}
+
+\subsection{\texttt{parameter\_file}}
+
+\begin{description}
+  \item[类型] \texttt{string}
+  \item[默认值] \texttt{none}
+  \item[物理含义] 上述参数集来源；行数必须\textbf{大于等于} \texttt{PSI\_end}。
+\end{description}
+
+\subsection{\texttt{PSI\_start} / \texttt{PSI\_end}}
+
+\begin{description}
+  \item[类型] \texttt{int} / \texttt{int}
+  \item[默认值] \texttt{-1} / \texttt{-1}
+  \item[物理含义] 0-基索引区间 \([\texttt{PSI\_start},\texttt{PSI\_end})\)（\textbf{半开区间}：\(\texttt{PSI\_end}=10\) 表示行号 \(0\)–\(9\)）。
+  \item[依赖] 仅在 \texttt{parameter\_walk=true} 时使用；二者同时 \(\ge 0\) 且 \texttt{PSI\_end>PSI\_start}。
+\end{description}
+
+\section{IO 路径与能量列表}
+\label{sec:appE_io}
+
+\subsection{\texttt{energy\_input\_file}}
+
+\begin{description}
+  \item[类型] \texttt{string}
+  \item[默认值] \texttt{lab\_energies.txt}
+  \item[物理含义] 待求解的 \(\Tlab\)（\si{MeV}）列表；每行一个浮点数。\texttt{find\_on\_shell\_bins} 会把每个请求映射到 \texttt{Nq\_WP-1} 个 q-bin 中点之一。
+  \item[路径解析] 相对路径以\textbf{当前工作目录}为基（不是可执行文件目录），因此推荐使用根目录相对路径如 \texttt{CPP/Input/lab\_energies.txt}。
+  \item[典型症状] 提交 \texttt{c6cf760}（\texttt{fix energy input}）所修：早期版本要求传不带后缀，新版直接传完整路径。
+\end{description}
+
+\subsection{\texttt{output\_folder}}
+
+\begin{description}
+  \item[类型] \texttt{string}
+  \item[默认值] \texttt{Output}
+  \item[物理含义] U-matrix 与诊断文本的输出目录。生成的文件包括 \texttt{U\_PW\_elements\_*\_TLAB=*.txt}、\texttt{solver\_validation\_tlab\_*.json}、可选的 \texttt{phase\_shifts\_*.txt} 等。
+  \item[路径行为] 不存在时不会自动创建；下游 \texttt{store\_run\_parameters} 会显式 \texttt{mkdir -p}（\texttt{disk\_io\_routines.cpp}）。
+\end{description}
+
+\subsection{\texttt{P123\_folder}}
+
+\begin{description}
+  \item[类型] \texttt{string}
+  \item[默认值] \texttt{Output}
+  \item[物理含义] \(P_{123}\) 的读写目录；典型场景下与 \texttt{output\_folder} 不同（避免大型 HDF5 与文本输出混在一处）。
+  \item[依赖] 与 \texttt{P123\_recovery}/\texttt{calculate\_and\_store\_P123} 共同工作；网格变更（任何一个 \texttt{*WP*} / \texttt{J\_*\_max} 变化）必须更换或清空目录，否则会读到不兼容的旧矩阵。
+\end{description}
+
+\subsection{\texttt{subfolder}（历史字段）}
+
+\begin{description}
+  \item[类型] \texttt{string}
+  \item[默认值] \texttt{Output}
+  \item[当前状态] \textbf{已废弃}。\texttt{read\_and\_set\_parameter} 仍接受该键以避免老配置报错，但主流程不再使用。建议从模板中删除以减少误导。
+\end{description}
+
+\section{命令行专属选项}
+\label{sec:appE_cli_only}
+
+下列选项不是 \texttt{run\_params} 字段，而是 CLI 专用的指令：
+
+\begin{description}
+  \item[\texttt{-h} / \texttt{--help}] 打印 \texttt{show\_usage()} 中的全部说明并立即退出（如果只有这一个参数）；与其他参数同时使用时只打印帮助、继续运行。
+  \item[\texttt{<file>.txt}] 任何以 \texttt{.txt} 结尾的位置参数都被视为输入文件并立即解析；\textbf{警告}：这意味着 \texttt{energy\_input\_file=foo.txt} 中的 \texttt{foo.txt} 不会被当作输入文件二次扫描，而是作为字符串保存——但若你直接把 \texttt{foo.txt} 当位置参数（不带 \texttt{=}），就会被作为 \texttt{key=value} 文件解析，可能导致非常隐蔽的错误。
+\end{description}
+
+\section{完整字段一览（速查表）}
+\label{sec:appE_quick_ref}
+
+\begin{longtable}{lll@{\hskip 1em}p{4.7cm}}
+\caption{Tic-tac \texttt{run\_params} 字段速查表}
+\label{tab:appE_quickref}\\
+\toprule
+键名 & 类型 & 默认值 & 简述 \\
+\midrule
+\endfirsthead
+\toprule
+键名 & 类型 & 默认值 & 简述 \\
+\midrule
+\endhead
+\texttt{two\_J\_3N\_max}             & int    & 1            & 3N 总角动量截断，正奇数 \\
+\texttt{J\_2N\_max}                 & int    & 3            & 2N 总角动量截断 \\
+\texttt{Np\_WP}                    & int    & 50           & \(p\)-WP bin 数 \\
+\texttt{Nq\_WP}                    & int    & 50           & \(q\)-WP bin 数；同时控制能量分辨率 \\
+\texttt{Np\_per\_WP}                & int    & 8            & 每 \(p\)-bin GL 节点 \\
+\texttt{Nq\_per\_WP}                & int    & 8            & 每 \(q\)-bin GL 节点 \\
+\texttt{Nphi}                     & int    & 48           & P123 中 \(\phi\) 求积点 \\
+\texttt{Nx}                       & int    & 48           & 几何函数 \(x\) 求积点 \\
+\texttt{chebyshev\_s}              & double & 100          & Chebyshev 网格尺度 \si{MeV} \\
+\texttt{chebyshev\_t}              & double & 1            & Chebyshev 稀疏指数 \\
+\texttt{p\_grid\_type}              & string & chebyshev    & \texttt{chebyshev}/\texttt{custom} \\
+\texttt{q\_grid\_type}              & string & chebyshev    & 同上 \\
+\texttt{p\_grid\_filename}          & string & ""           & 自定义网格路径 \\
+\texttt{q\_grid\_filename}          & string & ""           & 自定义网格路径 \\
+\texttt{midpoint\_approx}          & bool   & false        & 用 bin 中点替代 GL 求积 \\
+\texttt{potential\_model}          & string & LO\_internal & 见 \cref{sec:appE_models} \\
+\texttt{tensor\_force}             & bool   & true         & 张量耦合开关 \\
+\texttt{isospin\_breaking\_1S0}     & bool   & true         & \(\spectro{1}{S}{0}\) 电荷依赖 \\
+\texttt{three\_nucleon\_force}      & string & none         & 3NF 模型族 \\
+\texttt{c\_D}                      & double & 0.0          & 1\(\pi\)-CT LEC \\
+\texttt{c\_E}                      & double & 0.0          & 3N-contact LEC（Witała 约定 \(+\tfrac12\)） \\
+\texttt{Lambda\_3NF}               & double & 500.0        & 3NF 高斯截断 \si{MeV} \\
+\texttt{w1\_scale}                 & double & 1.0          & \(W^{(1)}\) 诊断标度 \\
+\texttt{calculate\_and\_store\_P123} & bool   & true         & 计算并保存 P123 \\
+\texttt{P123\_recovery}            & bool   & false        & 从 TFC 子文件恢复 P123 \\
+\texttt{include\_breakup\_channels} & bool   & false        & 计算 breakup U \\
+\texttt{solve\_faddeev}            & bool   & true         & 求解 Faddeev \\
+\texttt{solve\_dense}              & bool   & false        & 用 LAPACK 密集求解（调试） \\
+\texttt{production\_run}           & bool   & true         & 关闭后用占位 P123 \\
+\texttt{parallel\_run}             & bool   & false        & 通道并行 \\
+\texttt{channel\_idx}              & int    & -1           & 通道索引 \\
+\texttt{P123\_omp\_num\_threads}     & int    & \texttt{omp\_get\_max\_threads()} & P123 线程数 \\
+\texttt{parameter\_walk}           & bool   & false        & 参数扫描 \\
+\texttt{parameter\_file}           & string & none         & 参数集文件 \\
+\texttt{PSI\_start}                & int    & -1           & 扫描起始（含） \\
+\texttt{PSI\_end}                  & int    & -1           & 扫描终止（不含） \\
+\texttt{energy\_input\_file}        & string & lab\_energies.txt & 待求解 \(\Tlab\) 列表 \\
+\texttt{output\_folder}            & string & Output       & U-matrix 输出目录 \\
+\texttt{P123\_folder}              & string & Output       & P123 读写目录 \\
+\texttt{subfolder}                & string & Output       & 已弃用 \\
+\bottomrule
+\end{longtable}
+
+\section{典型 input.txt 模板}
+\label{sec:appE_templates}
+
+下列模板均可直接复制为 \texttt{CPP/Input/<name>.txt}，并通过 \texttt{./CPP/run CPP/Input/<name>.txt} 运行。模板分四档：冒烟、调参、收敛、3NF。
+
+\subsection{T-1：最小冒烟（\(<5\) 分钟）}
+\label{subsec:appE_T1}
+
+适用场景：构建链路通畅性检查、新机器首次跑通、二分定位致命 bug。
+
+\begin{lstlisting}[style=config,caption={\texttt{input\_smoke.txt}：最小冒烟档},label={lst:appE_smoke}]
+two_J_3N_max=1
+J_2N_max=1
+Np_WP=8
+Nq_WP=8
+Np_per_WP=2
+Nq_per_WP=2
+Nphi=8
+Nx=8
+
+chebyshev_s=150
+chebyshev_t=1
+p_grid_type=chebyshev
+q_grid_type=chebyshev
+
+P123_omp_num_threads=1
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=LO_internal
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=none
+
+energy_input_file=CPP/Input/tlab_190MeV.txt
+output_folder=CPP/Output/smoke
+P123_folder=CPP/Output/smoke/p123
+\end{lstlisting}
+
+\subsection{T-2：日常调参（\(\sim 30\) 分钟）}
+\label{subsec:appE_T2}
+
+适用场景：拟合曲线/扫参；介于冒烟与全收敛之间。
+
+\begin{lstlisting}[style=config,caption={\texttt{input\_dev.txt}：日常调参档},label={lst:appE_dev}]
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=30
+Nq_WP=30
+Np_per_WP=6
+Nq_per_WP=6
+Nphi=36
+Nx=36
+
+chebyshev_s=200
+chebyshev_t=1
+p_grid_type=chebyshev
+q_grid_type=chebyshev
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=Idaho_N3LO
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=none
+
+energy_input_file=CPP/Input/tlab_190MeV.txt
+output_folder=CPP/Output/dev
+P123_folder=CPP/Output/dev/p123
+\end{lstlisting}
+
+\subsection{T-3：190 MeV 基准收敛（\(\sim\) 数小时）}
+\label{subsec:appE_T3}
+
+适用场景：复现本书第 \(\sim 13\) 章的 \(\Tlab=190\,\mathrm{MeV}\) \(d+p\) 极化基准。
+
+\begin{lstlisting}[style=config,caption={\texttt{input\_dpolp\_190MeV.txt}：收敛基准档},label={lst:appE_dpolp_190}]
+two_J_3N_max=3
+J_2N_max=3
+Np_WP=50
+Nq_WP=50
+Np_per_WP=8
+Nq_per_WP=8
+Nphi=48
+Nx=48
+
+chebyshev_s=200
+chebyshev_t=1
+p_grid_type=chebyshev
+q_grid_type=chebyshev
+
+P123_omp_num_threads=8
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=Idaho_N3LO
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=none
+
+energy_input_file=CPP/Input/tlab_190MeV.txt
+output_folder=CPP/Output/dpolp_190MeV
+P123_folder=CPP/Output/dpolp_190MeV/p123
+\end{lstlisting}
+
+\textbf{注意}：第二次以后跑相同网格时，把 \texttt{calculate\_and\_store\_P123=false}，并保持 \texttt{P123\_folder} 不变即可复用 \(P_{123}\)。
+
+\subsection{T-4：3NF 灵敏度扫描（与 Miller Gate 1 对齐）}
+\label{subsec:appE_T4}
+
+适用场景：在 \texttt{nijmegen} 2NF 之上引入 chiral N2LO 3NF，扫描 \(c_D,c_E\)。
+
+\begin{lstlisting}[style=config,caption={\texttt{input\_miller\_gate1\_np50\_3nf.txt}（仓库实际模板）},label={lst:appE_miller_gate1_3nf}]
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=50
+Nq_WP=50
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=false
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=nijmegen
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=chiral_N2LO
+c_D=-0.20
+c_E=-0.205
+Lambda_3NF=500.0
+w1_scale=1.0
+
+energy_input_file=CPP/Input/lab_energies_miller_gate1.txt
+output_folder=CPP/Output/miller_gate1_np50_3nf
+P123_folder=CPP/Output/miller_gate1_np50
+\end{lstlisting}
+
+\textbf{要点}：
+\begin{itemize}
+  \item \texttt{P123\_folder} 与 2NF-only 基线（\texttt{input\_miller\_gate1\_np50.txt}）共用——网格相同 \(\Rightarrow\) \(P_{123}\) 完全可复用，节省一整轮计算；
+  \item \texttt{three\_nucleon\_force=chiral\_N2LO} 时 \(c_1,c_3\) 由 \texttt{potential\_model} 隐式决定（此处 \texttt{nijmegen} 走 \texttt{N2LOopt} 默认值）；
+  \item \(c_E=-0.205\) 是 Witała/Navrátil \(+\tfrac12\) 约定，与 E2002 的 \(-\tfrac12\) 约定符号相反。
+\end{itemize}
+
+\section{脚手架内部派生量（非输入）}
+\label{sec:appE_derived}
+
+最后列出几个常常被混入输入语境但其实是\textbf{内部计算}产出的量，避免误把它们当作可调旋钮：
+\begin{itemize}
+  \item \(p_{\max}\) / \(q_{\max}\)：分别由 \texttt{chebyshev\_s}/\texttt{chebyshev\_t}（或 \texttt{*\_grid\_filename}）派生；不是独立输入；
+  \item Padé 收敛阈值 \(\eps\)：硬编码于 \texttt{solve\_faddeev\_equations}（\texttt{ch11\_pade\_convergence.cpp}），当前为 \(10^{-9}\)；
+  \item Neumann 最大迭代数 \(K_{\max}\)：硬编码 \(K_{\max}=80\)，超过后切换 dense LAPACK 兜底（仅当 \texttt{solve\_dense=true}）；
+  \item \(E_d\)（氘核束缚能）：由 SWP 对角化得到，写入 \texttt{swp\_states.E\_bound}；这是\textbf{运行时量}而非输入；
+  \item \texttt{num\_2N\_unco\_states}/\texttt{num\_2N\_coup\_states}：派生于 \texttt{J\_2N\_max}/\texttt{tensor\_force}/\texttt{isospin\_breaking\_1S0}；
+  \item \texttt{q\_com\_idx\_array}：根据 \texttt{energy\_input\_file} 与 \(q\)-bin 边界派生（\texttt{run\_organizer.cpp}）；
+  \item \texttt{ε}（浮点拓扑容差）：硬编码在多个 \texttt{fabs(...) < 1e-12} 比较里，目前不可调。
+\end{itemize}
+
+\section{反向自洽检查清单}
+\label{sec:appE_self_check}
+
+跑生产任务前建议把启动日志（\texttt{create\_input\_printout\_string} 输出）与本附录交叉核对：
+\begin{enumerate}
+  \item \texttt{two\_J\_3N\_max} 是奇数；
+  \item \texttt{Np\_WP}/\texttt{Nq\_WP} 与目标 \texttt{P123\_folder} 内的 HDF5 文件维度一致（\texttt{h5dump -H P123\_sparse\_*.h5} 检查）；
+  \item \texttt{potential\_model} 与启动日志的 \texttt{Potential model:} 行完全相符（无 fallback NOTE）；
+  \item \texttt{three\_nucleon\_force} 拼写正确；如为 \texttt{chiral\_N2LO}，确认 \texttt{c\_D}/\texttt{c\_E}/\texttt{Lambda\_3NF}/\texttt{w1\_scale} 出现在日志中；
+  \item \texttt{energy\_input\_file} 路径相对仓库根可达；
+  \item \texttt{output\_folder} 不要与历史输出共用（避免被覆盖）；
+  \item Padé 阶差 \(\nudif\) 在 \(\le 10^{-6}\) 收敛——若不收敛，先尝试增大 \texttt{Nphi}/\texttt{Nx}，再考虑切换 \texttt{solve\_dense=true} 调试。
+\end{enumerate}
+
+\section{交叉引用索引}
+\label{sec:appE_xref}
+
+把每个高频参数指向正文的主要讨论位置：
+\begin{itemize}
+  \item \texttt{two\_J\_3N\_max}, \texttt{J\_2N\_max} —— Ch.~3、Ch.~7；
+  \item \texttt{Np\_WP}, \texttt{Nq\_WP}, \texttt{chebyshev\_*} —— Ch.~5；
+  \item \texttt{Np\_per\_WP}, \texttt{Nq\_per\_WP}, \texttt{midpoint\_approx} —— Ch.~8；
+  \item \texttt{Nphi}, \texttt{Nx}, \texttt{P123\_omp\_num\_threads}, \texttt{P123\_recovery} —— Ch.~9；
+  \item \texttt{tensor\_force}, \texttt{isospin\_breaking\_1S0}, \texttt{potential\_model} —— Ch.~2 / Ch.~8；
+  \item \texttt{solve\_faddeev}, \texttt{solve\_dense}, Padé 阶差 —— Ch.~11；
+  \item \texttt{include\_breakup\_channels}, \texttt{energy\_input\_file} —— Ch.~12 / Ch.~14；
+  \item \texttt{three\_nucleon\_force}, \texttt{c\_D}, \texttt{c\_E}, \texttt{Lambda\_3NF}, \texttt{w1\_scale} —— Ch.~15 / Ch.~16 / Ch.~17。
+\end{itemize}

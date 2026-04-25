@@ -1,13 +1,1159 @@
 % =====================================================================
 % 19_refactor_evolution.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% Wave 6 — Tic-tac 重构与新增功能
 % =====================================================================
 
 \chapter{Tic-tac 重构与新增功能}
 \label{ch:19_refactor_evolution}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% ---------------------------------------------------------------------
+\section{重构目标与双轨共存策略}
+\label{sec:19:goals}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+第~\ref{ch:18_origin_codebase} 章已经完整剖析了 Sean B.\,S.\,Miller 留下的
+\texttt{tictac-origin} 基线代码：一棵以 \texttt{CPP/} 为根、内部潜伏着大量
+Intel MKL 紧耦合、用 \texttt{find -regex} 抓所有 \texttt{*.cpp} 直接编译的
+单 Makefile 项目。这套代码在原作者本人手里能跑出 PRC~106, 024001 (2022)
+的全部基准（参见
+\href{https://journals.aps.org/prc/abstract/10.1103/PhysRevC.106.024001}{Miller 2022}），
+但落到一个新使用者（笔者，下称 \emph{tianbaiting}）肩上时，立刻暴露了三类
+痛点：
+
+\begin{enumerate}
+\item \textbf{平台耦合}。\texttt{mkl.h} / \texttt{MKL\_INT64} 渗透到核心
+      头文件 (\texttt{auxiliary.h}, \texttt{disk\_io\_routines.h},
+      \texttt{make\_permutation\_matrix.h}, \texttt{solve\_faddeev.h})。
+      在没有 Intel oneAPI license 的笔记本或集群上，连第一次 \texttt{make}
+      都过不去。
+\item \textbf{扩展困难}。新功能（三核子力 3NF、多能量 sweep、Miller Gate~1
+      相移提取、与实验数据对照管道）要插哪儿？所有 \texttt{*.cpp} 都堆在
+      \texttt{CPP/} 根目录下，新加一个 \texttt{three\_nucleon\_force\_*.cpp}
+      会立刻把目录搞成下水道。
+\item \textbf{零测试}。原仓库整棵 \texttt{tests/} 树为空（仅有
+      \texttt{Test/Cont\_Faddeev/} 和 \texttt{Test/Free\_energy/} 两个手写
+      benchmark 实验台）；任何代码修改都只能靠肉眼比对 \texttt{Output/}
+      数字。
+\end{enumerate}
+
+\paragraph{重构目标。}
+针对上述三点，本次重构（commit \texttt{23c0e0f} \emph{add cmake and reconstruct
+the structure}，2025 年初）确立了四条并列目标：
+
+\begin{description}
+\item[（G1）平台无关。] 移除 MKL 强依赖，把所有
+      \texttt{MKL\_INT64} 替换为 \texttt{long long}；MKL 头文件全部注释掉
+      （\texttt{//\#include "mkl.h"}）；改用 BLAS/LAPACK + LAPACKE 标准接口；
+      HDF5 用 conda 工具链自动发现。
+\item[（G2）三层物理化分目录。] 把 \texttt{CPP/} 平铺的
+      \texttt{make\_*.cpp / solve\_*.cpp} 按功能搬入 \texttt{src/core/}
+      \texttt{src/config/}, \texttt{src/io/}, \texttt{src/interactions/},
+      \texttt{src/utils/} 五大物理子树（详见 §\ref{sec:19:layout}）。
+\item[（G3）现代构建。] 在仓库根加一个 CMake 入口
+      （\texttt{CMakeLists.txt} + \texttt{build.sh}），同时保留
+      \texttt{CPP/makefile} 作为\emph{兼容包装器}，保证原作者熟悉的
+      \texttt{cd CPP \&\& make} 工作流不破坏（详见 §\ref{sec:19:build}）。
+\item[（G4）自动化测试与对照管道。] 新增
+      \texttt{tests/test\_190mev\_data\_pipeline.py} Python 回归测试 +
+      \texttt{tests/cpp/} GoogleTest C++ 测试 +
+      \texttt{tools/check\_3nf\_normalization/} 离线核校工具，并把
+      \texttt{data/DataOfCrosssectionAndPol/} 实验参考数据纳入版本管理
+      （详见 §\ref{sec:19:tests} 和 §\ref{sec:19:features}）。
+\end{description}
+
+\paragraph{双轨共存（dual-track coexistence）策略。}
+重构最容易被低估的成本是\emph{回归}：原作者已经在 \texttt{CPP/run} 上验证
+过一系列 benchmark（triton 束缚态、$nd$ doublet/quartet 散射长度、Miller
+2022 表~II 的 nd phase shifts），任何擅自删除 \texttt{CPP/} 都意味着切断
+对照。因此本仓库\emph{不删除} \texttt{CPP/} 子树，反而采取以下双轨策略：
+
+\begin{itemize}
+\item \texttt{CPP/} 保留为\textbf{生产路径}（production path）——
+      \texttt{CPP/run} 是 Python 工作流（\texttt{examples/}）实际调用的二进制；
+      \texttt{CPP/makefile} 现已变成 23 行的薄包装器，把活全部委托给仓库根
+      的 \texttt{Makefile}（见 §\ref{sec:19:build} 与 \cref{lst:ch19:cpp_makefile_wrapper}）。
+\item \texttt{src/} 是\textbf{现代化路径}（modernized path）——
+      \texttt{CMakeLists.txt}/\texttt{Makefile} 都从 \texttt{src/}
+      抓源；CMake 输出 \texttt{build/bin/tic-tac}，Makefile 默认输出
+      \texttt{tic-tac}（仓库根的同名二进制）。
+\item \textbf{源码同源（single source of truth）}。
+      \texttt{CPP/auxiliary.cpp / disk\_io\_routines.cpp / solve\_faddeev.cpp}
+      等保留下来的 \texttt{CPP/} 文件，与 \texttt{src/} 中的同名文件
+      \emph{已经分叉}（current 仓库的 \texttt{CPP/solve\_faddeev.cpp} 是
+      1912 行，\texttt{src/core/faddeev\_solver/solve\_faddeev.cpp} 是 2366 行
+      —— 后者增加了 3NF 分支与更详细的中英文双语注释）。
+      为防止两份源漂移过深，仓库提供了
+      \texttt{sync\_sources.py}（笔者维护）半自动同步工具，详见
+      §\ref{sec:19:legacy}。
+\end{itemize}
+
+这套策略带来的实际收益是：原作者随时可以 \texttt{git diff master..tianbaiting/master}
+读懂笔者改了什么，而笔者不必为支持 \texttt{CPP/run} 把整套现代结构推倒重来。
+代价是源码冗余 ${\sim}10\,\text{kLOC}$、构建路径暂时一对二（CMake $+$
+Makefile），这两条都列在 §\ref{sec:19:legacy} 的待办里。
+
+\begin{remark}[为何不直接 \texttt{git submodule} 式拆分]
+读者可能会问：既然两条路径源码相同，为何不让 \texttt{CPP/} 仅放一个软链
+指向 \texttt{src/}？答案是：\texttt{CPP/auxiliary.h} 等\textbf{头文件路径
+不同}（origin 头文件用 \texttt{\#include "matrix\_routines.h"} 平铺
+include，src 版用 \texttt{\#include "utils/matrix\_routines.h"} 子目录式
+include）；硬同步会破坏 \texttt{CPP/} 的本地相对路径。重构期内笔者采取
+\emph{\texttt{src/} 是真源、\texttt{CPP/} 偶尔手动同步关键 bugfix}
+的妥协方案，待 §\ref{sec:19:legacy} 完成最后一步迁移后才能删除 \texttt{CPP/}。
+\end{remark}
+
+\paragraph{本章导览。}
+%
+§\ref{sec:19:layout} 给出 \texttt{src/} 三层架构图与依赖关系；
+§\ref{sec:19:build} 比较 CMake 与 Makefile 两条构建路径；
+§\ref{sec:19:diff} 列出 15+ 行的文件级 diff 对照表；
+§\ref{sec:19:features} 用一张特性矩阵汇总所有新增模块；
+§\ref{sec:19:timeline} 按时间逆序整理 20+ 个关键 commit；
+§\ref{sec:19:tests} 讲测试与回归 CI；
+§\ref{sec:19:legacy} 列出未完成的清理工作。
+
+% ---------------------------------------------------------------------
+\section{src/ 三层架构与依赖图}
+\label{sec:19:layout}
+
+\subsection{物理子树划分}
+
+\texttt{src/} 树按\emph{物理职责}（不是\emph{文件类型}）切分为五个一级
+目录，每个目录的命名遵循"读名字就知道在干啥"的原则：
+
+\begin{description}
+\item[\texttt{src/core/}] —— Faddeev/AGS 求解器核心机器。
+   包含四个子目录：
+   \begin{itemize}
+   \item \texttt{faddeev\_solver/}（\texttt{solve\_faddeev.cpp/h}）
+         —— Padé 加速的 Neumann 级数求解器，是整个程序最热的代码路径。
+         相对 origin 增加了 3NF 分支（\texttt{tnf\_kernel\_context} 结构
+         体 + Born 级 $W^{(1)}\cdot(1+P)\cdot C$ 加项）。
+   \item \texttt{state\_space/}
+         （\texttt{make\_pw\_symm\_states / make\_wp\_states /
+         make\_swp\_states / make\_permutation\_matrix}）
+         —— 部分波三体态、wave-packet (WP) / smooth WP (SWP) 基与
+         置换算符 $P_{123}$ 的构造。
+   \item \texttt{potential/}（\texttt{make\_potential\_matrix}）
+         —— 在 WP 基中把 2NF $V$ 投影成块对角矩阵。
+   \item \texttt{resolvent/}（\texttt{make\_resolvent}）
+         —— 三体 Green 函数 $G_0$ 在 WP 基中的离散表示，
+         做 $R + Q$ 分解（regular + quadrature）。
+   \end{itemize}
+\item[\texttt{src/config/}] —— 输入解析与运行编排。
+   \begin{itemize}
+   \item \texttt{set\_run\_parameters.cpp/h}
+         —— \texttt{key=value} 输入解析；包含 60+ 个开关与 CLI help。
+         相比 origin 新增了 \texttt{three\_nucleon\_force},
+         \texttt{c\_D}, \texttt{c\_E}, \texttt{Lambda\_3NF},
+         \texttt{c1\_3NF}, \texttt{c3\_3NF} 等参数（见
+         §\ref{sec:19:features}）。
+   \item \texttt{run\_organizer.cpp/h}
+         —— 主循环编排：参数 walk、parallel run 切片、on-shell bin
+         查找。\texttt{find\_on\_shell\_bins()} 是一切 \emph{Tlab\_input
+         $\neq$ Tlab\_solver} 现象的根源（详见
+         \texttt{docs/dpol\_p\_190MeV\_validation.md}）。
+   \end{itemize}
+\item[\texttt{src/io/}] —— 文件 I/O。
+   \texttt{disk\_io\_routines.cpp/h} 包含 HDF5（P123 cache）+ 文本
+   （\texttt{U\_PW\_elements\_*.txt}）两种格式。MKL 依赖已被剥离。
+\item[\texttt{src/interactions/}] —— 核子-核子势 + 三核子力。
+   两个子目录：
+   \begin{itemize}
+   \item \texttt{chp/}（Fortran~90）—— Idaho/Salamanca 链中场势的
+         \texttt{chiral-twobody-potentials.f90} + \texttt{chp-set.f90}。
+   \item \texttt{nijmegen/}（Fortran~77）—— Nijmegen/Bonn library
+         \texttt{pnijm.f} + 接口层 \texttt{nijmegen\_interface.f90}。
+   \end{itemize}
+   C++ 包装器（\texttt{chiral\_LO\_internal}, \texttt{chiral\_N2LOopt},
+   \texttt{chiral\_Idaho\_N3LO}, \texttt{nijmegen}, \texttt{malfliet\_tjon},
+   \texttt{OPEP}, \texttt{potential\_model}）位于本目录根。
+   \textbf{全新加入}的是 \texttt{three\_nucleon\_force\_*.cpp/h}
+   家族（\texttt{three\_nucleon\_force\_model.cpp/h},
+   \texttt{three\_nucleon\_force\_none.h},
+   \texttt{three\_nucleon\_force\_gaussian\_stub.h},
+   \texttt{chiral\_3nf\_pw\_kernels.h}）—— 详见第~\ref{ch:15_3nf_physics}
+   至 \ref{ch:17_3nf_numerical} 章。
+\item[\texttt{src/utils/}] —— 通用工具。
+   \texttt{matrix\_routines}, \texttt{gauss\_legendre},
+   \texttt{coupling\_coefficients}（Wigner $3j/6j/9j$，Sympy oracle 测试），
+   \texttt{legendre}, \texttt{kinetic\_conversion}, \texttt{auxiliary},
+   \texttt{error\_management}, \texttt{templates.h}（模板排序工具）。
+   新增 \texttt{spin\_isospin\_algebra} 与
+   \texttt{chiral\_3nf\_recoupling}（3NF 自旋-同位旋重耦合，
+   见第~\ref{ch:16_3nf_pw_projection} 章）。
+\end{description}
+
+公共头文件 \texttt{constants.h}, \texttt{type\_defs.h} 提升到
+\texttt{include/} 顶级目录（origin 把它们埋在 \texttt{CPP/}）。这样
+\texttt{src/} 与 \texttt{tools/check\_3nf\_normalization/} 都能用
+\texttt{-Iinclude} 一个 flag 解决，避免 \texttt{-I../CPP -I../CPP/Interactions}
+满天飞。
+
+\subsection{依赖关系图}
+
+\cref{fig:ch19:dep_graph} 用 TikZ 画出 \texttt{src/} 各模块之间的编译期与
+运行期依赖。底层是 \texttt{utils/} 与 \texttt{include/}（无外部依赖）；
+\texttt{interactions/} 与 \texttt{io/} 在 utils 之上；\texttt{core/} 调用
+interactions/io/utils；\texttt{config/} 在最顶层串起一切；\texttt{main.cpp}
+是 30 行的瘦入口。
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  node distance=6mm and 8mm,
+  every node/.style={align=center},
+  modulebox/.style={draw, rounded corners=2pt, minimum width=24mm,
+                    minimum height=8mm, fill=blue!5},
+  utilbox/.style={draw, rounded corners=2pt, minimum width=24mm,
+                  minimum height=8mm, fill=gray!10},
+  corebox/.style={draw, rounded corners=2pt, minimum width=24mm,
+                  minimum height=8mm, fill=orange!10},
+  topbox/.style={draw, rounded corners=2pt, minimum width=30mm,
+                 minimum height=8mm, fill=green!10, thick},
+  arr/.style={-{Latex[length=2mm]}, thick},
+]
+% Bottom layer: include + utils
+\node[utilbox] (incl) at (0,0) {\texttt{include/}\\\scriptsize constants, type\_defs};
+\node[utilbox, right=of incl] (utils) {\texttt{src/utils/}\\\scriptsize matrix, gauss\_legendre,\\\scriptsize coupling, spin\_isospin};
+
+% Middle layer: interactions + io
+\node[modulebox, above=of incl, yshift=4mm] (inter) {\texttt{src/interactions/}\\\scriptsize chiral, nijmegen, 3NF};
+\node[modulebox, above=of utils, yshift=4mm] (io)    {\texttt{src/io/}\\\scriptsize disk\_io\_routines};
+
+% Core layer
+\node[corebox, above=of inter, yshift=6mm] (state) {\texttt{core/state\_space}\\\scriptsize WP/SWP, P123};
+\node[corebox, above=of io, yshift=6mm]    (potres) {\texttt{core/potential}\\\texttt{core/resolvent}};
+
+% Faddeev solver
+\node[corebox, above right=8mm and -4mm of state] (fad) {\texttt{core/faddeev\_solver}\\\scriptsize solve\_faddeev};
+
+% Config
+\node[topbox, above=of fad, yshift=4mm] (cfg) {\texttt{src/config/}\\\scriptsize set\_run\_parameters,\\\scriptsize run\_organizer};
+
+% main
+\node[topbox, above=of cfg, yshift=2mm, fill=red!15] (main) {\texttt{src/main.cpp}};
+
+% Arrows
+\draw[arr] (utils) -- (inter);
+\draw[arr] (incl)  -- (inter);
+\draw[arr] (utils) -- (io);
+\draw[arr] (incl)  -- (io);
+\draw[arr] (inter) -- (state);
+\draw[arr] (io)    -- (state);
+\draw[arr] (inter) -- (potres);
+\draw[arr] (io)    -- (potres);
+\draw[arr] (state) -- (fad);
+\draw[arr] (potres) -- (fad);
+\draw[arr] (inter) to[out=20, in=200] (fad);
+\draw[arr] (fad)   -- (cfg);
+\draw[arr] (cfg)   -- (main);
+
+% Side hint
+\node[draw=none, right=4mm of fad, text width=38mm,
+      font=\scriptsize] {\textit{tnf\_kernel\_context} 是\\interactions 与
+      faddeev\_solver 之间\\的轻量适配层（前向声明\\\texttt{class three\_nucleon\_force\_model}），\\见 \cref{lst:ch19:tnf_ctx}};
+\end{tikzpicture}
+\caption{\texttt{src/} 模块依赖图。蓝色 = 底层支持，灰色 = 工具/常量，橙色 =
+三体核心机器，绿色 = 运行编排，红色 = 入口。所有箭头均指向\emph{依赖目标}
+（即"$A\to B$ 表示 $A$ 用了 $B$ 的符号"）。}
+\label{fig:ch19:dep_graph}
+\end{figure}
+
+依赖图最值得注意的两点：
+
+\begin{enumerate}
+\item \textbf{interactions $\to$ faddeev\_solver 的双重边}（图中弯
+      箭头）。除了通过 \texttt{state\_space} 间接进入求解器（用于 2NF
+      $V$），3NF 还需要在求解器热路径中直接调用
+      \texttt{three\_nucleon\_force\_model::W1\_element()}。这条直接边
+      由 \texttt{tnf\_kernel\_context} 结构体（\cref{lst:ch19:tnf_ctx}）
+      把 \texttt{const three\_nucleon\_force\_model*} 指针、
+      \texttt{pw\_3N\_statespace*}、$p_{\text{WP}}, q_{\text{WP}}$ 网格和
+      $C^{T}$ 矩阵打包，避免把 \texttt{solve\_faddeev\_equations} 函数签
+      名再加 6 个参数。当 \texttt{tnf->enabled() == false} 时整个 3NF
+      分支被一个 if 判断跳过，零开销 fallback 到纯 2NF 路径。
+\item \textbf{utils 与 include 互相独立}。\texttt{utils/} 不依赖
+      \texttt{include/}（除了 \texttt{type\_defs.h}），这样
+      \texttt{tools/check\_3nf\_normalization/} 这种独立工具只需
+      \texttt{-Isrc/utils -Iinclude} 就能复用 \texttt{coupling\_coefficients}
+      / \texttt{spin\_isospin\_algebra}，不会牵连进
+      \texttt{interactions/chp/*.f90} 这种 Fortran 模块。
+\end{enumerate}
+
+\begin{codelandbox}[title={\texttt{tnf\_kernel\_context} 结构体（src/core/faddeev\_solver/solve\_faddeev.h, 31--38 行）}]
+\label{lst:ch19:tnf_ctx}
+\begin{lstlisting}[style=cpp,numbers=left]
+struct tnf_kernel_context {
+    const three_nucleon_force_model* tnf;
+    const pw_3N_statespace*          pw_states;
+    const double*                    p_WP_array;   // size Np_WP+1
+    const double*                    q_WP_array;   // size Nq_WP+1
+    double**                         CT_RM_array;  // C^T row-major
+    double                           w1_scale;     // diagnostic knob
+};
+\end{lstlisting}
+\end{codelandbox}
+
+\subsection{命名与目录约定（vs. origin）}
+
+下列五条约定在 origin 中并不存在或不一致；重构期间 \emph{tianbaiting} 把
+它们提升为硬规则：
+
+\begin{itemize}
+\item \textbf{文件名 \texttt{snake\_case}，类名 \texttt{CamelCase}}
+      —— origin 混用了\texttt{make\_pw\_symm\_states.cpp} 与
+      \texttt{Coupling\_coefficients.cpp} 等不同风格；现已统一。
+\item \textbf{头文件 include guards 用 \texttt{\#ifndef MODULE\_FILE\_H}}
+      —— 不再使用 \texttt{\#pragma once}（GCC/Clang 兼容，但
+      conda 工具链中观察到偶发缓存问题）。
+\item \textbf{include 路径用相对子目录}
+      —— 例如 \texttt{\#include "core/state\_space/make\_wp\_states.h"}，
+      不用 \texttt{-I src/core/state\_space} 的扁平方式。这一改动牵连
+      到所有 \texttt{src/core/*/*.cpp} 的 include 块，是重构最枯燥的
+      部分。
+\item \textbf{中英双语物理注释 [EN]/[CN] 块}
+      —— 所有涉及物理约定（normalization, 单位转换, sign convention）的
+      注释必须中英文并存。\cref{lst:ch19:bilingual_comment} 是 3NF 分支
+      的典型例子。
+\item \textbf{头文件不允许 \texttt{using namespace std;}}
+      —— origin 在 \texttt{CPP/auxiliary.h} 偷懒写了一行
+      \texttt{using namespace std;}，会污染 100+ 个下游文件。已删除。
+\end{itemize}
+
+\begin{codelandbox}[title={中英双语物理注释示例（src/core/faddeev\_solver/solve\_faddeev.cpp, 245--256 行）}]
+\label{lst:ch19:bilingual_comment}
+\begin{lstlisting}[style=cpp,numbers=left]
+// [EN] WP bin-averaging normalization for the 3NF matrix element W^(1)_WP.
+// V_WP uses p_r * p_c * sqrt(dp_r) * sqrt(dp_c)
+// (one momentum factor + sqrt(bin width) per side).
+// P123_WP uses 1/(sqrt(dp_r)*sqrt(dq_r)*sqrt(dp_c)*sqrt(dq_c)).
+// For W^(1) the WP matrix element is:
+//   W^(1)_WP = p_r*q_r*p_c*q_c * sqrt(dp_r dq_r dp_c dq_c) * W^(1)(mids)
+// / [CN] 3NF 矩阵元 W^(1)_WP 的 WP 基平均归一化。
+// V_WP 使用 p_r * p_c * sqrt(dp_r) * sqrt(dp_c).
+// P123_WP 使用 1/(sqrt(dp_r dq_r dp_c dq_c)) 作为 WP 归一化。
+// 对于作用在完整 (p,q) 空间的 W^(1)，其 WP 矩阵元为：
+//   W^(1)_WP = p_r*q_r*p_c*q_c * sqrt(dp_r dq_r dp_c dq_c) * W^(1)(mids)
+\end{lstlisting}
+\end{codelandbox}
+
+% ---------------------------------------------------------------------
+\section{CMake 与 Makefile：现代化路径 vs. 兼容包装}
+\label{sec:19:build}
+
+\subsection{两条路径的目标差异}
+
+\cref{tab:ch19:build_compare} 一目了然：CMake 路径面向\emph{开发与
+IDE 集成}，Makefile 路径面向\emph{生产与原作者熟悉度}。两条路径同源、
+同二进制行为（运行同一 \texttt{input.txt} 必须输出相同的 \texttt{U\_PW\_elements\_*.txt}）。
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}p{30mm}p{52mm}p{52mm}@{}}
+\toprule
+\textbf{对比项} & \textbf{CMake 路径}（\texttt{build.sh}） & \textbf{Makefile 路径}（\texttt{CPP/makefile}）\\
+\midrule
+入口 & \texttt{./build.sh release} & \texttt{cd CPP \&\& make -j} \\
+内部委托 & 直接调用 \texttt{cmake} + \texttt{make} & 23~行壳，转给仓库根 \texttt{Makefile} \\
+源根 & \texttt{src/} & \texttt{src/} （同源） \\
+目标二进制 & \texttt{build/bin/tic-tac}（再 \texttt{cp ./tic-tac}） & \texttt{CPP/run} \\
+build dir & \texttt{build/} & \texttt{CPP/build/}（CURDIR 控制） \\
+依赖发现 & \texttt{find\_package(GSL/HDF5/OpenMP)} & 手写 \texttt{pkg-config + CONDA\_PREFIX} 探测 \\
+HDF5 工具链 & \texttt{find\_package(HDF5 COMPONENTS CXX HL)} & 优先 \texttt{CONDA\_PREFIX}，回退 \texttt{hdf5\_serial}，回退 \texttt{hdf5} \\
+Fortran 模块顺序 & \texttt{set\_source\_files\_properties} 不显式排序 & 显式 \texttt{\$(CHP\_PRESET\_OBJECT): \$(CHP\_MODULE\_OBJECT)} \\
+测试集成 & \texttt{add\_subdirectory(tests/cpp)} + GoogleTest & 无（生产路径不跑 ctest） \\
+适用场景 & 开发、IDE、CI、新功能 & Python workflow、production sweep \\
+\bottomrule
+\end{tabular}
+\caption{CMake 与 Makefile 两条构建路径的对比。两者从同一份 \texttt{src/}
+源出发，但分别落在 \texttt{tic-tac}（开发用）与 \texttt{CPP/run}（生产用）
+两个二进制。\texttt{examples/} 下的 Python 工作流仍然调用
+\texttt{CPP/run}（参考 \texttt{deuteron\_proton\_Ay.py:run\_solver\_cmd}）。}
+\label{tab:ch19:build_compare}
+\end{table}
+
+\subsection{Conda HDF5 自动检测}
+
+origin 假设系统装的是 Ubuntu/Debian 自带 \texttt{libhdf5-dev}（包名是
+\texttt{hdf5\_serial}）。但本课题在 RIKEN 集群、笔记本、容器三种环境里
+轮换工作，\texttt{micromamba}/\texttt{conda} 安装的 \texttt{hdf5}
+包名又是\emph{裸的}（\texttt{libhdf5.so}，不是
+\texttt{libhdf5\_serial.so}）。commit \texttt{a9a4a1c}
+\emph{build: auto-detect conda HDF5 toolchain in CPP makefile} 引入了三段
+回退链（\cref{lst:ch19:conda_hdf5}）：
+
+\begin{codelandbox}[title={Conda HDF5 自动探测（Makefile, 52--67 行）}]
+\label{lst:ch19:conda_hdf5}
+\begin{lstlisting}[style=config,numbers=left]
+PKG_CONFIG ?= pkg-config
+HDF5_HAVE_SERIAL_PC := $(shell $(PKG_CONFIG) --exists hdf5-serial && echo yes 2>/dev/null)
+CONDA_INCLUDE :=
+CONDA_LDFLAGS :=
+HDF5_LIBS :=
+ifneq ($(strip $(CONDA_PREFIX)),)
+CONDA_INCLUDE := -I$(CONDA_PREFIX)/include
+CONDA_LDFLAGS := -L$(CONDA_PREFIX)/lib -Wl,-rpath,$(CONDA_PREFIX)/lib
+HDF5_LIBS := -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5
+else ifneq ($(strip $(HDF5_HAVE_SERIAL_PC)),)
+HDF5_LIBS := -lhdf5_serial_hl_cpp -lhdf5_serial_cpp -lhdf5_serial_hl -lhdf5_serial
+else
+HDF5_LIBS := -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5
+endif
+\end{lstlisting}
+\end{codelandbox}
+
+CMake 这边问题更小，因为 \texttt{find\_package(HDF5 REQUIRED COMPONENTS CXX HL)}
+本身已经会优先识别 \texttt{CONDA\_PREFIX} 下的 \texttt{HDF5Config.cmake}，
+不需额外配置。但代价是\emph{当 conda 环境损坏时 CMake 报错信息更模糊}
+—— 这一条是已知 paper-cut，待后续整入 \texttt{appendix~F}。
+
+\subsection{Fortran 模块编译顺序：构建陷阱}
+
+由于 \texttt{src/interactions/chp/chp-set.f90} \texttt{use idaho\_chiral\_potential}
+（这个 module 来自 \texttt{chiral-twobody-potentials.f90}），并行构建
+（\texttt{make -j8}）有非零概率在 \texttt{chp-set.f90} 早于
+\texttt{chiral-twobody-potentials.f90} 编译时报：
+
+\begin{quote}\small\ttfamily
+Error: Cannot open module file 'idaho\_chiral\_potential.mod' for reading at (1)
+\end{quote}
+
+origin 没暴露这个问题——因为它单线程构建。重构后并行 \texttt{-j\$(nproc)}
+让该 race condition 暴露。修复办法是在 Makefile 显式声明依赖：
+
+\begin{codelandbox}[title={显式 Fortran 模块依赖（Makefile, 38--40, 90--91 行）}]
+\begin{lstlisting}[style=config,numbers=left]
+CHP_MODULE_OBJECT := $(BUILD_DIR)/$(INTERACTIONS_DIR)/chp/chiral-twobody-potentials.o
+CHP_PRESET_OBJECT := $(BUILD_DIR)/$(INTERACTIONS_DIR)/chp/chp-set.o
+...
+# 显式 Fortran 模块编译顺序
+$(CHP_PRESET_OBJECT): $(CHP_MODULE_OBJECT)
+\end{lstlisting}
+\end{codelandbox}
+
+CMake 路径侥幸避开了该问题，因为 CMake 的 Fortran scanner 会自动建立
+module 依赖图。但这\emph{反而}成为劝阻新人直接走 CMake 的一条理由：
+当 CMake 偶尔失灵时，它的故障表现更诡异（\texttt{*.mod} 文件被写到不同
+\texttt{CMakeFiles/} 子目录），而 Makefile 显式依赖的失败是
+\emph{稳定可复现}的。
+
+\subsection{\texttt{CPP/makefile} 沦为 23 行包装器}
+
+origin 的 \texttt{CPP/makefile} 是一个 75 行的"完整"makefile（手写
+\texttt{CC := g++}、\texttt{find -regex}、独立的链接规则）。重构后剧烈
+瘦身：
+
+\begin{codelandbox}[title={\texttt{CPP/makefile} 兼容包装器（全文 23 行）}]
+\label{lst:ch19:cpp_makefile_wrapper}
+\begin{lstlisting}[style=config,numbers=left]
+ROOT_DIR := ..
+ROOT_MAKEFILE := $(ROOT_DIR)/Makefile
+TARGET := $(CURDIR)/run
+BUILD_DIR := $(CURDIR)/build
+
+.PHONY: all clean cleanall info help
+
+all:
+    $(MAKE) -C $(ROOT_DIR) -f $(notdir $(ROOT_MAKEFILE)) all \
+            TARGET=$(TARGET) BUILD_DIR=$(BUILD_DIR)
+
+clean:
+    $(MAKE) -C $(ROOT_DIR) -f $(notdir $(ROOT_MAKEFILE)) clean \
+            TARGET=$(TARGET) BUILD_DIR=$(BUILD_DIR)
+...
+
+help:
+    @echo "Compatibility wrapper for CPP/run"
+    @echo "This makefile delegates to ../Makefile so CPP/run is compiled from src/include."
+\end{lstlisting}
+\end{codelandbox}
+
+它现在唯一做的事就是把 \texttt{TARGET}/\texttt{BUILD\_DIR} 重定向，然后
+把控制权交给仓库根 \texttt{Makefile}。这样原作者的肌肉记忆 \texttt{cd CPP
+\&\& make} 仍然有效，但实际编译的是 \texttt{src/} 树。
+
+% ---------------------------------------------------------------------
+\section{文件级 diff 对照表}
+\label{sec:19:diff}
+
+下表列出 origin $\to$ current 之间 \emph{所有} 实际发生改动的源文件，
+按主题分组，按重构动机注明。表中"+"表示新增，"$\Delta$"表示原地修改，
+"$\to$"表示改名/搬家。
+
+\begin{longtable}{@{}p{35mm}p{43mm}p{60mm}@{}}
+\caption{Origin $\to$ Current 文件级 diff（主要源文件）}
+\label{tab:ch19:filediff}\\
+\toprule
+\textbf{Origin 路径} & \textbf{Current 路径} & \textbf{关键变更与动机}\\
+\midrule
+\endfirsthead
+\multicolumn{3}{l}{\emph{续表~\thetable}}\\
+\toprule
+\textbf{Origin 路径} & \textbf{Current 路径} & \textbf{关键变更与动机}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+
+% --- 构建系统 ---
+\multicolumn{3}{@{}l}{\emph{1. 构建系统}}\\[2pt]
+
+\texttt{CPP/makefile} (75 行)
+& \texttt{CPP/makefile} (23 行) $\Delta$ \newline + \texttt{Makefile} (165 行) +
+& \textbf{瘦身为兼容包装器}；新加根 \texttt{Makefile} 含 conda 检测、显式 Fortran 依赖、 \texttt{-Iinclude} 标准化。 \\
+
+(无)
+& \texttt{CMakeLists.txt} (148 行) +\newline\texttt{build.sh} (89 行) +
+& \textbf{现代化构建路径}。 \texttt{find\_package(OpenMP/GSL/HDF5)} 替换手写 \texttt{-l} 列表；CTest 集成。Commit \texttt{23c0e0f}。\\
+
+% --- 类型 / 平台 ---
+\multicolumn{3}{@{}l}{\emph{2. 平台无关化（去 MKL）}}\\[2pt]
+
+\texttt{CPP/auxiliary.h} \newline\texttt{CPP/auxiliary.cpp}
+& \texttt{src/utils/auxiliary.\{h,cpp\}}\newline + 同名 stub 在 \texttt{CPP/}\ \ $\Delta$
+& \textbf{所有 \texttt{MKL\_INT64} 替换为 \texttt{long long}}（见
+  \texttt{generate\_Ptilde\_new}）；\texttt{//\#include "mkl.h"} 注释；
+  using namespace std 删除。\\
+
+\texttt{CPP/disk\_io\_routines.h} \newline\texttt{CPP/disk\_io\_routines.cpp}
+& \texttt{src/io/disk\_io\_routines.\{h,cpp\}}\ \ $\Delta$
+& \textbf{MKL 头注释}；HDF5 \texttt{long long} 索引；新增
+  "Tlab/Ecm" 注释明确 \emph{solver 能量} vs.\emph{lab 能量}（来自 90 行 commit
+  \texttt{c6cf760}）。\\
+
+\texttt{CPP/error\_management.h}
+& \texttt{src/utils/error\_management.h}\ \ $\Delta$
+& MKL 头注释；其他无变化。\\
+
+\texttt{CPP/solve\_faddeev.\{h,cpp\}}\newline (2229 行)
+& \texttt{src/core/faddeev\_solver/solve\_faddeev.\{h,cpp\}} (2366 行) $\Delta$
+& \textbf{核心扩展}：去 MKL、\texttt{tnf\_kernel\_context} 结构体、3NF
+  Born 级 $W^{(1)}\cdot(1+P)\cdot C$ 分支（见
+  \cref{lst:ch19:tnf_ctx}）、双语注释。\\
+
+% --- 状态空间 ---
+\multicolumn{3}{@{}l}{\emph{3. 状态空间与置换算符}}\\[2pt]
+
+\texttt{CPP/make\_pw\_symm\_states.\{h,cpp\}}
+& \texttt{src/core/state\_space/make\_pw\_symm\_states.\{h,cpp\}}
+& 搬家+ include 路径修正；逻辑无变化。\\
+
+\texttt{CPP/make\_wp\_states.\{h,cpp\}}
+& \texttt{src/core/state\_space/make\_wp\_states.\{h,cpp\}}\ \ $\Delta$
+& 搬家；新增 \texttt{p\_grid\_type=custom} 分支（commit \texttt{b36d48c}）允许从 txt
+  读 WP 边界（用于 Miller Gate~1 的高分辨率 grid）。\\
+
+\texttt{CPP/make\_swp\_states.\{h,cpp\}}
+& \texttt{src/core/state\_space/make\_swp\_states.\{h,cpp\}}
+& 搬家+ MKL 头注释。\\
+
+\texttt{CPP/make\_permutation\_matrix.\{h,cpp\}}\ (1402 行)
+& \texttt{src/core/state\_space/make\_permutation\_matrix.\{h,cpp\}}\ \ $\Delta$
+& 搬家+ 全部 \texttt{MKL\_INT64} $\to$ \texttt{long long}；P123 HDF5 cache
+  路径与 \texttt{output\_folder} 一致化。\\
+
+% --- potential / resolvent ---
+\multicolumn{3}{@{}l}{\emph{4. 势矩阵 \& Resolvent}}\\[2pt]
+
+\texttt{CPP/make\_potential\_matrix.\{h,cpp\}}
+& \texttt{src/core/potential/make\_potential\_matrix.\{h,cpp\}}
+& 搬家；接口未变。\\
+
+\texttt{CPP/make\_resolvent.\{h,cpp\}}
+& \texttt{src/core/resolvent/make\_resolvent.\{h,cpp\}}
+& 搬家；接口未变。\\
+
+% --- config ---
+\multicolumn{3}{@{}l}{\emph{5. 输入解析 \& 运行编排}}\\[2pt]
+
+\texttt{CPP/set\_run\_parameters.\{h,cpp\}}
+& \texttt{src/config/set\_run\_parameters.\{h,cpp\}}\ \ $\Delta$
+& \textbf{新增 6 个 3NF 参数}（\texttt{three\_nucleon\_force},
+  \texttt{c\_D}, \texttt{c\_E}, \texttt{Lambda\_3NF}, \texttt{c1\_3NF}, \texttt{c3\_3NF}）；
+  \texttt{p\_grid\_type=custom} 选项（commit \texttt{b36d48c}）；
+  CLI \texttt{key=value} 现支持 left-to-right override（commit \texttt{f6d5149} 概念延续）。\\
+
+\texttt{CPP/run\_organizer.\{h,cpp\}}
+& \texttt{src/config/run\_organizer.\{h,cpp\}}\ \ $\Delta$
+& \texttt{find\_on\_shell\_bins()} 注释明确化（"用 q-bin 中点导出 solver
+  Tlab"）；输出表头明确"\emph{Solver} laboratory/CM energy"以避免与
+  experimental input Tlab 混淆。\\
+
+% --- 入口 ---
+\multicolumn{3}{@{}l}{\emph{6. 程序入口}}\\[2pt]
+
+\texttt{CPP/main.cpp}
+& \texttt{src/main.cpp} $\Delta$
+& 入口缩到 ${\sim}30$ 行；调用 \texttt{run\_organizer::run\_program}。 \\
+
+% --- 工具 ---
+\multicolumn{3}{@{}l}{\emph{7. 通用工具}}\\[2pt]
+
+\texttt{CPP/General\_functions/coupling\_coefficients.\{h,cpp\}}
+& \texttt{src/utils/coupling\_coefficients.\{h,cpp\}}
+& 搬家；后续 commit \texttt{c0520a7} 新增 L1 Sympy oracle 测试。\\
+
+\texttt{CPP/General\_functions/gauss\_legendre.\{h,cpp\}}
+& \texttt{src/utils/gauss\_legendre.\{h,cpp\}}
+& 搬家。\\
+
+\texttt{CPP/General\_functions/legendre.\{h,cpp\}}
+& \texttt{src/utils/legendre.\{h,cpp\}}
+& 搬家。\\
+
+\texttt{CPP/General\_functions/kinetic\_conversion.\{h,cpp\}}
+& \texttt{src/utils/kinetic\_conversion.\{h,cpp\}} $\Delta$
+& 搬家+ 注释明确 "lab Tlab $\Leftrightarrow$ q\_com" 双向换算（commit
+  \texttt{c6cf760} 'fix energy input'）。\\
+
+\texttt{CPP/General\_functions/matrix\_routines.\{h,cpp\}}
+& \texttt{src/utils/matrix\_routines.\{h,cpp\}}\ \ $\Delta$
+& 搬家+ 用 LAPACKE 接口替换 MKL DSS sparse solver；保留模板化
+  \texttt{quicksort}（origin 已经用了 \texttt{templates.h}，搬家后路径调整）。\\
+
+(无)
+& \texttt{src/utils/spin\_isospin\_algebra.\{h,cpp\}} +
+& \textbf{新增} 3NF 自旋-同位旋代数辅助（$\sigma_1\cdot\sigma_3$,
+  $\tau_1\cdot\tau_3$ 重耦合）。Commit \texttt{d5b0e2a}。 \\
+
+(无)
+& \texttt{src/utils/chiral\_3nf\_recoupling.\{h,cpp\}} +
+& \textbf{新增} 标量 + 秩 2 张量重耦合（rank-0 + rank-2 PW projection）。
+  Commit \texttt{73090d1}, \texttt{17a215f}。 \\
+
+% --- 势 ---
+\multicolumn{3}{@{}l}{\emph{8. 核子-核子势}}\\[2pt]
+
+\texttt{CPP/Interactions/chiral\_*.\{h,cpp\}}
+& \texttt{src/interactions/chiral\_*.\{h,cpp\}}
+& 整体搬家。LO\_internal / N2LOopt / Idaho\_N3LO / OPEP /
+  malfliet\_tjon / nijmegen / chiral\_twobody / potential\_model 全部一并迁移。\\
+
+\texttt{CPP/Interactions/chp/*.f90}
+& \texttt{src/interactions/chp/*.f90}
+& 搬家；模块依赖在 Makefile 中显式声明。\\
+
+\texttt{CPP/Interactions/nijmegen/*.f}
+& \texttt{src/interactions/nijmegen/*.f}
+& 搬家；F77 编译标志统一为 \texttt{-std=legacy}。\\
+
+% --- 3NF (全新) ---
+\multicolumn{3}{@{}l}{\emph{9. 三核子力（全新模块）}}\\[2pt]
+
+(无)
+& \texttt{src/interactions/three\_nucleon\_force\_model.\{h,cpp\}} +
+& 抽象基类 + \texttt{enabled()} null-object pattern。 \\
+
+(无)
+& \texttt{src/interactions/three\_nucleon\_force\_none.h} +\newline\texttt{three\_nucleon\_force\_gaussian\_stub.h} +
+& 平凡实现（\texttt{return 0}） + Gauss 调试 stub。 \\
+
+(无)
+& \texttt{src/interactions/chiral\_3nf\_pw\_kernels.h} +\newline\texttt{src/interactions/chiral\_N2LO\_3NF.h} +
+& \textbf{N2LO 3NF 全新实现}：$c_D, c_E, c_1, c_3$ 标量动量空间 kernel
+  + 部分波投影。详见
+  Ch~\ref{ch:16_3nf_pw_projection} 与 commit
+  \texttt{59c4074, 73090d1, c15606e, 8db06bf, 1f05031, bdb239d, f4df358}。\\
+
+% --- 头 ---
+\multicolumn{3}{@{}l}{\emph{10. 顶层头文件}}\\[2pt]
+
+\texttt{CPP/constants.h} \newline\texttt{CPP/type\_defs.h}
+& \texttt{include/constants.h}\ \ $\Delta$ \newline\texttt{include/type\_defs.h}\ \ $\Delta$
+& 提到顶级 \texttt{include/}；\texttt{type\_defs.h}
+  新增 3NF 相关字段（\texttt{c\_D}, \texttt{c\_E}, \texttt{Lambda\_3NF}）；
+  注释 "On-shell solver Tlab" 明确化。\\
+
+% --- 输入 ---
+\multicolumn{3}{@{}l}{\emph{11. 输入模板}}\\[2pt]
+
+\texttt{CPP/Input/input.txt} (35 行)
+& \texttt{CPP/Input/input.txt} (51 行) $\Delta$\newline + 16 个 autogen / Miller Gate / sweep 模板 +
+& 节标题分组（State-space / Quadrature / Grid / Runtime / Physics /
+  Model / IO）；新增多个调用模板。详见 §\ref{sec:19:features}。 \\
+
+% --- 数据 ---
+\multicolumn{3}{@{}l}{\emph{12. 实验数据与文档}}\\[2pt]
+
+(无)
+& \texttt{data/DataOfCrosssectionAndPol/} +
+& \textbf{新增}\ Tlab=190~MeV iT11/T20/T21/T22/d$\sigma$/d$\Omega$
+  实验数据（commit \texttt{141d58a}）；
+  \texttt{DSigamaOverDOmega\_fm2\_per\_sr.txt} 单位换算 (commit \texttt{a7c60cd})。\\
+
+(无)
+& \texttt{data/miller\_paper3\_fig6/} +\newline\texttt{data/nd\_scattering/} +
+& Miller PRC~106 (2022) 表~II 与 nd phase-shift 参考。\\
+
+(无)
+& \texttt{docs/algorithm\_flow\_and\_logic.md} +\newline\texttt{docs/dpol\_p\_190MeV\_validation.md} +\newline\texttt{docs/tictac\_parameter\_tuning.md} +\newline\texttt{docs/dpol\_p\_multi\_energy\_observables.md} +
+& 完整的算法流程、190~MeV 基准、参数调优、多能量观测量四份文档。\\
+
+% --- examples / tests / tools ---
+\multicolumn{3}{@{}l}{\emph{13. 工作流 / 测试 / 工具}}\\[2pt]
+
+(无)
+& \texttt{examples/} (16 个 .py + .sh) +
+& \textbf{Python 工作流}（详见 §\ref{sec:19:features}）。\\
+
+(无)
+& \texttt{tests/test\_190mev\_data\_pipeline.py} +
+& \textbf{Python 回归测试}：iT11 RMSE $\le 0.02$, d$\sigma$ rel.RMSE $\le 0.05$。\\
+
+(无)
+& \texttt{tests/cpp/} (5 个 GoogleTest 文件) +
+& \textbf{C++ 单元测试}：3NF 矩阵元、3NF 对称性、自旋-同位旋代数、Wigner 系数。\\
+
+(无)
+& \texttt{tools/check\_3nf\_normalization/} +
+& \textbf{离线 3NF 归一化校验工具}：读 triton $\psi$、计算
+  $\langle\psi|W^{(1)}|\psi\rangle$ 与 Epelbaum/Witała 参考对比。\\
+
+\end{longtable}
+
+% ---------------------------------------------------------------------
+\section{新增功能矩阵}
+\label{sec:19:features}
+
+下表汇总 origin 中\emph{完全不存在}的特性：
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}p{30mm}p{55mm}p{60mm}@{}}
+\toprule
+\textbf{功能模块} & \textbf{交付物} & \textbf{物理 / 工程动机}\\
+\midrule
+3NF 物理实现
+& \texttt{src/interactions/chiral\_3nf\_*.h},\newline\texttt{three\_nucleon\_force\_model.\{h,cpp\}},\newline\texttt{utils/spin\_isospin\_algebra.\{h,cpp\}},\newline\texttt{utils/chiral\_3nf\_recoupling.\{h,cpp\}}
+& 实现 N2LO 3NF（$c_D$ 1PE 接触、$c_E$ 全接触、$c_1$\&$c_3$ 2PE）
+  并接入 Faddeev solver。Witała/Epelbaum convention，Born 级
+  $W^{(1)}\cdot(1+P)\cdot C$ 直接相加。详见 Ch~\ref{ch:15_3nf_physics}--\ref{ch:17_3nf_numerical}。\\
+
+Python 工作流
+& \texttt{examples/deuteron\_proton\_Ay.py},\newline\texttt{compare\_Ay\_experiment.py},\newline\texttt{plot\_validation\_curves.py},\newline\texttt{run\_dpol\_p\_observables.py},\newline\texttt{plot\_dpol\_p\_observables.py},\newline\texttt{convert\_dsigma\_units.py},\newline\texttt{run\_3nf\_sweep.py}
+& 把"运行 \texttt{CPP/run} $\to$ 解析 \texttt{U\_PW\_elements\_*.txt}
+  $\to$ 计算可观测量 (iT11/T20/T21/T22/d$\sigma$) $\to$ 与实验数据对比 $\to$
+  matplotlib 出图"封装为可重用模块。Origin 的输出仅止于
+  U-amplitude，下游全靠用户手算。\\
+
+回归测试管道
+& \texttt{tests/test\_190mev\_data\_pipeline.py},\newline\texttt{test\_2nf\_miller\_baseline.py},\newline\texttt{test\_3nf\_*.py},\newline\texttt{tests/cpp/*.cpp}
+& 任何代码改动后 \texttt{python -m unittest} 一键检查 190~MeV 关键
+  observables 是否仍在阈值内（iT11 RMSE $\le 0.02$ pass / $\le 0.05$ warn）。
+  详见 §\ref{sec:19:tests}。 \\
+
+3NF 归一化离线核校
+& \texttt{tools/check\_3nf\_normalization/} (build\_pw\_3n\_statespace, contract\_W1\_expectation, read\_triton\_psi, hand\_calc\_c[1cD3E].py)
+& 独立读取 triton 真值波函数 $\psi_{3H}$，计算 $\langle\psi|W^{(1)}_{c_E/c_D/c_1/c_3}|\psi\rangle$，
+  与 Epelbaum/Witała PRC 文章中的参考值（已转录至
+  \texttt{epelbaum\_reference.md}）逐 LEC 比对，比例 $X = \text{ours}/\text{ref}$。
+  Commit 序列 \texttt{1d090ea}\ldots\texttt{f261f11}。\\
+
+multi-energy sweep
+& \texttt{examples/run\_dpol\_p\_observables.py},\newline\texttt{config.py}, \texttt{lab\_energies.txt},\newline\texttt{tlab\_utils.py}
+& 一次运行覆盖 \{70, 135, 190\} MeV/u 三个 dpol-p 基准能量；
+  共享 P123 cache 显著缩短总耗时。详见
+  \texttt{docs/dpol\_p\_multi\_energy\_observables.md}。Commit \texttt{813db4b}。\\
+
+Miller Gate~1 相移
+& \texttt{examples/extract\_phase\_shifts.py},\newline\texttt{CPP/Input/input\_miller\_gate1*.txt} (8 模板)
+& 实现 Miller's PRC~106 (2022) 表~II 中 nd doublet/quartet phase-shifts 的
+  Gate~1 提取算法（WIP, commit \texttt{3e0d6e0}）。
+  $S$ 矩阵直接来自 U-amplitude 的对角元，公式见
+  Ch~\ref{ch:14_miller_gate1}。\\
+
+HDF5 P123 cache 重用
+& \texttt{examples/*.py} 中 \texttt{--reuse-p123} 选项,\newline\texttt{run\_organizer.cpp} 的 \texttt{calculate\_and\_store\_P123} 开关
+& P123 矩阵的计算占总耗时 60--80\%（\texttt{Np\_WP=Nq\_WP=50}, J=1 时
+  ${\sim}\SI{40}{\minute}$；J=3 时数小时）。
+  multi-energy / parameter sweep 重复同一 (Np, Nq, J) 时\emph{重用}已经存的
+  HDF5 cache 是关键加速。Commit \texttt{c72f5c3} 修了一个 P123 reuse
+  漏掉某些 JP 通道的 bug。 \\
+
+Autogen 输入模板
+& \texttt{CPP/Input/input\_*\_autogen.txt},\newline\texttt{CPP/Input/lab\_energies\_*.txt},\newline\texttt{CPP/Input/README.md}
+& Python 工作流自动写入 ${\sim}10$ 个临时模板（\texttt{*\_autogen.txt}）
+  以避免污染 \texttt{input.txt}；命名后缀
+  反映 sweep 参数（\texttt{tlab\_64p5MeV}, \texttt{no\_3nf}, \texttt{witala}, \texttt{zero\_lec}）。
+  Commit \texttt{8c5ee36} 把所有 txt 输入收纳到 \texttt{CPP/Input/}。\\
+
+实验数据对照管道
+& \texttt{data/DataOfCrosssectionAndPol/} (T.txt, DSigamaOverDOmega.txt, *.jpg),\newline\texttt{examples/compare\_Ay\_experiment.py}
+& Tlab=190~MeV/u dpol-p 散射的 4 个张量分析能力 + 微分截面（5 个 PNG/JPG +
+  TXT），从 PRC 历史文献整理。
+  对照管道直接计算 RMSE 并发出 PASS/WARN/FAIL。
+  Commit \texttt{141d58a}。 \\
+
+参数调优文档
+& \texttt{docs/tictac\_parameter\_tuning.md},\newline\texttt{docs/algorithm\_flow\_and\_logic.md}
+& 系统记录 $N_p, N_q, N_\phi, N_x$ 与 $J_{2N}^{\max}$ 收敛性研究，
+  以及一切 \texttt{key=value} 输入的物理含义。Commit \texttt{b36d48c}。 \\
+
+\bottomrule
+\end{tabular}
+\caption{Origin 中不存在、本仓库新增的功能模块。}
+\label{tab:ch19:features}
+\end{table}
+
+\paragraph{物理新增功能 vs. 工程新增功能。}
+%
+表~\ref{tab:ch19:features} 上半（3NF、Miller Gate、multi-energy）属于
+\emph{物理}增加，下半（测试、HDF5 cache、autogen 模板、对照管道）属于
+\emph{工程}增加。两者比例约 1:2 —— 这与笔者的总投入比例大体一致：
+3NF 物理实现耗时 ${\sim}3$ 月（commit \texttt{9e5c1c8}\ldots\texttt{3e0d6e0}），
+工程化重构耗时 ${\sim}1.5$ 月，再加上验证 / 调试 ${\sim}1.5$ 月。
+
+% ---------------------------------------------------------------------
+\section{关键 commit 时间线}
+\label{sec:19:timeline}
+
+下表按时间逆序（从 2026-04-25 倒推）摘出 25 个关键 commit。这是一段真实
+代码考古：每个 commit 旁边附一句话说明该 commit 的物理或工程动机，方便
+后人 \texttt{git bisect}。
+
+\begin{longtable}{@{}p{16mm}p{52mm}p{72mm}@{}}
+\caption{关键 commit 时间线（按时间逆序）}
+\label{tab:ch19:timeline}\\
+\toprule
+\textbf{Commit} & \textbf{摘要} & \textbf{动机 / 影响}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Commit} & \textbf{摘要} & \textbf{动机 / 影响}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+
+\texttt{3e0d6e0} & add Miller Gate 1 phase-shift extractor (WIP)
+& 准备 Miller PRC~106 (2022) 表~II nd phase-shift 复现；
+  目前是 WIP（待 doublet/quartet 收敛性验证）。\\
+
+\texttt{f4df358} & fix c\_E sign: use Navrátil/Witała +½ convention
+& 早期版本采用 \emph{Epelbaum 2002} 的 $-\tfrac12$ 约定；
+  与 Witała 系列结果对照后，改为 $+\tfrac12$。\\
+
+\texttt{1f05031} & rewrite W1\_2pe with rank-0 + rank-2 PW projection
+& $c_1, c_3$ 项的标量 + 张量分解；与 Golak EPJA 2014 公式表对照。\\
+
+\texttt{8db06bf} & rewrite W1\_1pe\_contact with rank-0 + rank-2 PW projection
+& 同上，针对 $c_D$。\\
+
+\texttt{bdb239d} & apply 1/(2$\pi$)$^3$ Fourier normalization to 3NF PW kernels
+& 3NF 动量空间核与坐标空间 kernel 之间差一个 $(2\pi)^{-3}$；曾是
+  \texttt{check\_3nf\_normalization} 比例 $X$ 偏差 4 数量级的元凶。\\
+
+\texttt{c15606e} & rewrite W1\_contact with PW projection (c\_E first LEC)
+& 第一个 LEC ($c_E$) 完成 PW 投影；建立框架，后续三个 LEC 沿用。\\
+
+\texttt{59c4074} & add scalar momentum-space kernels for 3NF PW projection
+& 把 $W^{(1)}$ 拆成 $W^{(1)}_S + W^{(1)}_T$ 标量 + 张量两部分。\\
+
+\texttt{73090d1} & add 3NF spin-isospin recoupling helpers
+& \texttt{utils/chiral\_3nf\_recoupling.\{h,cpp\}} 诞生；标量 + 秩 2 重耦合。\\
+
+\texttt{c9a6d63} & fix(3nf): apply $-\tfrac12$ prefactor on $V^{(1)}_{\text{cont}}$ $c_E$
+& Epelbaum 2002 eq.\,(2.10) 漏因子；\texttt{check\_3nf} 比例从 4 拉回 2。\\
+
+\texttt{a674522} & add 2NF-only baseline guardrail vs Miller / Nogga
+& 在 \texttt{tests/test\_2nf\_miller\_baseline.py} 中固化纯 2NF 的 hash，
+  防止 3NF 改动意外回归到 2NF 数字。\\
+
+\texttt{5cf16ab} & fix(3nf): apply squared-Gaussian regulator per E2002 eq.\,(3.19)
+& 早期实现错用了\emph{一次方} Gaussian regulator；改为 $\exp(-(p/\Lambda)^4)$。\\
+
+\texttt{0090391} & add Miller (seanbsm) benchmark table
+& 把 Miller 2022 PRC 表~II nd phase shifts 转录为 \texttt{tests/}
+  fixture，作为终极对照。\\
+
+\texttt{f261f11}--\texttt{1d090ea} & feat(3nf-check): \ldots
+& 11 个 commit 串：从 tool skeleton $\to$ read\_psi $\to$
+  contract $W^{(1)}$ $\to$ Epelbaum 比例 $X$ 报告。
+  关键基础设施。\\
+
+\texttt{cef25f1} & wire 3NF kernel into Faddeev solver
+& 第一次把 \texttt{three\_nucleon\_force\_model::W1\_element()} 接进
+  \texttt{solve\_faddeev\_equations} 热路径。\\
+
+\texttt{a9f2d60} & add L4 regression tests for 3NF
+& L4 = "已知物理量回归"层次（如 triton binding energy with 3NF $\approx 8.5$~MeV）。\\
+
+\texttt{fa0823b} & add L3 symmetry and conservation law tests for 3NF
+& L3 = $J,T,P$ 守恒 + Hermiticity + 三粒子交换对称性。\\
+
+\texttt{cabab0b}, \texttt{ca285a0}, \texttt{70c5c58} & add L2 + 1PE-CT + 2PE terms
+& 三个 commit 把 $c_E, c_D, c_1, c_3$ 全部 LEC 接入。\\
+
+\texttt{17a215f} & implement $\sigma_1\!\cdot\!\sigma_3$ and $\tau_1\!\cdot\!\tau_3$ recoupling
+& 自旋-同位旋代数核心 commit；后续所有 3NF 实现的基石。\\
+
+\texttt{d5b0e2a} & add spin-isospin algebra helpers with L2 tests
+& \texttt{utils/spin\_isospin\_algebra.\{h,cpp\}} 诞生。\\
+
+\texttt{c0520a7} & add L1 coupling coefficient tests (C++ + Sympy oracle)
+& L1 = "数学正确性"层次；用 Python Sympy 算 $3j/6j/9j$ 作为 ground truth。\\
+
+\texttt{9e5c1c8} & add C++ test infrastructure for 3NF
+& \texttt{tests/cpp/} 与 GoogleTest 集成；后续所有 L1--L5 测试基础。\\
+
+\texttt{c72f5c3} & fix: include all JP channels in U aggregation and P123 reuse
+& bug：P123 reuse 跨 multi-energy 时漏掉部分 JP 通道；修复后
+  iT11 在低能段恢复正常。\\
+
+\texttt{a7c60cd} & feat: add dsigma unit conversion workflow and fm$^2$ export
+& 实验数据 mb/sr $\Leftrightarrow$ fm$^2$/sr 双向换算；解决 \texttt{compare\_Ay\_experiment.py}
+  反复 0.1 因子混乱的老问题。\\
+
+\texttt{a9a4a1c} & build: auto-detect conda HDF5 toolchain in CPP makefile
+& 见 \cref{lst:ch19:conda_hdf5}。\\
+
+\texttt{b36d48c} & docs: parameter tuning guide and grid option fix
+& \texttt{p\_grid\_type=custom} 选项；
+  系统记录 $N_p, N_q$ 收敛性。\\
+
+\texttt{813db4b} & feat: pure tic-tac multi-energy dpol-p observables workflow
+& 多能量 sweep 入口；端到端从 \texttt{run\_dpol\_p\_observables.py} $\to$ 出图。\\
+
+\texttt{809617b} & tests: add regression check for 190MeV data pipeline
+& \texttt{tests/test\_190mev\_data\_pipeline.py} 诞生；定义 iT11 / d$\sigma$ 阈值。\\
+
+\texttt{da9cac2} & examples: refactor 190MeV pipeline into reusable module
+& 把硬编码的 \texttt{deuteron\_proton\_Ay.py} 抽出公共部分；
+  为多能量 sweep 铺路。\\
+
+\texttt{141d58a} & add test data of polD-p analysing power and crossection
+& \texttt{data/DataOfCrosssectionAndPol/} 入仓；
+  以前散落在各人电脑上的实验对照数据终于有版本管理。\\
+
+\texttt{23c0e0f} & add cmake and reconstruct the structure
+& \textbf{重构起点}：\texttt{CPP/} $\to$ \texttt{src/} 大搬家；
+  CMake 入口；MKL 依赖剥离。 \\
+
+\texttt{998e7f8} & substitute intel MKL. add some instruction doc.
+& \textbf{重构前驱}：第一次系统性把 MKL 替换为 BLAS/LAPACK；
+  此 commit 依然在 \texttt{CPP/} 内做改动，是搬家前的
+  最后一步铺垫。\\
+
+\end{longtable}
+
+\paragraph{时间线的两个关键转折点。}
+%
+（i）\texttt{998e7f8} (substitute intel MKL) + \texttt{23c0e0f}
+(reconstruct the structure) 是\emph{工程化}转折点——之前所有改动都是 Sean
+原作者风格的物理 commit，此后开始有 docs/、CMake、tests/。
+%
+（ii）\texttt{9e5c1c8} (add C++ test infrastructure for 3NF) 是\emph{物理化}
+转折点——之前的 \texttt{tests/} 只有 Python 集成测试，此后开始有 GoogleTest
+单元测试，3NF 这种新物理才能用 TDD 方式开发。
+
+% ---------------------------------------------------------------------
+\section{测试与回归 CI 思路}
+\label{sec:19:tests}
+
+\subsection{五层测试金字塔}
+
+\texttt{tests/} 树按 commit message 中暗示的层次分为 L1--L5：
+
+\begin{description}
+\item[L1 数学正确性。] \texttt{test\_coupling\_coefficients.py}
+      （Python + Sympy oracle）+ \texttt{tests/cpp/test\_coupling\_coefficients.cpp}
+      （GoogleTest）。验证 $3j, 6j, 9j$ 与
+      \texttt{utils/coupling\_coefficients.cpp} 的实现完全一致到
+      $10^{-12}$ 量级。Commit \texttt{c0520a7}。
+\item[L2 矩阵元正确性。] \texttt{tests/cpp/test\_3nf\_matrix\_elements.cpp},
+      \texttt{test\_chiral\_3nf\_recoupling.cpp}, \texttt{test\_spin\_isospin\_algebra.cpp}。
+      在固定（手算或 Sympy oracle 验证过的）的 6 个特定 $\langle\alpha'|W^{(1)}|\alpha\rangle$
+      矩阵元上做点对点比较。Commit \texttt{cabab0b}。
+\item[L3 对称性 / 守恒律。] \texttt{tests/cpp/test\_3nf\_symmetries.cpp}：
+      $J, T, P$ 守恒；Hermiticity（$W^{(1)\dagger}_{\alpha'\alpha} = W^{(1)}_{\alpha\alpha'}$）；
+      三粒子交换 $W^{(1)}(1+P+P^2) = $ 完全对称等。Commit \texttt{fa0823b}。
+\item[L4 物理量回归。] \texttt{test\_3nf\_regression.py}：
+      已知 triton 束缚态能量（$E_t \approx -8.48$~MeV with N2LO 3NF），
+      已知 $nd$ 散射长度。Commit \texttt{a9f2d60}。
+\item[L5 物理 validation。] \texttt{test\_190mev\_data\_pipeline.py}：
+      端到端跑 \texttt{CPP/run} + Python downstream，
+      与 \texttt{data/DataOfCrosssectionAndPol/} 实验数据比对，
+      iT11 RMSE $\le 0.02$ pass / $\le 0.05$ warn / 否则 fail。
+      Commit \texttt{809617b}, \texttt{174792a}。
+\end{description}
+
+\paragraph{为何 L5 阈值是 0.02 / 0.05？}
+%
+两个阈值都来自经验：
+%
+（a）\textbf{0.02} = 实验数据本身的统计 + 系统误差（来自
+\texttt{T.txt} 中 iT11 误差棒）；solver 数字落在该阈值内意味着 "在
+实验精度内一致"。
+%
+（b）\textbf{0.05} = 使用低分辨率 grid（$N_p = N_q = 30$）时的离散化
+误差上限；落在 0.02--0.05 之间意味着 solver 物理正确但精度被 grid 限制。
+该阈值来源于 \texttt{docs/tictac\_parameter\_tuning.md} 中的收敛性
+扫描表。
+
+\subsection{CI 不在 GitHub Actions 跑——而是 \texttt{git bisect}}
+
+由于 \texttt{CPP/run} 在 \texttt{Np\_WP = Nq\_WP = 30} 时单次 J=1 运行
+${\sim}\SI{20}{\minute}$，全套测试 ${\sim}\SI{2}{\hour}$，跑在云 CI 上
+不经济。当前实践是：
+
+\begin{enumerate}
+\item 每个 \emph{物理} commit（接入新 LEC、改 normalization、修
+      sign 约定）跑 L1--L4 + L5 子集（仅 Tlab=190 MeV）。
+\item 每个 \emph{工程} commit（搬目录、改 build、重命名）只跑 L1--L3。
+\item 怀疑回归时用 \texttt{git bisect run}：
+\begin{lstlisting}[style=config,numbers=none]
+git bisect start
+git bisect bad HEAD
+git bisect good 23c0e0f  # 重构起点
+git bisect run python -m unittest tests/test_190mev_data_pipeline.py
+\end{lstlisting}
+      在 ${\sim}{\log_2 N_{\text{commit}}} \approx 8$ 次自动二分内
+      （每次 ${\sim}\SI{20}{\minute}$）锁定罪魁。 实际操作中
+      \texttt{c72f5c3} (P123 reuse 漏 JP) 和 \texttt{bdb239d}
+      ($1/(2\pi)^3$ 归一化) 都是这样找到的。
+\end{enumerate}
+
+\subsection{\texttt{tools/check\_3nf\_normalization/}：第六类测试}
+
+这个工具不属于 L1--L5 任何层次——它是\emph{离线 ground-truth 比对}：
+
+\begin{itemize}
+\item \texttt{read\_triton\_psi.cpp} 读入文献提供的真值波函数 $\psi_{3H}$
+      （在 \texttt{tests/data/} 中由 Hebeler/Nogga 代码生成）。
+\item \texttt{build\_pw\_3n\_statespace.cpp} 从 $\psi$ 的 $\alpha$-表
+      构造与本仓库一致的 PW state space，做 parity sanity 检查。
+\item \texttt{contract\_W1\_expectation.cpp} 计算
+      $\langle\psi_{3H}|W^{(1)}_{c_X}|\psi_{3H}\rangle$，对每个 LEC
+      ($c_E, c_D, c_1, c_3$) 输出一个数。
+\item 与 \texttt{epelbaum\_reference.md}（转录自 Epelbaum/Witała 系列文章）
+      对比，输出比例 $X = \text{ours}/\text{ref}$。$X$ 应该在 $[0.95, 1.05]$ 内。
+\end{itemize}
+
+这种"独立读真值波函数 + 用我们的算子作用一次"的检查曾经在
+debug 路径上发现过两个典型 bug：commit \texttt{bdb239d}（$X \sim 4 \times 10^4$
+偏离）和 \texttt{c9a6d63}（$X \sim 2$ 偏离）。
+
+% ---------------------------------------------------------------------
+\section{已知遗留问题与待办}
+\label{sec:19:legacy}
+
+重构远未完成。以下问题截至 2026-04-25 仍然存在：
+
+\begin{description}
+\item[（A）\texttt{CPP/} 与 \texttt{src/} 双源漂移。]
+      \texttt{CPP/solve\_faddeev.cpp} (1912 行) vs.
+      \texttt{src/core/faddeev\_solver/solve\_faddeev.cpp} (2366 行)
+      已经分叉 ${\sim}450$ 行，绝大部分是 3NF 分支。
+      理论上 \texttt{CPP/} 中所有 \texttt{*.cpp/*.h} 应被删除并由\emph{符号链接}
+      或 build glob 替代，但目前 \texttt{sync\_sources.py} 是\emph{手动调用}
+      的，且对 include 路径差异处理不完美。
+      \textbf{待办}：commit 序列 (i) 删 \texttt{CPP/*.cpp} 中已被
+      \texttt{src/} 完全覆盖的文件；(ii) 把 \texttt{CPP/Interactions/} 改为
+      \texttt{src/interactions/} 的相对软链。
+
+\item[（B）\texttt{output/} 与 \texttt{Output/} 大小写碰撞。]
+      仓库根同时存在 \texttt{output/}（小写，CMake 默认）与 \texttt{Output/}
+      （大写，origin 默认 + \texttt{CPP/} 路径）。在不区分大小写的文件
+      系统（macOS HFS+ 默认、某些 NTFS 配置）上两者会被合并，导致
+      \texttt{P123\_*.h5} 写入位置混乱。
+      \textbf{待办}：统一为小写 \texttt{output/}，更新所有 \texttt{output\_folder}
+      默认值与 \texttt{.gitignore}。
+
+\item[（C）多个未验证的 Miller Gate~1 输入模板。]
+      \texttt{CPP/Input/input\_miller\_gate1\_dbg.txt},
+      \texttt{input\_miller\_gate1\_np20\_3nf\_scale\{0,03\}.txt} 等 7 个文件是
+      WIP 调试残留（commit \texttt{3e0d6e0}），命名混乱（\texttt{scale0} vs
+      \texttt{scale03} 不直观）。
+      \textbf{待办}：清理为 \{baseline, 3nf\_on, 3nf\_off, np20, np50\} 5 个
+      正交模板。
+
+\item[（D）\texttt{tools/check\_3nf\_normalization/} 编译产物未 .gitignore。]
+      \texttt{check\_3nf\_normalization}, \texttt{*.o}, \texttt{*.log}
+      被 git status 标记为 untracked（参见仓库 \texttt{git status}）。
+      \textbf{待办}：扩展 \texttt{.gitignore} 覆盖该目录的 \texttt{*.o},
+      \texttt{check\_3nf\_normalization}, \texttt{run\_*.log}。
+
+\item[（E）\texttt{include/type\_defs.h} 与 \texttt{CPP/type\_defs.h} 已分叉。]
+      \texttt{git status} 显示 \texttt{include/type\_defs.h} 被修改。
+      重构期间一度尝试把 origin 的扁平 \texttt{type\_defs.h} 软链到
+      \texttt{include/}，但因为 \texttt{src/} 的 include 路径必须用
+      \texttt{type\_defs.h} 而 \texttt{CPP/} 必须用 \texttt{"type\_defs.h"}，
+      最终选择了\emph{两份独立维护}。这一条仅次于 (A) 是最大的源码冗余。
+
+\item[（F）Fortran 源仍然嵌在 \texttt{src/interactions/}。]
+      理论上 Fortran 子树应该独立到 \texttt{src/fortran/} 或
+      \texttt{external/}，使 C++ 部分可以纯 \texttt{cmake -DBUILD\_FORTRAN=OFF}
+      构建（仅做 2NF 模型测试时不需要 chiral / nijmegen Fortran 库）。
+      当前 \texttt{find\_package(Fortran)} 是 CMake 入口的硬依赖。
+
+\item[（G）\texttt{config.py} / \texttt{sync\_sources.py} 缺文档。]
+      仓库根有两个 \texttt{*.py} 文件（\texttt{config.py}, \texttt{sync\_sources.py}）
+      未在 \texttt{README.md} / \texttt{AGENTS.md} 解释。
+      \textbf{待办}：补 \texttt{appendix~D} 一节专门说明这两个工具的用途。
+
+\item[（H）\texttt{tests/cpp/CMakeLists.txt} 未被 Makefile 路径感知。]
+      C++ 单元测试（GoogleTest）只能通过 CMake 构建后 \texttt{ctest -V} 跑；
+      \texttt{cd CPP \&\& make} 路径不会构建测试。
+      \textbf{待办}：在根 \texttt{Makefile} 中加入 \texttt{tests} 目标，
+      统一两条路径的测试入口。
+
+\item[（I）\texttt{Test/Cont\_Faddeev/}, \texttt{Test/Free\_energy/} 是死代码。]
+      origin 留下的两个手写 benchmark 实验台，\texttt{tests/} 文档显式标注
+      "rarely run"。
+      \textbf{待办}：判断是否还有任何 reference 价值；若无则删除。
+
+\item[（J）\texttt{lab\_energies.txt} 在仓库根 vs. \texttt{CPP/}.]
+      仓库根有一个 \texttt{lab\_energies.txt}（commit
+      \texttt{c6cf760} 'fix energy input' 引入），\texttt{CPP/Input/} 也有同名。
+      多版本能量列表难以审计。
+      \textbf{待办}：合并到 \texttt{CPP/Input/lab\_energies.txt} 单一权威。
+\end{description}
+
+\subsection{重构完成度自评}
+
+按 §\ref{sec:19:goals} 的四条目标（G1--G4）评分：
+
+\begin{itemize}
+\item \textbf{G1 平台无关}：90\%。MKL 已剥离，conda HDF5 探测就位。
+      剩 10\% = (E) 的 \texttt{type\_defs.h} 双源问题。
+\item \textbf{G2 三层物理化分目录}：100\%。\texttt{src/core/config/io/interactions/utils}
+      五大子树已稳定。
+\item \textbf{G3 现代构建}：80\%。CMake + Makefile 双轨工作。剩 20\% =
+      (D)(F)(H) 的细节。
+\item \textbf{G4 自动化测试}：70\%。L1--L5 五层金字塔已搭好；缺真正的
+      远程 CI（GitHub Actions / GitLab Pipelines）。当前\emph{所有测试}
+      都依赖人手 \texttt{python -m unittest}。
+\end{itemize}
+
+总体平均 ${\sim}85\%$ 完成度。剩下 15\% 主要是双源清理（A,E,J）和
+CI 自动化（G4 后半），都属于"重要不紧急"，预计在
+2026 年内逐步完成。
+
+\begin{remark}[与上游同步的可能性]
+原作者 Sean B.\,S.\,Miller 的 \texttt{tictac-origin/master} 分支自
+2024 年底已不再活跃更新。本仓库 \texttt{master} 头是
+\texttt{3e0d6e0} (Miller Gate~1)，与 origin head 已经分叉 ${\sim}40$ 个
+commit。是否、何时把重构后的 \texttt{src/} 通过 PR 推回上游，目前没有
+明确计划——双方分歧主要在工程化深度（origin 维护者更倾向"小补丁"风格，
+现仓库的重构幅度过大）。这一决策待 §\ref{sec:19:legacy} 的 (A)(E)
+完成后再讨论。
+\end{remark}
+
+% ---------------------------------------------------------------------
+\section{本章小结}
+
+本章把"\texttt{tictac-origin} $\to$ 当前 \texttt{Tic-tac}"的 ${\sim}1$ 年
+重构史压缩成五张表 + 一张图：
+%
+\cref{fig:ch19:dep_graph} 给出 \texttt{src/} 五层依赖；
+\cref{tab:ch19:build_compare} 比较两条构建路径；
+\cref{tab:ch19:filediff} 列出 30+ 行 origin/current 文件 diff；
+\cref{tab:ch19:features} 汇总 10 个 origin 不存在的新功能；
+\cref{tab:ch19:timeline} 按时间逆序整理 25+ 关键 commit。
+
+读者下一章（第~\ref{ch:20_hands_on} 章）将拿到从 0 开始 \texttt{git clone}
+$\to$ \texttt{./build.sh release} $\to$ 跑 190~MeV 基准 $\to$ 出图 $\to$
+分析的完整 hands-on 流程；本章是其物理与工程背景说明书。

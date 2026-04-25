@@ -1,0 +1,46 @@
+// ===============================================================
+// 抽取自仓库 [current]: CPP/Input/input_miller_gate1_np50.txt
+// 行号区段：1..41
+// 由 docs/treatise/code_excerpts/extract.py 自动生成；勿手动编辑
+// ===============================================================
+# Miller Gate 1 convergence test: Np=Nq=50.
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=50
+Nq_WP=50
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=nijmegen
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+energy_input_file=CPP/Input/lab_energies_miller_gate1.txt
+output_folder=CPP/Output/miller_gate1_np50
+P123_folder=CPP/Output/miller_gate1_np50

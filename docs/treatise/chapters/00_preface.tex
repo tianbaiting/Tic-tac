@@ -1,17 +1,76 @@
 % =====================================================================
 % 00_preface.tex
 % 卷首 —— 序：本文档的定位与阅读路径
-% Wave 0 占位；待 Wave 1 或终轮补全
+% Wave 8 / Main agent
 % =====================================================================
 
 \chapter*{序：本文档的定位与阅读路径}
 \addcontentsline{toc}{chapter}{序：本文档的定位与阅读路径}
 
-% TODO Wave 1 / Wave 8: 写本卷的定位、读者画像、阅读路径推荐
-% 占位：编译可通过
+\section*{为何写这本书}
 
-本卷面向实验室内部读者，沉淀两个仓库
-（\texttt{tianbaiting/Tic-tac} 与 \texttt{seanbsm/Tic-tac}）
-中关于三体核散射 Wave-Packet Faddeev/AGS 数值实现的全部物理、算法与代码细节。
+本卷面向 RIKEN dpol 实验小组及外协合作者，沉淀两个仓库
+（\texttt{tianbaiting/Tic-tac} 与 \texttt{seanbsm/Tic-tac}）中关于
+\textbf{三体核散射 Wave-Packet Faddeev/AGS 数值实现}的全部物理、算法与代码细节。
+两个仓库历时四年，跨越 Sean B.\,S.\,Miller 博士论文（2022）的方法论核与本组在
+2024-2026 年间为 dpol 实验配套加上的 3NF / 多能量 / Miller Gate / Python 工作流四大新增能力。
+读者群分为：
 
-\textbf{[Wave 0 占位 —— 详细内容由 Wave 1/Wave 8 补全]}
+\begin{itemize}
+  \item \textbf{核散射理论方向新生}——从第 \cref{ch:01_lippmann_schwinger}–\cref{ch:04_faddeev_ags} 章建立 LS \(\to\) Faddeev \(\to\) AGS 的概念阶梯；
+  \item \textbf{数值实现维护者}——直接进 \cref{ch:09_permutation_p123}–\cref{ch:11_faddeev_solver}（三体核心机器）和 \cref{ch:18_origin_codebase}/\cref{ch:19_refactor_evolution}（仓库演化）；
+  \item \textbf{3NF 调试者}——直奔第 \cref{ch:15_3nf_physics}–\cref{ch:17_3nf_numerical} 章（3NF 专章），是本书最有价值的部分；
+  \item \textbf{实验观测量复现者}——\cref{ch:13_polarization_observables}（极化观测量）+ \cref{ch:20_hands_on}（上手实战）。
+\end{itemize}
+
+\section*{阅读路径}
+
+完整阅读 \(\sim 500\) 页 \(\to\) 4-6 个工作日。建议三种路径：
+
+\begin{description}
+  \item[完整路径] 按章节顺序读完。适合首次接触者、需要一次性建立完整心智模型时。
+  \item[实战路径] \cref{ch:20_hands_on} \(\to\) \cref{app:E_input_dictionary} 输入字典 \(\to\) \cref{app:F_pitfalls_future} 陷阱清单 \(\to\) 按需回查具体章节。
+        适合"先跑通、再读代码"型读者。
+  \item[3NF 调试路径] \cref{ch:15_3nf_physics} \(\to\) \cref{ch:16_3nf_pw_projection} \(\to\) \cref{ch:17_3nf_numerical} \(\to\) \cref{app:F_pitfalls_future}（H 系列已修 bug）。
+        适合排查 3NF 数值正确性问题。
+\end{description}
+
+每一章按八段式骨架（物理动机 \(\to\) 数学推导 \(\to\) 离散化方案 \(\to\) 算法骨架 \(\to\) 代码落地 \(\to\) 数字闭环 \(\to\) 接口与依赖 \(\to\) 常见陷阱）展开，让读者在固定的位置找到对应内容。
+\cref{ch:18_origin_codebase}/\cref{ch:19_refactor_evolution}/\cref{ch:20_hands_on} 因主题特殊偏离八段式，但每章首页会说明替代结构。
+
+\section*{物理与代码的双重实指}
+
+本书最核心的方法论是\textbf{物理与代码的双重实指}（physics-code coreference）：
+
+\begin{itemize}
+  \item 任何 \cref{ch:09_permutation_p123} 等核心章节的 §x.5 "代码落地" 小节
+        \textbf{都来自 \texttt{code\_excerpts/extract.py} 直接抽取的真实文件区段}（含原文件路径与行号），
+        而不是手写的伪代码。
+  \item 这意味着源文件改了，重抽取产物也会更新；
+        若读者手中的 PDF 与最新 \texttt{HEAD} 不一致，请重跑 \texttt{make build}。
+  \item 任何 §x.6 "数字闭环" 都附\textbf{可复现命令}，让读者自己跑出表中数字。
+\end{itemize}
+
+\section*{关于"两个 Tic-tac"}
+
+\texttt{seanbsm/Tic-tac}（本书称\textbf{origin}）是 Sean B.\,S.\,Miller 博士论文的代码原型，
+单层 \texttt{CPP/} 目录、Makefile 构建，不含 3NF 与 Python 工作流。
+\texttt{tianbaiting/Tic-tac}（本书称 \textbf{current} 或本仓库）是 fork：
+保留 \texttt{CPP/} 双轨兼容；现代化为 \texttt{src/} 分层 + CMake；
+新增 3NF / 多能量 / Miller Gate 1 / 实验数据对照管道。
+两仓库具体逐文件对照见 \cref{ch:18_origin_codebase}（origin 解读）与 \cref{ch:19_refactor_evolution}（重构演化）。
+
+每章末尾的"代码落地"小节，凡涉及核心数据结构与公共函数的，都会做 origin 与 current 的双栏并排对照，
+读者可以一眼看到"哪段被重命名、哪段被拆开、哪段是新增"。
+
+\section*{致谢}
+
+本文档由 Baiting Tian 主持、与 Anthropic Claude 模型协作产出（多 wave 多 subagent 异步写作）。
+全部物理推导、数值结果与 commit 引用均由作者亲自审阅；任何错误责任在作者。
+特别感谢 Sean B.\,S.\,Miller 在博士论文中提供的 WPCD 完整方法论；感谢 dpol 实验小组的
+理论同事在 3NF 实现过程中提供的多次校核。
+
+\section*{版本说明}
+
+第一版（2026-04-26）。后续若发现谬误或新坑，请按 \cref{app:F_pitfalls_future} 的 H 系列编号续接，
+并在 \texttt{git commit} 中以 \texttt{fix(...)} 前缀标注。本卷会随仓库一起演化。

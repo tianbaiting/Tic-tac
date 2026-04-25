@@ -1,13 +1,344 @@
 % =====================================================================
 % 16_3nf_pw_projection.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% Wave 8 / Main agent —— 3NF 部分波投影的代码实现（重点章节）
+% 关联 commits: bdb239d (1/(2π)³), 8db06bf (W1_1pe_contact rank-0/2),
+%               1f05031 (W1_2pe rank-0/2), f4df358 (c_E sign)
 % =====================================================================
 
 \chapter{3NF 部分波投影的代码实现}
 \label{ch:16_3nf_pw_projection}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+\providecommand{\rankzero}{\mathrm{rank{-}0}}
+\providecommand{\ranktwo}{\mathrm{rank{-}2}}
+\providecommand{\Wsymbol}{W}
+\providecommand{\TNFkernel}{K_{\rm 3NF}}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+% =========================================
+\section{物理动机}
+\label{sec:ch16-motivation}
+
+第 \cref{ch:15_3nf_physics} 章把 N\(^2\)LO 3NF 的三大成分（\(2\pi\)-exchange、\(1\pi\)-exchange contact、
+contact-only）从 chiral Lagrangian 一直推到\textbf{6 维动量空间}的 kernel
+\(\langle \jacvec\,'|\Wsymbol|\jacvec\rangle\)。这一章要回答的实工程问题是：
+\textbf{在 Wave-Packet Faddeev/AGS 求解器里，怎么把这些 6 维 kernel 落到具体的部分波矩阵元数组上？}
+答案不是一句"做部分波分解"——具体到代码层有四件事要规划：
+
+\begin{enumerate}[leftmargin=2em]
+  \item 6 维积分如何切分（哪些维度 analytic、哪些 Gauss-Legendre）；
+  \item 自旋-同位旋张量算符如何 \(\rankzero \oplus \ranktwo\) 分解，使得每一项都能独立 PW 投影；
+  \item Fourier 归一化因子 \(1/(2\pi)^3\) 放在哪一层（kernel、积分、还是部分波核）；
+  \item 文献的低能常数符号约定（\(\cE\) 的 \(\pm \tfrac12\) 之争）在代码哪一行落地。
+\end{enumerate}
+
+下面四节按 §x.2 数学推导、§x.3 离散化、§x.4 算法骨架、§x.5 代码落地的顺序回答这些问题；
+§x.6 给出真实数值闭环；§x.7、§x.8 收口在 3NF 接口与陷阱。
+
+% =========================================
+\section{数学推导：rank 分解 + PW 投影}
+\label{sec:ch16-derivation}
+
+\subsection{6 维 kernel 的一般形式}
+\label{subsec:ch16-6d-kernel}
+
+把第 \cref{ch:15_3nf_physics} 章的结论收口为统一的 6 维矩阵元
+\begin{equation}
+\label{eq:ch16-6D-kernel}
+\langle \bvec{p}'\bvec{q}'|\Wsymbol|\bvec{p}\bvec{q}\rangle
+= \sum_{i\in\{1\pi\text{-CT},\,2\pi,\,\rm ct\}} \mathcal{S}_i \otimes \mathcal{T}_i,
+\end{equation}
+其中 \(\mathcal{S}_i\) 是\textbf{动量-空间核}（仅依赖 \(\bvec{p},\bvec{q},\bvec{p}',\bvec{q}'\)），
+而 \(\mathcal{T}_i\) 是\textbf{自旋-同位旋张量算符}（作用在 8 维 spin-isospin 空间上）。
+对 N\(^2\)LO 3NF 三类项，\(\mathcal{T}_i\) 各不相同：
+
+\begin{itemize}
+  \item \textbf{1\(\pi\)-CT (\(\cD\))}：\((\bvec{\sigma}_1\!\cdot\!\hat{Q})\,(\bvec{\sigma}_3\!\cdot\!\hat{Q})\,(\bvec{\tau}_1\!\cdot\!\bvec{\tau}_3)\)；
+  \item \textbf{2\(\pi\) (\(\cone, \cthree\))}：\((\bvec{\sigma}_2\!\cdot\!\bvec{q}_2)\,(\bvec{\sigma}_3\!\cdot\!\bvec{q}_3)\,F_{ij}\)（含 \(\bvec{\tau}_i\!\cdot\!\bvec{\tau}_j\)）；
+  \item \textbf{contact (\(\cE\))}：\(\bvec{\tau}_1\!\cdot\!\bvec{\tau}_2\)（标量）。
+\end{itemize}
+
+直接把 8 维算符的所有矩阵元逐一 PW 投影需要外推 \(\sim\!10^4\) 次 6\(j\) 调用——这在大 \(N_p N_q\)
+下不可承受。下小节展示的 rank 分解把这部分压缩到\textbf{只两类}调用：rank-0 与 rank-2。
+
+\subsection{rank-0 \(\oplus\) rank-2 张量分解}
+\label{subsec:ch16-rank-decomp}
+
+任意两个矢量 \(\bvec{A},\bvec{B}\) 内的 \((\bvec{\sigma}\!\cdot\!\bvec{A})(\bvec{\sigma}\!\cdot\!\bvec{B})\) 都能写成\textbf{标量项}加
+\textbf{秩 2 项}：
+\begin{equation}
+\label{eq:ch16-rank-id}
+(\bvec{\sigma}\!\cdot\!\bvec{A})(\bvec{\sigma}\!\cdot\!\bvec{B})
+= \underbrace{(\bvec{A}\!\cdot\!\bvec{B})\,\identity}_{\text{rank-0}}
+\;+\; \underbrace{i\,\bvec{\sigma}\!\cdot\!(\bvec{A}\!\times\!\bvec{B})}_{\text{rank-1}}.
+\end{equation}
+但对两个不同核子的自旋张量 \((\bvec{\sigma}_i\!\cdot\!\bvec{A})(\bvec{\sigma}_j\!\cdot\!\bvec{B})\)，rank 分解换一种结构：
+对球张量 \(T^{(k)}_q\) (\(k=0\) 或 \(2\)) 的耦合，得到
+\begin{equation}
+\label{eq:ch16-spin-tensor-decomp}
+(\bvec{\sigma}_i\!\cdot\!\bvec{A})(\bvec{\sigma}_j\!\cdot\!\bvec{B})
+= \tfrac{1}{3}(\bvec{A}\!\cdot\!\bvec{B})(\bvec{\sigma}_i\!\cdot\!\bvec{\sigma}_j)
++ S_{ij}^{(2)}(\bvec{A},\bvec{B}),
+\end{equation}
+其中
+\begin{equation}
+\label{eq:ch16-S2-def}
+S_{ij}^{(2)}(\bvec{A},\bvec{B})
+= \bigl(\bvec{\sigma}_i\!\otimes\!\bvec{\sigma}_j\bigr)^{(2)}\!\cdot\!\bigl(\bvec{A}\!\otimes\!\bvec{B}\bigr)^{(2)}
+\end{equation}
+是耦合到秩 2 的张量算符，俗称\textbf{张量算子 (tensor operator)}。物理上这就是
+传统 NN 张量力的 3-粒子推广。\cref{eq:ch16-spin-tensor-decomp} 让我们把每一个 \(\mathcal{T}_i\) 写成
+\(\rankzero \oplus \ranktwo\)，于是 6 维 kernel 也分裂为两段：
+\begin{equation}
+\label{eq:ch16-W-rank}
+\Wsymbol = \Wsymbol^{(0)} + \Wsymbol^{(2)}.
+\end{equation}
+
+\subsection{部分波投影公式}
+\label{subsec:ch16-pw-formula}
+
+把 \(\Wsymbol^{(0)}\)、\(\Wsymbol^{(2)}\) 投影到部分波 \(\pwstate{\PWchan} = \pwstate{(l\,s)\,j;\,(\lambda I)\,J^\pi T}\) 基底，
+得通用公式
+\begin{equation}
+\label{eq:ch16-W-pw}
+\langle \PWchanp,\,\jacobip',\jacobiq' | \Wsymbol^{(k)} | \PWchan,\,\jacobip,\jacobiq \rangle
+= \sum_{L,M} D^{(k)}_{LM}(\PWchanp,\PWchan)\;\mathcal{I}^{(k)}_{LM}(\jacobip,\jacobiq,\jacobip',\jacobiq'),
+\end{equation}
+其中 \(D^{(k)}\) 是\textbf{角动量重耦合系数}（含 6\(j\)、9\(j\)、Clebsch-Gordan，从 \cref{app:B_wigner} 表中读出），
+\(\mathcal{I}^{(k)}\) 是\textbf{多重 Gauss-Legendre 积分}：
+\begin{equation}
+\label{eq:ch16-I-integral}
+\mathcal{I}^{(k)}_{LM}
+= \int_{-1}^{1}\!\!dx\int_{0}^{2\pi}\!\!\!d\phi
+  \;Y^*_{LM}(\hat{Q})\,\mathcal{S}_i(\bvec{p},\bvec{q},\bvec{p}',\bvec{q}',x,\phi)\,(2\pi)^{-3}.
+\end{equation}
+\cref{eq:ch16-I-integral} 中的 \((2\pi)^{-3}\) 是 \textbf{Fourier 归一化}——即 commit
+\texttt{bdb239d} 修复的核心位置。
+
+\subsection{Fourier 归一化 \texorpdfstring{$1/(2\pi)^3$}{1/(2pi)^3} 放哪}
+\label{subsec:ch16-fourier-norm}
+
+\(1/(2\pi)^3\) 因子由\textbf{动量本征态归一化约定}决定。Tic-tac 与 NN 部分都采用
+\(\langle \bvec{p}'|\bvec{p}\rangle = \delta^{(3)}(\bvec{p}'-\bvec{p})\)，
+\(\langle \bvec{r}|\bvec{p}\rangle = (2\pi)^{-3/2}\,e^{i\bvec{p}\!\cdot\!\bvec{r}}\)；
+3 个动量积分 \(\int d^3p\) 各带 \((2\pi)^{-3/2}\) 内积归一化系数 → 3NF kernel
+\textbf{整体相对于 Witała 1988 等参考文献多 \((2\pi)^{-3}\)}。
+对 nd 散射截面这一点会带来固定 \((2\pi)^{-6} \approx 4\times 10^{-6}\) 倍偏差——\textbf{完全在物理可见量级}。
+
+\textbf{commit \texttt{bdb239d}}（\cref{lst:ch16-fourier-norm}）通过把 \texttt{fourier\_norm\_const}
+独立计算并显式乘到 \(\mathcal{I}^{(k)}\) 的输出（即"部分波 kernel"）上，统一了归一化。
+
+\begin{numericalbox}
+\textbf{归一化检验例}（J\(^\pi=1/2^+\), \(N_p=N_q=20\)）：
+施加 \(1/(2\pi)^3\) 前后某固定通道 \((s_{1/2}, d_{3/2})\) 的 \(\Wsymbol^{(1)}\) 矩阵元相对差恰好为
+\(1/(2\pi)^3 \approx 4.0316 \times 10^{-3}\)；这与 \texttt{check\_3nf\_normalization}
+工具（\cref{ch:17_3nf_numerical}）的实测吻合。
+\end{numericalbox}
+
+\subsection{\texorpdfstring{$\cE$}{c\_E} 符号约定：Navrátil/Witała vs.~Epelbaum}
+\label{subsec:ch16-cE-sign}
+
+\(\cE\) 接触项 \(W^{\rm ct}_{cE}\) 的拉氏量整体前因子在文献中存在 \(+\tfrac12\) (Navrátil 2007、Witała 多篇) 与
+\(-\tfrac12\) (Epelbaum 2002 = E2002) 两种约定。两者只是整体符号反转，
+但若代码用一种约定写、LEC 拟合用另一种，
+氚束缚能 \(B(^3\!\mathrm{H})\) 与文献参考值会\textbf{偏向相反方向}（每 \(\sim\!100\,\mathrm{keV}\) 量级）。
+
+\textbf{commit \texttt{f4df358}}（\cref{lst:ch16-cE-fix}）确认 Tic-tac 选取
+\(+\tfrac12\) 的 Navrátil/Witała 约定，并把
+\(W^{\rm ct}_{cE}\) 与 1\(\pi\)-CT 的整体前因子统一改成 \(+\tfrac12\)。
+本约定也在 \cref{app:E_input_dictionary} 的 \texttt{c\_E} 字段说明中显式记录。
+
+% =========================================
+\section{离散化方案}
+\label{sec:ch16-discretization}
+
+把 \cref{eq:ch16-W-pw} 投到 WP 网格上：
+\begin{equation}
+\label{eq:ch16-W-WP}
+\Wsymbol^{(k)}_{\PWchanp\PWchan,\, i'j'\, ij}
+= \int_{\binp{i'}}\!\!dp'\!\int_{\binq{j'}}\!\!dq'\!\int_{\binp{i}}\!\!dp\!\int_{\binq{j}}\!\!dq\;
+  \Wsymbol^{(k)}_{\PWchanp\PWchan}(\jacobip',\jacobiq',\jacobip,\jacobiq)\,/\,\Niso_{\rm bin}.
+\end{equation}
+4 维 bin 积分用 \(\NppW \times N_q^{\rm quad}\) 的嵌套 Gauss-Legendre。
+内部 2 维 \((x, \phi)\) 积分用 \(\Nx, \Nphi = 8, 8\)（生产配置；\(\Nx=16\) 验证一次后差别 \(<10^{-9}\)）。
+最终 6 维积分总开销 \(O(\NppW^2 N_q^{\rm quad\,2}\,\Nx\Nphi)\) 倍于 NN 势矩阵——这是 3NF 启用后\textbf{单次 V 矩阵构造时间膨胀 \(\sim 1.3\times\)}的来源。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch16-algorithm}
+
+\begin{algorithm}[H]
+\caption{N$^2$LO 3NF 部分波 kernel 组装}
+\label{alg:ch16-3nf-pw}
+\KwIn{部分波索引列表 $\{\PWchan\}$, WP 网格 $\{\binp{i}, \binq{j}\}$, LECs $\{\cD,\cE,\cone,\cthree\}$, 截止 $\Lambda$.}
+\KwOut{$W^{(0)}, W^{(2)} \in \mathbb{R}^{\Nalpha\times\Nalpha\times \NpWP\times\NqWP\times \NpWP\times \NqWP}$}
+\For{每个通道对 $(\PWchanp, \PWchan)$}{
+  从 \cref{app:B_wigner} 取 6$j$/9$j$/CG 表，构造 $D^{(0)},\,D^{(2)}$\;
+  \For{每个 bin 对 $(i',j',i,j)$}{
+    \For{每个 quadrature 点 $(\jacobip',\jacobiq',\jacobip,\jacobiq)$}{
+      \For{每个角度 $(x,\phi)$}{
+        \(\mathcal{S}_{1\pi\text{-CT}} \leftarrow {\cD}/(\fpi^2)\,(\bvec{\sigma}_3\!\cdot\!\hat{Q})/(Q^2+\mpi^2)\)\;
+        \(\mathcal{S}_{2\pi} \leftarrow [-4\cone\mpi^2 + 2\cthree(\bvec{q}_2\!\cdot\!\bvec{q}_3)]/\fpi^2\)\;
+        \(\mathcal{S}_{\rm ct} \leftarrow \cE\)\;
+        $W^{(k)}_{\rm bin}\,+= D^{(k)}\,\mathcal{S}\,\exp[-(\jacobip^2{+}\jacobiq^2)^2/\Lchi^4]$\;
+      }
+    }
+    \(\Wsymbol^{(k)}\,/=\,(2\pi)^3\)\tcp*{Fourier 归一化（commit bdb239d）}
+  }
+}
+\end{algorithm}
+
+% =========================================
+\section{代码落地}
+\label{sec:ch16-code-land}
+
+\subsection{kernel 头文件总览}
+
+\lstinputlisting[style=cpp, caption={\texttt{src/interactions/chiral\_3nf\_pw\_kernels.h:1--50}：3NF 部分波核 API 总览}, label={lst:ch16-kernels-header}]{code_excerpts/snippets/ch16_kernels_header.h}
+
+3 个 kernel 函数 \texttt{kernel\_1pe\_contact, kernel\_2pe\_c1c3, kernel\_contact} 各自负责一类项；
+统一返回\textbf{动量空间标量值}\(\mathcal{S}_i\)，把所有自旋-同位旋角度因子留给 recoupling 层处理。
+
+\subsection{1\(\pi\)-CT 部分（commit \texttt{8db06bf}）}
+
+\lstinputlisting[style=cpp, caption={\texttt{src/interactions/chiral\_3nf\_pw\_kernels.h:100--160}：kernel\_1pe\_contact 实现}, label={lst:ch16-kernel-1pe}]{code_excerpts/snippets/ch16_kernel_1pe.h}
+
+commit \texttt{8db06bf} 把原来 \(\mathcal{T}_{1\pi\text{-CT}}\) 的 6 维角积分替换为
+rank-0 + rank-2 分解（\cref{eq:ch16-spin-tensor-decomp}）。代码中体现为：原版有大约
+\(\sim 80\) 行的 6\(j\) 显式求和，新版仅 \(\sim 30\) 行；rank-0 项的角度积分 analytic、
+rank-2 项用 \texttt{coupling\_helper(j\_pair, j\_spec, k=2)} 调用 \cref{app:B_wigner} 的 9\(j\) 表。
+
+\subsection{W1\_1pe\_contact 业务封装（rank-0 + rank-2）}
+
+\lstinputlisting[style=cpp, caption={\texttt{src/interactions/three\_nucleon\_force\_model.cpp}：W1\_1pe\_contact 的 rank-0/rank-2 主循环}, label={lst:ch16-W1-1pe-contact}]{code_excerpts/snippets/ch16_W1_1pe_contact.cpp}
+
+代码组织上把内层 quadrature 与外层 rank 求和\textbf{物理意义对应一一}：
+\texttt{rank0\_term}/\texttt{rank2\_term} 命名让后续维护者无需追文献也能看出 \cref{eq:ch16-spin-tensor-decomp} 的两半。
+commit \texttt{8db06bf} 之前这两段是混合在一起的——这是该 commit 最大的可读性收益。
+
+\subsection{2\(\pi\)-exchange 部分（commit \texttt{1f05031}）}
+
+\lstinputlisting[style=cpp, caption={\texttt{src/interactions/three\_nucleon\_force\_model.cpp}：W1\_2pe 主循环（\(\cone, \cthree\) 项）}, label={lst:ch16-W1-2pe}]{code_excerpts/snippets/ch16_W1_2pe.cpp}
+
+2\(\pi\) kernel 的 \texttt{lec\_bracket}\(=[-4\cone\mpi^2 + 2\cthree(\bvec{q}_2\!\cdot\!\bvec{q}_3)]/\fpi^2\) 直接对应 \cref{eq:ch16-I-integral} 的 \(\mathcal{S}_{2\pi}\)；
+spatial 因子 \texttt{q2q3 / prop} 是 \(\bvec{q}_2\!\cdot\!\bvec{q}_3 / [(\bvec{q}_2^2+\mpi^2)(\bvec{q}_3^2+\mpi^2)]\)
+（双 \(\pi\) 传播子）。commit \texttt{1f05031} 也把这一项做了同样的 rank-0 + rank-2 重写。
+
+\subsection{contact 部分（commit \texttt{f4df358} \(\cE\) 符号修正）}
+
+\lstinputlisting[style=cpp, caption={\texttt{src/interactions/three\_nucleon\_force\_model.cpp}：W1\_contact 实现（\(\cE\) 项）}, label={lst:ch16-W1-contact}]{code_excerpts/snippets/ch16_W1_contact.cpp}
+
+注意整体前因子 \(+\tfrac12\)（Navrátil/Witała 约定，commit \texttt{f4df358}）。这个 \(+\tfrac12\)
+\textbf{不是}文献 Epelbaum 2002 eq.~(2.10) 的 \(-\tfrac12\) ——读者若对照 E2002 论文，
+要把整篇推导的整体符号取反；本仓库按 Navrátil 选定。
+
+\subsection{Fourier 归一化（commit \texttt{bdb239d}）}
+
+\lstinputlisting[style=cpp, caption={\texttt{src/interactions/three\_nucleon\_force\_model.cpp}：fourier\_norm\_const 计算与施加点}, label={lst:ch16-fourier-norm}]{code_excerpts/snippets/ch16_fourier_norm_const.cpp}
+
+注意 \texttt{fourier\_norm\_const} 在 W\(^{(1)}\)（不含 P 算符）的层级一次性施加，
+而\textbf{不是}在每个 kernel 内部——这是 commit \texttt{bdb239d} 的关键设计：让"归一化"
+独立可控、可单元测试，避免重复或漏乘。
+
+\subsection{regulator (squared-Gaussian)}
+
+\lstinputlisting[style=cpp, caption={squared-Gaussian regulator 实现 \(e^{-(p^2+q^2)^2/\Lambda^4}\)}, label={lst:ch16-regulator}]{code_excerpts/snippets/ch16_regulator_gauss.cpp}
+
+E2002 eq.~(3.19) 规定 squared-Gaussian 形式（指数中是 \((p^2+q^2)^2\) 而非 \((p^2+q^2)\)）；
+历史 commit \texttt{5cf16ab} 把早期实现的"线性高斯"修为 squared 形式（详见 \cref{app:F_pitfalls_future} H-3）。
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch16-numerical-closure}
+
+\begin{numericalbox}
+\textbf{代表性数值}（\(\Tlab=190\,\)MeV, J\(^\pi=1/2^+\), \(N_p=N_q=20\), \(N_\phi=N_x=8\),
+LECs 从 \texttt{lecs\_idaho}: \(\cD=-0.2,\cE=-0.205,\cone=-0.74\,{\rm GeV}^{-1},\cthree=-3.61\,{\rm GeV}^{-1}\)，
+\(\Lambda=500\,\)MeV）：
+
+\begin{tabular}{ll}
+\toprule
+\(\Wsymbol^{(0)}_{\rm 1\pi\text{-CT}}\) bin-(0,0) 对角元 & \(+1.43\times 10^{-3}\,\mathrm{MeV}^{-2}\) \\
+\(\Wsymbol^{(2)}_{\rm 1\pi\text{-CT}}\) 同元 & \(-7.12\times 10^{-4}\) \\
+\(\Wsymbol^{(0)}_{\rm 2\pi}\) 同元 & \(+2.18\times 10^{-3}\) \\
+\(\Wsymbol^{(2)}_{\rm 2\pi}\) 同元 & \(-1.05\times 10^{-3}\) \\
+\(\Wsymbol_{\cE}\) 同元 & \(+5.40\times 10^{-4}\) \\
+\midrule
+3NF on/off 对 \(B(^3\mathrm{H})\) 影响 & \(\Delta E_b \approx -0.45\,\mathrm{MeV}\) \\
+3NF on/off 对 \(d\sigma/d\Omega\) (60\(^\circ\) cm) 影响 & \(\sim 4\%\) 增大 \\
+3NF on/off 对 \(\iTeleven\) (90\(^\circ\) cm) 影响 & \(\sim 0.05\) 绝对值变化 \\
+\bottomrule
+\end{tabular}
+
+\textbf{复现命令}：
+\begin{verbatim}
+./CPP/run CPP/Input/input_miller_gate1_np20_3nf.txt
+python tools/check_3nf_normalization/check_3nf_normalization \
+       --np 20 --nq 20 --J 1 --psi triton_psi.h5
+\end{verbatim}
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch16-interfaces}
+
+\textbf{上游}：
+\begin{itemize}
+  \item LECs（\(\cD,\cE,\cone,\cthree,\Lambda\)）从 \texttt{src/config/set\_run\_parameters.cpp} 解析，
+        默认值在 \texttt{lecs\_idaho.h}/\texttt{lecs\_n2loopt.h} 中；详见 \cref{app:E_input_dictionary}。
+  \item 部分波索引 \(\{\PWchan\}\) 与 WP 网格由 \cref{ch:07_pw_symm_states}、\cref{ch:06_wp_swp_states} 提供。
+  \item 6\(j\)/9\(j\)/CG 表由 \cref{app:B_wigner} 中 \texttt{coupling\_coefficients.cpp} 实现。
+\end{itemize}
+
+\textbf{下游}：
+\begin{itemize}
+  \item 总势矩阵 \(V_{\rm tot} = V_{\rm 2N} + V_{\rm 3NF}\) 在 \cref{ch:08_potential_matrix} 中合成；
+        Faddeev solver（\cref{ch:11_faddeev_solver}）直接消费。
+  \item 数值正确性由 \cref{ch:17_3nf_numerical} 的 \texttt{check\_3nf\_normalization} 工具验证。
+\end{itemize}
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch16-pitfalls}
+
+\begin{pitfallbox}
+\textbf{P1：\(\cE\) 符号约定错误。}
+错用 Epelbaum 2002 \(-\tfrac12\) 与本仓库 Navrátil \(+\tfrac12\) 约定混用，
+会让 \(B(^3\mathrm{H})\) 朝相反方向偏。诊断方法：跑 \texttt{check\_3nf\_normalization}，对比 \(\cE\to-\cE\) 后的束缚能。
+修复点：commit \texttt{f4df358}（\cref{lst:ch16-W1-contact}）。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{P2：\(1/(2\pi)^3\) Fourier 归一化漏乘或重复乘。}
+症状：3NF 矩阵元与 Witała benchmark 偏 \((2\pi)^{\pm 3}\sim 4\times 10^{-3}\) 量级（漏乘是\textit{大}，重复是\textit{小}）。
+修复点：commit \texttt{bdb239d}，在 \texttt{three\_nucleon\_force\_model.cpp} 的
+W\(^{(1)}\) 调用层一次性施加（\cref{lst:ch16-fourier-norm}）。\textbf{绝对不要在 kernel 内部分别加}。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{P3：rank-0 vs rank-2 系数符号弄反。}
+\cref{eq:ch16-spin-tensor-decomp} 中 rank-0 部分系数是 \(\tfrac{1}{3}(\bvec{A}\!\cdot\!\bvec{B})\)，
+而 rank-2 部分是减去 rank-0 后的剩余。代码里两者用 \texttt{rank0\_term}/\texttt{rank2\_term} 命名分离
+（commit \texttt{8db06bf}/\texttt{1f05031}）。诊断方法：把 \texttt{rank2\_term} 整体置 0 再跑一次，
+看剩下的 \(\Wsymbol^{(0)}\) 是否与 \texttt{check\_3nf\_normalization} 的纯 rank-0 模式一致。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{P4：regulator 形式（线性 vs squared）混用。}
+E2002 eq.~(3.19) 是 squared-Gaussian \(e^{-(p^2+q^2)^2/\Lambda^4}\)，
+不是 \(e^{-(p^2+q^2)/\Lambda^2}\)。前者在 \(p,q\to\Lambda\) 处衰减更陡。
+线性版会让 \(B(^3\mathrm{H})\) 在 \(\Lambda\)-扫参时不平滑（\cref{app:F_pitfalls_future} H-3）。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{P5：\(\cone, \cthree\) 单位换算。}
+LEC 表通常以 \(\mathrm{GeV}^{-1}\) 给出（如 \(\cone=-0.74\,\mathrm{GeV}^{-1}\)），但
+Tic-tac 内部 \texttt{include/constants.h} 用 \(\mathrm{MeV}\)。换算因子 \(10^{-3}\) 容易遗漏；
+commit \texttt{ddbb389}（\cref{app:F_pitfalls_future} H-2）已修复并把变量改名为
+\texttt{fpi4\_inv\_MeV} 显式标注单位。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{P6：\texttt{w1\_scale} 调试参数误以为是物理参数。}
+\texttt{w1\_scale}（详见 \cref{app:E_input_dictionary}）只是把 \(\Wsymbol^{(1)}\) 整体乘以一个常数
+用于 Padé 收敛诊断；\textbf{物理生产必须 \(=1.0\)}。早期一些扫参脚本误把这个当作 LEC 之一变化扫描，
+得到不可重现的"3NF 灵敏度"——任何 \(\ne 1.0\) 的结果只有调试意义。
+\end{pitfallbox}

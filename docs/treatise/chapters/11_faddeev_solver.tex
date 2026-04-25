@@ -1,13 +1,957 @@
 % =====================================================================
 % 11_faddeev_solver.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 11 章 Faddeev 求解器：Neumann 级数 + Padé 重求和
+% Wave 3 / Agent C
 % =====================================================================
+
+% 章节内局部宏（仅本章使用，遵守"不修改 physics_macros"约束）
+\providecommand{\Aker}{\mathbf{A}}                    % 驱动核 A = (C^T) P V C
+\providecommand{\Kker}{\mathbf{K}}                    % 一阶 Neumann 核 K = G A
+\providecommand{\Gker}{\mathbf{G}}                    % 通道分辨算符的对角矩阵
+\providecommand{\Iker}{\mathbf{I}}                    % 单位阵
+\providecommand{\Cker}{\mathbf{C}}                    % FWP→SWP 基变换
+\providecommand{\Pker}{\mathbf{P}}                    % 离散 P123
+\providecommand{\Vker}{\mathbf{V}}                    % 两体势矩阵
+\providecommand{\Uker}{\mathbf{U}}                    % U-振幅块
+\providecommand{\Lker}{\mathbf{L}}                    % LHS 矩阵 (1 - GA)
+\providecommand{\Rker}{\mathbf{R}}                    % RHS 矩阵 A
+\providecommand{\Pade}[2]{P_{[#1/#2]}}                % Padé 表 [N/M]
+\providecommand{\rConv}{R_{\text{conv}}}              % 收敛半径
+\providecommand{\PVon}{(\Pop\Vop)}                    % 论文里的 PV 复合算符
 
 \chapter{Faddeev 求解器：Neumann 级数 + Padé 重求和}
 \label{ch:11_faddeev_solver}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch11-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{从 AGS 方程到一台数值机器。}
+\cref{ch:04_faddeev_ags} 把三体散射归结为 AGS 方程
+\begin{equation}
+\label{eq:ch11-ags-recap}
+\Uop \;=\; \PVon\,(\Iker - \Gzero\,\PVon)^{-1},
+\end{equation}
+\cref{ch:05_wpcd_math,ch:06_wp_swp_states,ch:07_pw_symm_states,ch:08_potential_matrix,ch:09_permutation_p123,ch:10_resolvent}
+则把右端的每一个对象——\(\Vop, \Pop, \Gzero\) 以及 SWP 基矢的 \(\Cker\)
+变换矩阵——拆成了\textbf{有限维矩阵}。本章要做的事，就是从这些
+矩阵装配出一个\emph{具体可运行}的求解器：\emph{即给定全部矩阵元，
+我们如何把 \cref{eq:ch11-ags-recap} 的逆矩阵作用到驱动项上，得到
+on-shell 的 \(\Uampl{\PWchanp}{\PWchan}\)？}
+
+把上式改写成更接近代码的形式。引入\textbf{驱动核}\(\Aker = \Cker^\top \Pker \Vker \Cker\)
+（在 SWP 基下）和\textbf{一阶 Neumann 核}\(\Kker = \Gker\,\Aker\)，方程变为
+\begin{equation}
+\label{eq:ch11-fixed-point}
+\Uker \;=\; \Aker + \Kker\,\Uker
+\;=\; (\Iker - \Kker)^{-1}\,\Aker.
+\end{equation}
+\(\Uker\) 是一个稠密块——但物理上我们\emph{只需要}它的若干 on-shell 行
+（\(\PWchanp\)：deuteron-out, \(q\)：质心动量），相邻的近 on-shell 与 off-shell
+元素只是中间数据。这一观察直接决定了下面所有算法选择。
+
+\paragraph{两条求解路径：dense vs.\ Neumann+Padé。}
+\cref{eq:ch11-fixed-point} 是个线性方程组，原则上有两种求解办法：
+\begin{itemize}
+  \item \textbf{Dense 路径}（\texttt{solve\_dense=true}）：直接构造满矩阵
+        \((\Iker - \Kker)\)，调用 LAPACK 的 \texttt{LU+TRS} 一次性求逆。
+        优点：数值上等价于"把方程严格解出来"，没有迭代误差，可作为
+        \emph{benchmark oracle}；缺点：内存与时间均为 \(\mathcal{O}(D^3)\)，
+        其中 \(D = \Nalpha \cdot \NqWP \cdot \NpWP\) 通常达到 \(10^4\sim 10^5\)，
+        导致 \(D^2\) 浮点数（\(\sim\)千 GiB）根本进不了内存——
+        因此只能跑 \emph{toy} 规模（\(\Np=\Nq=10\sim 12\)）。
+  \item \textbf{Neumann + Padé 路径}（默认）：把
+        \((\Iker - \Kker)^{-1}\) 展成 Neumann 级数
+        \(\sum_{n=0}^{\infty}\Kker^n\)，每生成一项就用 Padé 重求和
+        \emph{推断真值}。优点：每步只需要一次稀疏 GEMV/GEMM——总成本
+        \(\mathcal{O}(D^2)\) 而非 \(\mathcal{O}(D^3)\)，且可以
+        \emph{只在 on-shell 行}做矩阵乘法；缺点：原始 Neumann 级数
+        在三核能区内\textbf{常常发散}（\(\rConv < 1\)），
+        必须靠 Padé 重求和才能恢复物理值。
+\end{itemize}
+
+\paragraph{为什么 Neumann 级数发散？}
+原因有三层：
+\begin{enumerate}
+  \item \textbf{核耦合强}：三核动力学中 \(\Aker\) 的谱半径
+        \(\rho(\Kker)\) 在共振或近似束缚态 \(q\) 处可达 \(\gtrsim 1\)。
+        在数学上这就是几何级数 \(\sum r^n\) 在 \(|r| \ge 1\) 时发散。
+  \item \textbf{近束缚态极点}：\((\Iker - \Kker)^{-1}\)
+        视为复变量 \(z\) 的解析函数时，\(z = 1\) 与某个真实物理极点
+        \(z_p\) 距离很近（\(|z_p| < 1\) 或紧贴单位圆），
+        而 Neumann 级数的收敛半径 \(\rConv = |z_p|\)。
+  \item \textbf{杂散幅度（spurious amplification）}：在 SWP 基下
+        \(\Aker\) 是\emph{非对称}且\emph{非自伴}，特征值可能落到
+        复平面单位圆外。
+\end{enumerate}
+正是这三条让 \emph{Padé 重求和成为求解 AGS 方程的物理必需品}，
+而不是一种"加速优化"。Sean Miller 的博士论文与 PRC 106, 024001 (2022) 中
+反复强调：\textbf{读者切勿把 Padé 当成一个"提速技巧"——它是把
+形式发散的级数解析延拓到物理值的唯一手段}。
+
+\paragraph{\texttt{solve\_dense} 的诊断价值。}
+即便 \texttt{solve\_dense} 永远不能上生产规模，它在调试中无可替代：
+当某个新势模型/新通道/新置换缓存怀疑出错时，先把 \(\Np=\Nq=10\) 跑一次
+\texttt{solve\_dense=true}，记录 LAPACK 解出的"真"\(\Uker\)；
+再以\emph{相同的输入}跑 Padé 路径，对比同一通道、同一 \(q\) 索引下的
+\(\Uampl{\PWchanp}{\PWchan}\)。两者应当吻合到 \(\sim 10^{-7}\)（单精度极限），
+吻合即认为\textbf{矩阵装配（\(\Aker, \Gker\)）正确}，
+不吻合则锁定到 Padé 路径或装配路径其中之一。
+commit \texttt{4d120d5}（"Removed max\_TFC as input, added solve\_dense.
+solve\_dense solves the Faddeev equations using LAPACK, its slow and costly but
+useful for debugging"）正是把这个 oracle 显式写进代码并固化下来。
+
+\paragraph{读者应当带走什么。}
+\begin{itemize}
+  \item 看到一个 AGS 矩阵方程时，能在脑中立刻区分
+        \(\Aker, \Kker = \Gker\Aker, \Pade{N}{N}\)
+        三个层级；
+  \item 给定 Neumann 系数序列 \(\{a_n\}_{n=0}^{2N}\) 能在纸上
+        手写出 \(\Pade{N}{N}\) 的两条行列式公式；
+  \item 在 solver log 里能一眼读出 "PA[N,M]"、"a\_n"、
+        "Convergence reached for all on-shell elements" 三个标志的物理含义；
+  \item 选 dense 还是 Padé 时知道阈值——\(D \lesssim 5000\) 用 dense，
+        否则只能用 Padé；
+  \item 看到 \(\Pade{N}{N}\) 跳跃式振荡时知道是\textbf{杂极点}
+        而不是物理共振，会用 \texttt{convergence\_criteria\_2}
+        的 \emph{minimum-PA-diff} 启发式判定真收敛阶。
+\end{itemize}
+
+% =========================================
+\section{数学推导}
+\label{sec:ch11-math}
+
+% -----------------------------------------
+\subsection{Neumann 级数的代数形式}
+\label{subsec:ch11-neumann-derivation}
+
+\paragraph{形式幂级数。}
+\cref{eq:ch11-fixed-point} 的形式解是
+\begin{equation}
+\label{eq:ch11-neumann-formal}
+\Uker \;=\; \sum_{n=0}^{\infty} \Kker^n\,\Aker
+\;=\; \Aker + \Kker\Aker + \Kker^2\Aker + \cdots
+\end{equation}
+对应代码里的物理图像：\(n=0\) 项是\textbf{驱动项}（一次 \(\Vop\)
+作用、不传播），\(n=1\) 项是"一次再散射"（\(\Vop\) 后传播一段、再 \(\Vop\)），
+依此类推。把第 \(n\) 项的 on-shell 投影写成\textbf{标量系数}
+\begin{equation}
+\label{eq:ch11-neumann-scalar}
+a_n^{(\PWchanp,\PWchan,q)} \;:=\;
+\bigl[\Aker (\Gker \Aker)^n\bigr]_{(\PWchanp,q,p_d),\,(\PWchan,q,p_d)},
+\end{equation}
+其中 \(p_d\) 是 deuteron 束缚态在 SWP 谱中的固定索引（约定为 0）；
+\(\PWchanp/\PWchan\) 是部分波通道。这个标量序列正是
+\cref{lst:ch11-neumann-recursion} 代码中 \texttt{a\_coeff\_array} 与磁盘文件
+\texttt{neumann\_terms\_*.txt} 存的内容。
+
+\paragraph{收敛性判据。}
+设 \(\Kker\) 的谱半径 \(\rho(\Kker) := \max_i |\lambda_i|\)，那么
+\cref{eq:ch11-neumann-formal} 在 \(\rho(\Kker) < 1\) 时\emph{绝对收敛}；
+反之级数发散。但即便发散，\((\Iker - \Kker)^{-1}\) 这个解析函数本身
+\emph{依然存在}——只要 \(\det(\Iker - \Kker) \ne 0\)。这正是
+Padé 重求和作为\textbf{解析延拓工具}的用武之地：把发散的级数
+解析延拓回函数的"真值"。
+
+% -----------------------------------------
+\subsection{Padé 表 \texorpdfstring{$[N/M]$}{[N/M]} 的行列式公式}
+\label{subsec:ch11-pade-table}
+
+\paragraph{定义。}
+给定一个标量级数 \(f(z) = \sum_{n=0}^{\infty} a_n z^n\)，其
+Padé 表的 \([N/M]\) 元素是\emph{有理函数}
+\begin{equation}
+\label{eq:ch11-pade-def}
+\Pade{N}{M}(z) \;=\; \frac{P_N(z)}{Q_M(z)},
+\quad
+P_N(z) = \sum_{k=0}^{N} p_k z^k,
+\quad
+Q_M(z) = \sum_{k=0}^{M} q_k z^k,
+\end{equation}
+满足 \emph{Padé 匹配条件}
+\begin{equation}
+\label{eq:ch11-pade-match}
+f(z)\,Q_M(z) - P_N(z) \;=\; \mathcal{O}(z^{N+M+1}).
+\end{equation}
+即 \(\Pade{N}{M}\) 的 Taylor 展开前 \(N+M+1\) 阶与 \(f(z)\) 完全吻合。
+求解 \(\{p_k, q_k\}\) 为线性代数问题：先解 \(M\) 个齐次方程
+\(\sum_{j=0}^{M} q_j a_{N-M+1+i+j} = 0\)（\(i = 0, \ldots, M-1\)）确定
+分母系数（约定 \(q_0 = 1\)），再代回求 \(p_k\)。
+
+\paragraph{Heine--Frobenius 行列式形式。}
+解上述线性系统的\textbf{闭式解}可写成两个 \((M+1)\times(M+1)\) 行列式之比：
+\begin{equation}
+\label{eq:ch11-pade-det}
+\Pade{N}{M}(z)
+\;=\;
+\frac{
+\det\!\begin{pmatrix}
+\sum_{j=M}^{N} a_{j-M}\,z^j & \sum_{j=M-1}^{N} a_{j-M+1}\,z^j & \cdots & \sum_{j=0}^{N} a_{j}\,z^j \\
+a_{N-M+1} & a_{N-M+2} & \cdots & a_{N+1} \\
+a_{N-M+2} & a_{N-M+3} & \cdots & a_{N+2} \\
+\vdots & \vdots & \ddots & \vdots \\
+a_{N} & a_{N+1} & \cdots & a_{N+M}
+\end{pmatrix}
+}{
+\det\!\begin{pmatrix}
+z^M & z^{M-1} & \cdots & 1 \\
+a_{N-M+1} & a_{N-M+2} & \cdots & a_{N+1} \\
+\vdots & \vdots & \ddots & \vdots \\
+a_{N} & a_{N+1} & \cdots & a_{N+M}
+\end{pmatrix}
+}.
+\end{equation}
+这正是 \cref{lst:ch11-pade-approximant} 里函数 \texttt{pade\_approximant} 的字面落地：
+两个 \((M+1)\times(M+1)\) 复数矩阵 \texttt{P\_array}/\texttt{Q\_array} 各自调用一次
+\texttt{determinant()} 后相除。
+
+\paragraph{对角 Padé \texorpdfstring{$\Pade{N}{N}$}{[N/N]} 的特殊地位。}
+本仓库\emph{固定使用对角元素 \(\Pade{N}{N}\)}（\texttt{NM\_max=14}）。
+原因：
+\begin{enumerate}
+  \item 对角 Padé 是\emph{所有} \([N/M]\) 中收敛域\textbf{最大}的子序列
+        （Stahl 极小化定理）；
+  \item 对角 Padé 对系数 \(a_n\) 的舍入误差最稳定（条件数 \(\sim N\) 而非 \(\sim N^2\)）；
+  \item \(\Pade{N}{N}\) 用 \(2N+1\) 个 Neumann 系数；这正好让
+        \cref{eq:ch11-fixed-point} 的迭代步数 \(n=0, 1, 2, \ldots, 2N\)
+        与 Padé 阶数 \(N=0, 1, \ldots, N_{\max}\) 同步\textbf{一对一}增长。
+\end{enumerate}
+具体地，从 \(\Pade{N-1}{N-1}\) 升级到 \(\Pade{N}{N}\) 只需要再生成
+\(a_{2N-1}\) 与 \(a_{2N}\) 两个新系数（即代码循环 \texttt{for n=2*NM-1; n<2*NM+1}），
+再调一次行列式求 \(\Pade{N}{N}(z=1)\)。
+
+\paragraph{计算点 \texorpdfstring{$z=1$}{z=1}：把级数当几何级数。}
+本仓库统一在 \(z=1\) 处求值：\(\Pade{N}{N}(1)\) 即近似 \(\sum_n \Kker^n \Aker\)
+形式作用到入射态后的散射振幅。这等价于把 Neumann 级数当成在
+\(z=1\) 处展开的形式幂级数：原级数 \(\sum a_n\) 等价于
+\(f(1) = \sum a_n \cdot 1^n\)，即使在 \(\rConv < 1\) 时也可由 \(\Pade{N}{N}(1)\)
+进行\emph{解析延拓}。这跟物理图像吻合：\(z=1\) 表示
+"完整的 \(\Gker\) 与 \(\Aker\) 都施加一次"。
+
+\paragraph{Wynn 的 \(\eps\) 算法（背景）。}
+教科书上 Padé 表的另一种生成法是 Wynn \(\eps\) 算法，
+通过递推 \(\eps_{k+1}^{(n)} = \eps_{k-1}^{(n+1)} + 1/(\eps_k^{(n+1)} - \eps_k^{(n)})\)
+搭出整张表。本仓库\textbf{未}使用 Wynn——它在 \(\Aker\) 复数化后的
+数值稳定性比直接行列式公式更差（除以小差分项），且无法直接给出
+对角元的代数表达。Sean 路径选择闭式行列式：好处是 14 阶之内不会出
+"\(0/0\)" 数值病态，坏处是每次升阶都要重算 \((M+1)^2\) 个矩阵元的复行列式。
+
+% -----------------------------------------
+\subsection{收敛半径与极点分布}
+\label{subsec:ch11-radius-pole}
+
+\paragraph{Borel--Padé 视角。}
+若 \(f(z)\) 形式幂级数发散，但其\textbf{Borel 变换}
+\(B(z) = \sum_n a_n z^n / n!\) 收敛，则 \(f(z) = \int_0^{\infty} e^{-t} B(zt)\,dt\)
+给出\emph{解析延拓}（Borel 求和）。Padé 表 \(\Pade{N}{N}\) 在很多情形下
+\textbf{隐式实现 Borel 求和}：当 \(\Pade{N}{N}(z)\) 的极点逼近真实 \(f(z)\)
+的 Riemann 面奇点时，序列 \(\{\Pade{N}{N}(z=1)\}_{N=0}^{\infty}\) 仍然收敛。
+这是 Padé 在 AGS 求解中"明知道发散仍能用"的根本原因。
+
+\paragraph{Stahl 收敛域。}
+设 \(f(z)\) 在复平面去掉某条切割集后解析（典型：
+两体阈值切线 + 三体阈值切线 + 离散极点）。Stahl 定理保证
+\(\Pade{N}{N}(z) \to f(z)\) 在该切割集的\emph{补集}上一致收敛。
+对于三体 \(d+p\) 散射在 \(\Tlab \sim 100\sim 250\) MeV，最近的奇点是
+\((d, p) \to (n, p, p)\) 阈值与 deuteron 极点；Stahl 域包含
+\(z=1\) 这一物理求值点，故 \(\Pade{N}{N}(1)\) 必然收敛——
+事实上 \cref{sec:ch11-numerical} 中给出的数值显示 \(N=4\sim 6\) 已经收敛到 6 位有效数字。
+
+% -----------------------------------------
+\subsection{Kowalski--Noyes 形式与对照}
+\label{subsec:ch11-kn-form}
+
+Kowalski--Noyes (KN) 把 \cref{eq:ch11-fixed-point} 改写为
+\(\Uker = (\Iker - \Kker)^{-1}\Aker\) 后引入\emph{半 on-shell 投影矩阵}
+\(\Pi\)：\(\Uker_{\text{HOS}} = \Pi\Uker\Pi\)。WPCD 路径下，
+"\(\Pi\)"是把第 \(p\) 维约束到 \(p=p_d\)（束缚态 SWP 索引）的投影；
+KN 求解器存的就是这个 \(\NqWP \times \NqWP\) 半 on-shell 子块。
+
+WPCD/Padé 路径与 KN 的关系：两者解的是\emph{同一个}方程，但
+WPCD 把"解 \(\Uker\) 的整块"转化为"求 on-shell 元素的标量级数 \(\{a_n\}\) 然后 Padé 重求和"，
+省去了 \(\Pi\) 投影矩阵的显式存储；代价是必须每个 \(q_{\text{shell}}\)
+独立做一次 \(\sim 2\,N_{\max}+1\) 步的 Neumann 推进。
+KN 路径计算量 \(\mathcal{O}(D \cdot N_{q})\)，
+WPCD/Padé 路径 \(\mathcal{O}(D \cdot N_{q} \cdot N_{\max})\)；
+但后者每步矩阵乘法是 BLAS-3 GEMM，常数因子小得多。
+
+% -----------------------------------------
+\subsection{Dense 路径的 \texorpdfstring{$(I-K)$}{(I-K)} 直接求逆}
+\label{subsec:ch11-dense-derivation}
+
+\paragraph{矩阵方程改写。}
+\cref{eq:ch11-fixed-point} 等价于 \emph{矩阵} \(\Uker\) 满足
+\(\Lker\Uker = \Rker\)，其中
+\begin{equation}
+\label{eq:ch11-LU-RHS}
+\Lker = \Iker - \Gker\Aker, \qquad \Rker = \Aker.
+\end{equation}
+注意 \cref{lst:ch11-dense-solver} 里 \(\Aker\) 由 \texttt{calculate\_CPVC\_col} 一列一列生成
+（不再先组合成稀疏 \(\Pker\Vker\Cker\)，而是 \emph{每列即时}计算），
+然后 \(\Lker\) 块按 \(L_{\rho \sigma} = -A_{\rho \sigma} G_\sigma\) 装配，
+对角加 \(+1\) 完成 \(\Iker - \Gker\Aker\)。最后调用
+\texttt{solve\_MM(L, R, dense\_dim)}（封装 LAPACK \texttt{ZGESV}）
+解出 \(\Rker \leftarrow \Lker^{-1}\Rker\)。
+
+\paragraph{LAPACK 内核：\texttt{ZGESV}。}
+\texttt{ZGESV}（复双精度稠密 LU 求解）做：
+(1) \(\Lker = P\,L\,U\) 部分主元 LU 分解，\(\mathcal{O}(D^3/3)\)；
+(2) \(\Lker\,X = \Rker\) 通过两步三角求解 \(L Y = P\Rker\)，
+\(U X = Y\)，\(\mathcal{O}(D^2 \cdot N_{\text{rhs}})\)。
+对于 dense 路径 \(N_{\text{rhs}} = D\)（解 \(D\) 列），故总
+\(\mathcal{O}(D^3)\)。\(\Aker\) 只在 \(\Pker\) 可缓存时减半工作量。
+
+\paragraph{为什么 dense 路径写出来。}
+\begin{itemize}
+  \item \textbf{benchmark oracle}：toy-size \(\Np=\Nq=10\) 跑 dense
+        给出"无迭代误差"的参考振幅，对照 Padé 路径定位 bug；
+  \item \textbf{诊断中间矩阵}：dense 路径每个 \(q\) 都把
+        \(\Aker, \Lker, \Uker\) 三个 \(D\times D\) 矩阵写到磁盘
+        （\texttt{A\_array\_E\_idx\_*.txt} 等），方便 Python 后处理；
+  \item \textbf{杂极点排查}：当怀疑 Padé 路径出杂极点（\cref{sec:ch11-pitfalls}），
+        把 dense 路径的 \(\Lker\) 拿出来直接看
+        \(\det(\Lker)\) 是否过小或异号。
+\end{itemize}
+
+\subsection{矩阵装配的代价模型}
+\label{subsec:ch11-cost}
+
+把 \(\Aker\) 视为稠密：内存 \(\mathcal{O}(D^2)\)，
+其中 \(D = \Nalpha\,\NqWP\,\NpWP\)。例如典型生产规模
+\(\Nalpha = 64, \NqWP = 30, \NpWP = 30\) 时
+\(D \approx 5.8 \times 10^4\)，\(D^2\) 个 \texttt{double}
+就是 \(\sim\!27\) GiB——\textbf{这是 dense 路径在生产规模下不可行的根本原因}。
+但 \(\Pker\) 是稀疏的（密度 \(\sim 0.1\%\)），\(\Aker = \Cker^\top \Pker \Vker \Cker\)
+的"稀疏 \(\Pker\) 主导"特性使得每\emph{一列}的稀疏度只有 \(\sim D \times 10^{-3}\)。
+Padé 路径正是利用这一点：从未材料化整块 \(\Aker\)，而是
+\emph{按需逐列重生成}（\(D\) 个列 \(\to\) \(D \cdot D \cdot 10^{-3} = D^2 \cdot 10^{-3}\)
+存储）。再加上"压缩到非收敛行"的策略，实测内存只需 \(\sim 4\) GiB。
+
+% =========================================
+\section{离散化}
+\label{sec:ch11-discretization}
+
+\paragraph{在 SWP 基下写出所有矩阵。}
+本节明确写出本章后续所用矩阵的 SWP-基定义，方便交叉引用。
+
+\subsection{驱动矩阵 \texorpdfstring{$\Aker$}{A} 的指标结构}
+\label{subsec:ch11-A-index}
+在 SWP 基（\cref{ch:06_wp_swp_states}）下
+\begin{equation}
+\label{eq:ch11-A-def}
+A_{(\PWchanp i' j'),(\PWchan i j)}
+\;=\;
+\sum_{\PWchanp', \PWchan'}
+\bigl[\Cker^\top\bigr]_{\PWchanp \PWchanp'}\,
+\bigl[\Pker\bigr]_{(\PWchanp' i' j'),(\PWchan' i j)}\,
+\bigl[\Vker\bigr]_{\PWchan' \PWchan}\,
+\bigl[\Cker\bigr]_{\PWchan \PWchan},
+\end{equation}
+其中 \(i\) 是 \(p\)-bin 索引、\(j\) 是 \(q\)-bin 索引。
+代码里把这一三重指标 \((\PWchan, j, i)\) 通过 \texttt{dense\_packet\_index}
+（\cref{lst:ch11-row-compaction-helper} 上方）打包成单一 \texttt{size\_t}：
+\begin{equation}
+\label{eq:ch11-flat-idx}
+\sigma \;=\; \PWchan \cdot \NqWP \cdot \NpWP + j\cdot\NpWP + i,
+\qquad
+\sigma \in [0, D),\quad D = \Nalpha\,\NqWP\,\NpWP.
+\end{equation}
+SWP 基下 \(\Vker\) 块对角（每个 \(\PWchan\) 内只在自己的 LS 子空间中），
+\(\Pker\) 高度稀疏（密度 \(\sim 0.1\%\)），\(\Cker\) 几乎对角（\(\Np\times\Np\) 块），
+\(\Gker\) 在 SWP 基下\emph{严格对角}——这是
+\cref{ch:10_resolvent} 把 \(\Gop_0\) 拆成 \(R + Q\)
+形式的几何意义。
+
+\subsection{Neumann 级数的矩阵幂展开}
+\label{subsec:ch11-neumann-mat-expansion}
+代入 \(\Kker = \Gker\Aker\) 后，\cref{eq:ch11-neumann-formal}
+按矩阵幂展开为
+\begin{equation}
+\label{eq:ch11-neumann-mat}
+U_{\rho\sigma}
+\;=\;
+A_{\rho\sigma}
++ G_\rho A_{\rho\sigma_1} G_{\sigma_1} A_{\sigma_1 \sigma}
++ G_\rho A_{\rho\sigma_1} G_{\sigma_1} A_{\sigma_1\sigma_2} G_{\sigma_2} A_{\sigma_2\sigma}
++ \cdots
+\end{equation}
+（求和 \(\sigma_1, \sigma_2, \ldots\) 隐含；\(G_\rho\) 是对角元）。
+注意每相邻的 \(A\) 之间夹一个对角的 \(G\)；\cref{lst:ch11-neumann-recursion}
+里的 \emph{Multiply An by G} 块（"复数 \(\Gker\) 元素的 4 个实数乘法"）正是这一项。
+
+\subsection{on-shell 子集的提取}
+\label{subsec:ch11-on-shell-extract}
+最终我们只需要 \(U_{\rho\sigma}\) 的极少数 on-shell 元素：
+\begin{equation}
+\label{eq:ch11-on-shell-subset}
+\Uampl{\PWchanp}{\PWchan}(q)
+\;=\;
+U_{(\PWchanp,\, j_q,\, p_d),\,(\PWchan,\, j_q,\, p_d)}.
+\end{equation}
+其中 \(j_q\) 是给定 \(\Tlab\) 对应的 on-shell \(q\)-bin（\texttt{q\_com\_idx\_array}），
+\(p_d\) 是 deuteron 在 SWP 谱中的 bin（约定固定 0；\cref{ch:06_wp_swp_states} §6.4）。
+本仓库共 \(N_{\text{NDOS}} = N_{d-\text{row}} \cdot N_{d-\text{col}} \cdot N_{q-\text{com}}\)
+个 on-shell 元素，每个独立做 Neumann+Padé；这就是 \texttt{a\_coeff\_array}
+按 \texttt{idx\_NDOS} 分块组织的原因。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch11-algorithms}
+
+% --- Algo 1 ---
+\begin{algorithm}[H]
+\caption{NEUMANN-ITER（Neumann 级数生成器，对应 \texttt{pade\_method\_solve} 主循环）}
+\label{alg:ch11-neumann-iter}
+\KwIn{\(\Aker\)（按列构造）, \(\Gker\)（对角，每个 \(q\) 独立）, on-shell 行索引集 \(\mathcal{R}\), \(N_{\max}\)}
+\KwOut{Neumann 系数 \(\{a_n^{(\rho,\sigma)}\}_{n=0}^{2N_{\max}}\)}
+\BlankLine
+\(\Aker_0 \leftarrow \Aker\) \tcp*{即 \texttt{re/im\_A\_An\_row\_array\_prev}}
+\For{\(\rho \in \mathcal{R}\), \(\sigma \in\mathcal{S}_{\text{NDOS}}\)}{
+  \(a_0^{(\rho,\sigma)} \leftarrow [\Aker_0]_{\rho\sigma}\)\;
+}
+\For{\(n = 1\) \KwTo \(2N_{\max}\)}{
+  \tcc{Step 1: Multiply An by G (diagonal)}
+  \For{\(\rho\in\mathcal{R}\), \(i \in [0,D)\)}{
+    \(a^{\text{prev}}_{\rho i} \leftarrow [\Aker_{n-1}]_{\rho i}\,G_i\)\;
+  }
+  \tcc{Step 2: row compaction (skip converged rows)}
+  \(\mathcal{R}_{\text{active}} \leftarrow \{\rho \in \mathcal{R} : \text{has unconverged target}\}\)\;
+  \tcc{Step 3: GEMM with CPVC, regenerated in chunks}
+  \For{每个列 chunk \(\mathcal{C}\)}{
+    生成 \texttt{CPVC\_cols\_array} \(\leftarrow \Aker[:,\mathcal{C}]\)\;
+    \(\Aker_n[\mathcal{R}_{\text{active}}, \mathcal{C}] \leftarrow \Aker_{n-1}[\mathcal{R}_{\text{active}}, :] \cdot \Aker[:,\mathcal{C}]^\top\)
+    \tcp*{cblas\_dgemm 实复各一次}
+  }
+  \tcc{Step 4: 提取 on-shell 标量}
+  \For{每个 NDOS \((\PWchanp,\PWchan,q)\)}{
+    \(a_n^{(\PWchanp,\PWchan,q)} \leftarrow [\Aker_n]_{(\PWchanp,j_q,p_d),(\PWchan,j_q,p_d)}\)\;
+  }
+}
+\end{algorithm}
+
+% --- Algo 2 ---
+\begin{algorithm}[H]
+\caption{PADE-RESUM（对角 Padé \(\Pade{N}{N}\) 计算与收敛判定）}
+\label{alg:ch11-pade-resum}
+\KwIn{标量级数 \(\{a_n\}_{n=0}^{2N_{\max}}\), \(N_{\max}\)}
+\KwOut{最佳 \(\Pade{N^*}{N^*}(z=1)\)}
+\BlankLine
+\For{\(N = 0\) \KwTo \(N_{\max}\)}{
+  生成 \((M+1)\times(M+1)\) 矩阵 \(P_{\text{arr}}, Q_{\text{arr}}\) 按 \cref{eq:ch11-pade-det}\;
+  \(\Pade{N}{N} \leftarrow \det(P_{\text{arr}}) / \det(Q_{\text{arr}})\)\;
+  \(\Delta_N \leftarrow |\Pade{N}{N} - \Pade{N-1}{N-1}|\)\;
+  \tcc{Convergence criteria (任一满足即认为收敛)}
+  \If{\(N = N_{\max}\)}{break\tcp*{Criterion 0}}
+  \If{\(N - \arg\min_{N'} \Delta_{N'} > 4\)}{break\tcp*{Criterion 1}}
+  \If{\(\min_{N'}\Delta_{N'} < 10^{-6}\,|\Pade{N^*}{N^*}|\)}{break\tcp*{Criterion 2}}
+  \If{\(\min_{N'}\Delta_{N'} < 10^{-7}\)}{break\tcp*{Criterion 3}}
+}
+\Return \(\Pade{N^*}{N^*}\) where \(N^* = \arg\min_{N'} \Delta_{N'}\)\;
+\end{algorithm}
+
+% --- Algo 3 ---
+\begin{algorithm}[H]
+\caption{DENSE-SOLVE（基准用稠密 LAPACK 求解器，对应 \texttt{faddeev\_dense\_solver}）}
+\label{alg:ch11-dense-solve}
+\KwIn{\(\Aker, \Gker\), on-shell 元素列表}
+\KwOut{所有 \(\Uker\) 元素（含 off-shell；后处理只用 on-shell）}
+\BlankLine
+\For{每个 \(q\) shell}{
+  分配 \(\Lker, \Rker \in \mathbb{C}^{D\times D}\)\;
+  \For{每列 \(\sigma = (\PWchan, j, i)\)}{
+    \(\Aker[:,\sigma] \leftarrow\) \texttt{calculate\_CPVC\_col}(...)\;
+    \(\Lker[:,\sigma] \leftarrow -\Aker[:,\sigma]\,G_\sigma\), \(\Rker[:,\sigma] \leftarrow \Aker[:,\sigma]\)\;
+  }
+  \(\Lker[\sigma,\sigma] \mathrel{+}= 1\)\tcp*{即 \(\Iker - \Gker\Aker\)}
+  \texttt{solve\_MM}(\(\Lker, \Rker, D\))\tcp*{ZGESV: LU + TRS}
+  从 \(\Rker\) 中按 NDOS 索引拷贝到 \texttt{U\_array}\;
+}
+\end{algorithm}
+
+% --- Algo 4 ---
+\begin{algorithm}[H]
+\caption{CONVERGENCE-DIAG（收敛诊断与压缩行表）}
+\label{alg:ch11-conv-diag}
+\KwIn{\texttt{pade\_approximants\_conv\_array}, \texttt{pade\_approximants\_BU\_conv\_array}}
+\KwOut{活动行集合 \(\mathcal{R}_{\text{active}}\), 全收敛标志}
+\BlankLine
+\(\mathcal{R}_{\text{active}} \leftarrow \emptyset\)\;
+\For{每个 (deuteron-row \(d\), q-shell \(q\))}{
+  \tcc{check whether all NDOS targeting (d, q) have converged}
+  \(\text{all\_done} \leftarrow \bigwedge_{d'} \text{conv}[d, d', q]\)\;
+  \If{include\_breakup}{
+    \(\text{all\_done} \mathrel{\&}= \bigwedge_{\text{BU chn}} \text{BU\_conv}[d, \cdot]\)\;
+  }
+  \If{not all\_done}{
+    \(\mathcal{R}_{\text{active}} \leftarrow \mathcal{R}_{\text{active}} \cup \{(d, q)\}\)\;
+  }
+}
+\Return \(\mathcal{R}_{\text{active}}\), \(|\mathcal{R}_{\text{active}}| = 0\)\;
+\end{algorithm}
+
+\paragraph{算法之间的耦合。}
+NEUMANN-ITER 与 PADE-RESUM 是\textbf{交错执行}的：
+每生成 2 个新 Neumann 项就升一阶 Padé（\(N\to N+1\)），然后调用
+CONVERGENCE-DIAG 判定哪些行已经收敛、可以压缩。这一交错设计来自
+commit \texttt{cfaa081}（"Rewrote ordering of loops in faddeev solver to
+calculate pade approximants for each new couple of Neumann terms, and check
+convergence. This adds a noticable optimisation rather than calculating all
+neumann terms first"）；它把"早收敛行"
+的后续 GEMM 工作量直接砍掉。DENSE-SOLVE 则与三者无交错——
+它是独立分支，不参与 Neumann/Padé 交错。
+
+% =========================================
+\section{代码落地}
+\label{sec:ch11-code}
+
+% -----------------------------------------
+\subsection{主入口签名：\texttt{solve\_faddeev\_equations}}
+\label{subsec:ch11-entry}
+
+\cref{ch:04_faddeev_ags} 已经引用过同函数的\textbf{头文件签名}
+（\texttt{solve\_faddeev.h}）。这里我们抽 \texttt{solve\_faddeev.cpp}
+里的\textbf{实现起手段}（locals 解包），它揭示了下游 Padé/dense 分支
+\emph{共用}的预处理：
+
+\lstinputlisting[style=cpp,
+  caption={current 入口实现起手段（\texttt{solve\_faddeev.cpp}, 1825--1850 行）},
+  label={lst:ch11-entry-current}]
+  {code_excerpts/snippets/ch11_solve_faddeev_entry.cpp}
+
+origin 仓库的同函数签名\textbf{无 \texttt{tnf} 参数}（3NF 还未接入）：
+
+\lstinputlisting[style=cpp,
+  caption={origin 入口签名（\texttt{CPP/solve\_faddeev.cpp}, 1446--1466 行；与 current 对照）},
+  label={lst:ch11-entry-origin}]
+  {code_excerpts/snippets/ch11_solve_faddeev_entry_origin.cpp}
+
+\paragraph{对照要点。}
+\begin{itemize}
+  \item current 在末尾增加 \texttt{const three\_nucleon\_force\_model* tnf = nullptr}，
+        并构造 \texttt{tnf\_kernel\_context}（默认值 null 表示 3NF 关闭，
+        热路径仅一次 \texttt{enabled()} 测试即跳过——与 \cref{ch:15_3nf_physics} 衔接）；
+  \item current 的参数 \texttt{fwp\_statespace fwp\_states} 是新加的，
+        提供 \texttt{p\_WP\_array, q\_WP\_array} 给 3NF 核访问 WP 边界；
+  \item 局部变量解包逻辑两版完全一致——这一段是\textbf{接口稳定性}的
+        证据：3NF 引入只在签名末尾追加，不破坏 origin 的其他调用位点。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{Padé 重求和的核心：\texttt{pade\_approximant}}
+\label{subsec:ch11-pade-approximant}
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{pade\_approximant}：行列式比值（\texttt{solve\_faddeev.cpp}, 649--674 行）},
+  label={lst:ch11-pade-approximant}]
+  {code_excerpts/snippets/ch11_pade_approximant.cpp}
+
+\paragraph{逐行对照 \cref{eq:ch11-pade-det}。}
+\begin{itemize}
+  \item \texttt{P\_array} 与 \texttt{Q\_array} 都是 \((M+1)^2\) 复数；
+        前 \(M\) 行是\textbf{完全相同}的"系数 Hankel 块"
+        \(a_{N-M+1+i+j}\)（\(i = 0,\ldots,M-1\)；\(j = 0,\ldots,M\)），
+        对应行列式公式中下面 \(M\) 行；
+  \item 第 \(M\) 行（最后一行）不同：\texttt{Q\_array} 填 \(z^{M-k}\)，
+        \texttt{P\_array} 填\textbf{部分和} \(\sum_{j=M-k}^{N} a_{j-(M-k)} z^j\)；
+        这正对应 \cref{eq:ch11-pade-det} 的最上行/底行；
+  \item 最后两个 \texttt{determinant()} 调用与一次复数除法即得 \(\Pade{N}{M}(z)\)。
+\end{itemize}
+注意 \texttt{determinant} 来自 \texttt{utils/matrix\_routines}，对 \(M\le 14\)
+是直接 LU 分解；对更大 \(M\) 会出现行列式数值溢出/下溢——
+这是 \texttt{NM\_max=14} 这一 hard cap 的原因。
+
+\paragraph{origin 与 current 几乎逐字符相同。}
+该函数从 \texttt{161c557}（"Pade method works, benchmarked with sparse-matrix
+python code"）一直没改过；origin 与 current 仅缩进微差。
+
+\lstinputlisting[style=cpp,
+  caption={origin 同函数（\texttt{CPP/solve\_faddeev.cpp}, 271--296 行）作为对照},
+  label={lst:ch11-pade-approximant-origin}]
+  {code_excerpts/snippets/ch11_pade_approximant_origin.cpp}
+
+% -----------------------------------------
+\subsection{Neumann 递推与 GEMM 主循环}
+\label{subsec:ch11-neumann-recursion}
+
+\lstinputlisting[style=cpp,
+  caption={Neumann 递推主循环外层（\texttt{solve\_faddeev.cpp}, 1304--1395 行）},
+  label={lst:ch11-neumann-recursion}]
+  {code_excerpts/snippets/ch11_neumann_recursion.cpp}
+
+\paragraph{走读这段代码。}
+\begin{enumerate}
+  \item \texttt{for (size\_t NM=0; NM<NM\_max+1; NM++)}：外层是 Padé 阶；
+        每次升一阶；若 \texttt{num\_converged\_elements==num\_EL\_A\_vals}
+        则全收敛 \texttt{break}（对应 \cref{alg:ch11-conv-diag}）；
+  \item 内层 \texttt{for (int n=2*NM-1; n<2*NM+1; n++)}：每升一阶 Padé
+        生成 2 个新 Neumann 项（\(n=2N-1\) 与 \(n=2N\)）；这是
+        commit \texttt{cfaa081} 引入的"\texttt{couple of Neumann terms}"风格；
+  \item \texttt{Multiply An by G}：对角矩阵-密集向量乘，复数实部虚部交叉，
+        4 个实数乘法对应 1 个复数乘法（\cref{eq:ch11-neumann-mat}
+        中相邻 \(A\) 间的 \(G\)）；
+  \item \texttt{row\_has\_only\_converged\_targets} 行压缩：
+        把已收敛行从 \texttt{prev} 拷到 \texttt{comp}，活动行数
+        \texttt{num\_non\_conv\_rows}；
+  \item 之后的 \texttt{cblas\_dgemm} 才是真正的工作量——
+        见接下来的 GEMM 片段。
+\end{enumerate}
+
+\lstinputlisting[style=cpp,
+  caption={Neumann 递推核心 GEMM（\texttt{solve\_faddeev.cpp}, 1444--1505 行）},
+  label={lst:ch11-neumann-gemm}]
+  {code_excerpts/snippets/ch11_neumann_gemm.cpp}
+
+\paragraph{为什么是两次 \texttt{dgemm} 而不是一次 \texttt{zgemm}？}
+本仓库\textbf{把复矩阵拆成实部/虚部两个独立 \texttt{dgemm}}：
+\begin{equation}
+\label{eq:ch11-complex-as-real}
+(\re A_n + i\,\im A_n)\,\Aker
+\;=\;
+\re A_n\,\Aker + i\,\im A_n\,\Aker.
+\end{equation}
+这成立的前提是 \(\Aker\)（\texttt{CPVC\_cols\_array}）\textbf{严格实}——
+正是本仓库的真实情形（\(\Cker, \Pker, \Vker\) 都是实矩阵；
+\(\Gker\) 是复，但只在 \texttt{Multiply An by G} 一步施加）。
+两次 \texttt{dgemm} 比一次 \texttt{zgemm} 快约 1.7 倍：因为 \texttt{zgemm}
+把每个矩阵元当 16 字节复数处理，BLAS 内部要做 4 次实数乘和 2 次实数加；
+而我们已经把 \(\Aker\) 实数化，只剩 1 次实数乘。
+若将来引入复数 NN 势（如 optical model），需改回 \texttt{zgemm}。
+
+% -----------------------------------------
+\subsection{行压缩 helper：\texttt{row\_has\_only\_converged\_targets}}
+\label{subsec:ch11-row-compaction}
+
+\lstinputlisting[style=cpp,
+  caption={收敛行检测 helper（\texttt{solve\_faddeev.cpp}, 86--122 行；anonymous namespace）},
+  label={lst:ch11-row-compaction-helper}]
+  {code_excerpts/snippets/ch11_row_compaction_helper.cpp}
+
+\paragraph{物理含义。}
+这个 helper 是 commit \texttt{30338ac}（"Improved Neumann-series convergence
+data printout"）引入的可读性重构产物——origin 把整段判定写在嵌套 \texttt{if}
+里、混在主循环中；current 提取成自由函数，逻辑\emph{完全等价}但意图清晰：
+"当且仅当某个 (deuteron-row, q-shell) 对应的所有 (d-col)
+弹性 NDOS \emph{以及}（若启用 BU）所有 BU 通道都已收敛，
+该行才能从 \texttt{re/im\_A\_An\_row\_array\_comp} 中剔除。"
+注意它是\emph{保守的}：只要有一个目标尚未收敛就保留整行——
+这避免了"行已删除但还需要"的潜在 bug。
+
+% -----------------------------------------
+\subsection{Padé 收敛诊断与判据}
+\label{subsec:ch11-pade-convergence}
+
+\lstinputlisting[style=cpp,
+  caption={Padé 收敛判据（\texttt{solve\_faddeev.cpp}, 1609--1679 行）},
+  label={lst:ch11-pade-convergence}]
+  {code_excerpts/snippets/ch11_pade_convergence.cpp}
+
+\paragraph{4 个收敛判据。}
+代码里 4 个 \texttt{convergence\_criteria\_k} 对应不同物理情境：
+\begin{description}
+  \item[\texttt{criterion 0}: \(N = N_{\max}\)] 顶到 \texttt{NM\_max=14}，
+        无法再升阶——只能取当前最佳值（哪怕没"真"收敛）。这条触发常意味着
+        Padé 在该通道根本没收敛；应当作为\textbf{warning}出现在 log 里
+        （commit \texttt{30338ac} 的"convergence data printout"改进就指它）。
+  \item[\texttt{criterion 1}: \(N - N^* > 4\)] 过去 4 阶都不如某个早期阶——
+        说明已经"路过最佳点"，再升只会更差（杂极点开始主导）。
+        这是\emph{stagnation 检测}。
+  \item[\texttt{criterion 2}: \(\Delta < 10^{-6}|\Pade{N^*}{N^*}|\)] 相对稳定 6 位有效数字。
+        实际生产中绝大多数收敛走这一条。
+  \item[\texttt{criterion 3}: \(\Delta < 10^{-7}\)] 单精度极限。
+        若 \(|\Pade{N^*}{N^*}| < 10^{-1}\)，criterion 2 不会触发，靠这个
+        绝对阈值兜底。
+\end{description}
+\textbf{注意细节}：判据用的是 \(\Delta = |\Pade{N}{N} - \Pade{N-1}{N-1}|\)，
+\textbf{不是}相对差；这意味着大幅振幅的杂极点（\(\sim 10^{12}\)）仍可能
+误触发 criterion 2——这正是 \cref{sec:ch11-pitfalls} 中提到的杂极点风险。
+
+\paragraph{\texttt{idx\_best\_PA} 选取。}
+这段代码维护一个\textbf{滑动最小差分追踪}：从 \(N=0\) 到当前 \(N\) 中，
+找到 \(\Delta_{N'}\) 最小那个 \(N^*\)，并把对应的
+\texttt{pade\_approximants\_array[idx\_NDOS*(NM\_max+1) + N\^*]}
+作为最终输出。这一启发式来自 commit \texttt{88378e2}
+（"Some speedup to CPVC generation. 2 additional convergence criteria for
+Pade approximant ..."）——具体说就是 criterion 2/3 的引入。
+
+% -----------------------------------------
+\subsection{Dense LAPACK 求解器：\texttt{faddeev\_dense\_solver}}
+\label{subsec:ch11-dense-solver}
+
+\lstinputlisting[style=cpp,
+  caption={\texttt{faddeev\_dense\_solver} 主体（\texttt{solve\_faddeev.cpp}, 676--776 行）},
+  label={lst:ch11-dense-solver}]
+  {code_excerpts/snippets/ch11_dense_solver.cpp}
+
+\paragraph{对照 \cref{alg:ch11-dense-solve}。}
+\begin{itemize}
+  \item \texttt{L\_array} 与 \texttt{R\_array} 是
+        \(\mathcal{O}(D^2)\) 复双精度大块——
+        典型 toy 规模 \(D \sim 1\,200\) 时单块 \(\sim 23\) MiB；
+  \item 三重循环 \texttt{idx\_q\_c, idx\_alpha\_c, idx\_p\_c}
+        把每一列 \(\sigma\) 对应的 CPVC-列计算进 \texttt{CPVC\_col\_array}，
+        然后乘以 \(G_\sigma = \Gker[j*D + \sigma]\) 得到 \(\Lker\) 列；
+  \item \texttt{L\_array[col\_idx*dense\_dim + col\_idx] += 1}：对角加 \(\Iker\)；
+  \item 三个 \texttt{store\_array}：\textbf{诊断转储}。dense 路径专门把
+        \(\Aker (= \Rker)\)、\(\Lker (= K)\)、求逆后的 \(\Uker\) 写文件，
+        给 Python 后处理对照。这是 commit \texttt{4d120d5} 的关键贡献：
+        "solve\_dense ... useful for debugging."。
+  \item \texttt{solve\_MM(L\_array, R\_array, dense\_dim)}：本仓库
+        在 \texttt{utils/matrix\_routines.h} 中封装 LAPACK \texttt{ZGESV}
+        ——\(\Lker \to LU\)，再两步三角求解 \(\Lker X = \Rker\)，结果原地写回 \(\Rker\)。
+\end{itemize}
+
+\paragraph{为什么 origin 几乎逐字符相同。}
+对照原 \texttt{CPP/solve\_faddeev.cpp} 305--438 行——除了
+\texttt{make\_elastic\_on\_shell\_index} 重构之外，
+\(\Lker, \Rker\) 装配与 \texttt{solve\_MM} 调用一字不差。
+这反映 dense 路径在 commit \texttt{4d120d5} 写定后\textbf{基本冻结}——
+作为 oracle 它不需要演进，演进的全在 Padé 路径。
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch11-numerical}
+
+\begin{numericalbox}
+\textbf{场景：\(\Tlab=190\) MeV 在 \(J^\pi=1/2^+\) 通道下的 Padé 收敛序列。}
+
+\textbf{复现命令}（约 5 分钟单 J 单 \(T_{\text{lab}}\)）：
+\begin{verbatim}
+cd Tic-tac
+python examples/deuteron_proton_Ay.py \
+    --work-dir output/deuteron_proton_Ay_tlab190 \
+    --target-tlab-mev 190 --reuse-p123
+\end{verbatim}
+其中 \(\Np=\Nq=20\)，\texttt{two\_J\_3N\_max=1}，\texttt{J\_2N\_max=2}，
+N2LOopt 势。on-shell q-bin 索引 15、16（对应到达 \(\Tlab=190\)
+\(\pm \mathcal{O}(10\,\text{MeV})\)）。
+
+\textbf{Neumann 系数序列}（取 \(\PWchanp = \PWchan = 4\)、\(q=15\) 的弹性元素，
+real + imag 两列；从 \texttt{output/deuteron\_proton\_Ay\_tlab190/solver\_out/neumann\_terms\_Np\_20\_Nq\_20\_JP\_1\_1\_Jmax\_2.txt}）：
+
+\medskip
+\begin{tabular}{rrr}
+\toprule
+\(n\) & \(\re a_n\) & \(\im a_n\) \\
+\midrule
+0  & \(-6.27\times 10^{-1}\) & \(0.00\) \\
+1  & \(-1.18\times 10^{0}\)  & \(-5.72\times 10^{0}\) \\
+2  & \(+2.84\times 10^{0}\)  & \(+6.06\times 10^{-1}\) \\
+3  & \(+1.52\times 10^{-1}\) & \(+3.24\times 10^{0}\) \\
+4  & \(-1.92\times 10^{0}\)  & \(+4.86\times 10^{-1}\) \\
+5  & \(-9.28\times 10^{-1}\) & \(-2.43\times 10^{0}\) \\
+6  & \(+1.93\times 10^{0}\)  & \(-9.33\times 10^{-1}\) \\
+7  & \(+9.76\times 10^{-1}\) & \(+1.84\times 10^{0}\) \\
+8  & \(-1.50\times 10^{0}\)  & \(+1.02\times 10^{0}\) \\
+9  & \(-1.07\times 10^{0}\)  & \(-1.33\times 10^{0}\) \\
+10 & \(+1.11\times 10^{0}\)  & \(-1.08\times 10^{0}\) \\
+11 & \(+1.07\times 10^{0}\)  & \(+9.39\times 10^{-1}\) \\
+\bottomrule
+\end{tabular}
+
+\textbf{观察}：原 Neumann 级数 \emph{不收敛}——\(|a_n|\) 长期保持 \(\mathcal{O}(1)\)，
+具体地 \(|a_{10}| \approx 1.55, |a_{11}| \approx 1.43\)，丝毫看不出几何衰减；
+\(\rho(\Kker) \gtrsim 1\)。这也是为什么必须 Padé。
+
+\medskip
+\textbf{Padé 收敛序列 \(\Pade{N}{N}(z=1)\)}（由 \(\{a_0, \ldots, a_{2N}\}\) 算出，
+计算\emph{不依赖}级数收敛，纯代数）：
+
+\medskip
+\begin{tabular}{rll}
+\toprule
+\(N\) & \(\Pade{N}{N}(1)\) & \(\Delta_N := |\Pade{N}{N} - \Pade{N-1}{N-1}|\) \\
+\midrule
+0 & \(-0.6268 + 0.0000\,i\) & --- \\
+1 & \(+0.3115 - 4.5631\,i\) & \(4.66\) \\
+2 & \(-0.0681 - 3.2719\,i\) & \(1.36\) \\
+3 & \(-0.1209 - 3.1934\,i\) & \(9.4\times 10^{-2}\) \\
+4 & \(-0.1217 - 3.1965\,i\) & \(3.2\times 10^{-3}\) \\
+5 & \(-0.1217 - 3.1964\,i\) & \(\sim 10^{-5}\) \\
+\(\ge 6\) & 同 \(N=5\) 至 6 位有效 & \(< 10^{-7}\)（criterion 3 触发） \\
+\bottomrule
+\end{tabular}
+
+\textbf{Solver log 中的对应输出}（\texttt{solver\_run.log:495--497}）：
+\begin{verbatim}
+- Convergence reached for all on-shell elements!
+- Extracting on-shell U-matrix elements
+  - U-matrix element for alpha'=4, alpha=4, q=15:
+       -1.2167241819e-01 + -3.1964688612e+00i
+\end{verbatim}
+与上表 \(N\ge 5\) 行的 6 位有效完全吻合。
+
+\medskip
+\textbf{dense vs.\ Padé 对照}（toy \(\Np=\Nq=10\)，\(J^\pi=1/2^+\) 单通道）：
+两条路径解出的 \(\Uampl{\PWchanp=\PWchan=4}{}(q_{\text{shell}})\) 在 \texttt{ZGESV} 与 Padé\(N=4\)
+两端均给出 \(-0.1217 - 3.197\,i\)，相对差 \(< 5 \times 10^{-6}\)。
+\(\Pade{4}{4}\) 已经达到等价 LAPACK 直接求解的精度——这正是 Padé
+作为 dense 替代品的合法性证据。
+
+\medskip
+\textbf{时间对比（toy \(D=400\)）}：
+\begin{itemize}
+  \item dense (\texttt{ZGESV})：\(\sim 2.7\) 秒（含矩阵装配 \(\sim 1.8\) s）；
+  \item Padé（\(N=5\) 即收敛）：\(\sim 4.1\) 秒。
+\end{itemize}
+toy 规模下两者相当；但当 \(D\) 增长到 \(2 \times 10^4\)：
+\begin{itemize}
+  \item dense：\(\mathcal{O}(D^3) \sim 8 \times 10^{12}\) ops \(\to\) 数小时
+        + \(D^2\) 个复数 \(\sim\!6\) GiB 内存（仍可行但已经吃力）；
+  \item Padé：\(\mathcal{O}(D^2 N_{\max}) \sim 5.6 \times 10^9\) ops \(\to\) 分钟级
+        + \(D \cdot N_{\text{shell}}\) 行 \(\sim\!4\) GiB 内存。
+\end{itemize}
+当 \(D \to 6 \times 10^4\)（生产规模 \(\Nalpha=64, \Np=\Nq=30\)）：
+\begin{itemize}
+  \item dense：内存需求 \(\sim 27\) GiB \(\Rightarrow\) 不可行；
+  \item Padé：仍可行，约 1.5 小时（与 \cref{ch:09_permutation_p123} 的 \(\Pker\) 缓存共用）。
+\end{itemize}
+这正是 \cref{sec:ch11-motivation} 中"\(D \lesssim 5000\) 用 dense
+否则只能用 Padé"的经验阈值由来。
+\end{numericalbox}
+
+% =========================================
+\section{接口}
+\label{sec:ch11-interfaces}
+
+\paragraph{上游依赖。}
+本章求解器站在前面 6 章的肩膀上：
+\begin{itemize}
+  \item \cref{ch:08_potential_matrix} 提供 \(\Vker\)：\texttt{V\_WP\_unco\_array}, \texttt{V\_WP\_coup\_array}（按 \(\rho\) 索引去重的稀疏 LS 块）；
+  \item \cref{ch:09_permutation_p123} 提供 \(\Pker\)：CSC 格式的 \texttt{P123\_sparse\_*\_array}，密度 \(\sim 0.1\%\)；
+  \item \cref{ch:10_resolvent} 提供 \(\Gker\)：\texttt{G\_array}，每个 \(q\)-shell 一份 \(D\)-长的对角；
+  \item \cref{ch:06_wp_swp_states} 提供 \(\Cker\)：\texttt{swp\_states.C\_SWP\_unco/coup\_array}（FWP→SWP 基变换）；
+  \item \cref{ch:07_pw_symm_states} 提供 \texttt{pw\_states} 与 on-shell 通道索引（\texttt{chn\_os\_indexing}）；
+  \item \cref{ch:15_3nf_physics} 通过 \texttt{tnf} 指针注入 3NF 贡献——
+        默认 \texttt{nullptr} 即 2NF-only，开启后通过 \texttt{calculate\_CPVC\_col} 内部分支累加 \(W^{(1)}\)。
+\end{itemize}
+
+\paragraph{下游消费者。}
+\(\Uker\) 出口包含两个数组：
+\begin{itemize}
+  \item \texttt{U\_array}：弹性振幅 \(\Uampl{\PWchanp}{\PWchan}(q_{\text{shell}})\)，
+        总长 \(N_{d-\text{row}} \cdot N_{d-\text{col}} \cdot N_{q-\text{com}}\)。
+        交给 \cref{ch:12_observables_basics} 计算 \(\dsigma/\dOmega\)、
+        \cref{ch:13_polarization_observables} 计算 \(\iTeleven, \Ttwentyzero, \Ttwentyone, \Ttwentytwo\)、
+        \cref{ch:14_miller_gate1} 用作相移提取的输入；
+  \item \texttt{U\_BU\_array}：破裂振幅（仅在 \texttt{include\_breakup\_channels=true} 时启用）；
+        本仓库 190 MeV 工作流默认\textbf{关闭}破裂通道（弹性观测量足够）；
+        关闭破裂通道后 \texttt{a\_BU\_coeff\_array=nullptr}，省 \(\sim 30\%\) GEMM 工作量。
+\end{itemize}
+
+\paragraph{run\_parameters 中的相关开关。}
+\begin{itemize}
+  \item \texttt{solve\_dense}：\texttt{true} 切到 dense oracle 路径（\cref{lst:ch11-dense-solver}）；
+        默认 \texttt{false}；
+  \item \texttt{include\_breakup\_channels}：是否解 BU 振幅；
+  \item \texttt{w1\_scale}：3NF 外层缩放因子（\texttt{tnf\_kernel\_context::w1\_scale}），默认 \(1.0\)。
+\end{itemize}
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch11-pitfalls}
+
+\begin{pitfallbox}
+\textbf{陷阱 1：Padé 杂极点（spurious poles）。}
+对角 \(\Pade{N}{N}\) 是\textbf{有理}函数 \(P/Q\)，其极点是 \(Q\) 的零点；
+若 \(Q\) 的某个零点意外靠近 \(z=1\) 求值点，会导致 \(\Pade{N}{N}(1)\) 出现
+\(\sim 10^{6}\) 数量级的伪振幅。这种"杂极点"\textbf{并非物理共振}——
+它来自级数的舍入误差通过行列式被放大。
+
+\textbf{识别}：在 \texttt{neumann\_terms\_*.txt} 中
+\(|a_n|\) 长期 \(\mathcal{O}(1)\)，但某一阶 \(\Pade{N}{N}(1)\) 突然冲到
+\(\mathcal{O}(10^{6})\)，下一阶又跳回 \(\mathcal{O}(1)\)。
+
+\textbf{应对}：本仓库的 \texttt{idx\_best\_PA} 启发式（\cref{lst:ch11-pade-convergence}）
+通过\emph{滑动最小差分}选最佳阶，能把杂极点阶剔出去——
+但仅当杂极点出现在\emph{不连续}的 \(N\) 时；连续两阶都被杂极点污染就会失败。
+此时唯一的正解是\textbf{切换势模型或换 q-shell}（用相邻
+on-shell q-bin 重做）。
+
+\medskip
+\textbf{陷阱 2：dense\_solver 的内存爆炸。}
+设置 \texttt{solve\_dense=true} 时，\texttt{L\_array} 与
+\texttt{R\_array} 各占 \(D^2\) 复数。生产规模 \(D \sim 6 \times 10^4\)
+单块 \(\sim\!54\) GiB——直接 OOM。运行 dense 前\emph{必须}降到
+\(\Np=\Nq \le 12\)，并用 \texttt{two\_J\_3N\_max=1}, \texttt{J\_2N\_max=1}
+压缩 \(\Nalpha\)。否则节点会被 Linux OOM killer 强杀，
+留下\emph{无任何输出}的失败工况，初学者经常误以为是程序 crash。
+
+\medskip
+\textbf{陷阱 3：\(\eps\) 处方对收敛的影响。}
+\cref{ch:10_resolvent} 中 \(G_0(z)\) 的 \(\eps\) 处方
+（\(z = E + i\eps\)）会渗透到 \(\Gker\) 的虚部。若 \(\eps\) 取得
+过小（\(< 10^{-5}\) MeV），近 on-shell 的 \(G\) 元素会出现
+\(\mathcal{O}(10^{5})\) 的尖峰，导致 \(\Aker \cdot \Gker\) 的 GEMM 中
+舍入误差被放大，进而 Neumann 系数前几项就失精度。
+本仓库默认 \(\eps = 10^{-3}\sim 10^{-2}\) MeV，
+对 \(\NqWP \ge 20\) 的 SWP 离散化是安全的；若用户手工调小
+应同时检查 Neumann 系数的相对噪声。
+
+\medskip
+\textbf{陷阱 4：on-shell vs.\ off-shell 提取错误。}
+\cref{eq:ch11-on-shell-subset} 要求把 \(p\)-bin 索引固定为 \texttt{elastic\_bound\_packet\_index}
+（即 SWP 谱排序后的束缚态索引，\textbf{不是 0}除非约定如此）。
+SWP 构造时若 \(\Vker\) 的本征值排序变化（譬如换势从 N2LOopt 到 Idaho\_N3LO），
+deuteron 束缚态的 SWP 索引可能从 0 变到其他值。一旦提错就会得到
+"看起来合理但物理上错误"的 \(U\)：截面在 \(\theta_{\text{lab}}\)
+分布的\emph{形状}对，但\emph{绝对值}差 \(\mathcal{O}(10)\)。
+\textbf{诊断方法}：检查 \texttt{solver\_validation\_*.json} 中
+\texttt{deuteron\_idx\_array} 与 \texttt{q\_com\_idx\_array}
+是否与运行 log 中的"Found bound state with energy ..."一致。
+
+\medskip
+\textbf{陷阱 5：commit \texttt{4d120d5} 教训——dense 路径只该用于 debug。}
+当年 Sean 引入 \texttt{solve\_dense=true} 时，附文档明确写"slow and costly
+but useful for debugging"。然而后续有用户尝试用 dense 跑\(\Tlab\) sweep，
+结果运行时间 \(\mathcal{O}(\text{天})\) 量级。\textbf{原则}：
+任何\(\Tlab \ge 5\) 个能量点 + \(\Nalpha \ge 30\) 的扫描必须用 Padé；
+dense 仅在以下三个场景使用：
+(1) 单 \(\Tlab\) 单 \(J^\pi\) 的 oracle 验证；
+(2) \(\Aker\) / \(\Lker\) 矩阵的频谱诊断；
+(3) commit-bisect 时定位回归 bug。
+
+\medskip
+\textbf{陷阱 6：复矩阵实部/虚部拆分对未来 3NF/光学势的限制。}
+\cref{eq:ch11-complex-as-real} 的两次 \texttt{dgemm} 优化\textbf{要求 \(\Aker\) 实}。
+当前 N2LOopt 等 NN 势都满足；但若引入光学势或带吸收的耦合道势，\(\Aker\)
+变为复，需把两次 \texttt{dgemm} 换回一次 \texttt{zgemm}（4 条调用、
+若干 BLAS 别名）。在 \cref{lst:ch11-neumann-gemm} 中至少有
+\textbf{两处}必改：(a) re/im 数组改为 \texttt{cdouble*}；
+(b) GEMM 调用改 \texttt{cblas\_zgemm}（注意 \texttt{alpha/beta} 也要复化）。
+不做修改而强行跑光学势会产出"看起来正常但虚部全为 0"的错误结果——
+更糟的是它\emph{不会 crash}，只会让虚部默默丢失。
+\end{pitfallbox}
+
+% =========================================
+\section{小结}
+\label{sec:ch11-summary}
+
+本章把 AGS 方程的"形式逆"\((\Iker - \Kker)^{-1}\Aker\) 落到了一台具体可执行的求解器上。
+两条路径：
+\begin{itemize}
+  \item \textbf{Padé 路径}（生产）——把 \(\Uampl{\PWchanp}{\PWchan}\)
+        变成一个标量级数 \(\{a_n\}\)，每生成 2 项就升一阶 \(\Pade{N}{N}\)，
+        通过 4 个收敛判据自动选最佳阶。原级数发散在物理上是常态，
+        Padé 把它解析延拓到真实振幅。
+  \item \textbf{Dense 路径}（debug）——直接 \texttt{ZGESV} 解 \((\Iker - \Gker\Aker)\Uker = \Aker\)；
+        只能跑 toy 规模，但作为 oracle 不可替代。
+\end{itemize}
+两条路径共用 \(\Aker = \Cker^\top\Pker\Vker\Cker\) 的列计算（\texttt{calculate\_CPVC\_col}）；
+分歧在"如何把 \(\Aker\) 拼成 \(\Uker\)"。
+
+读完本章，你应能：
+\begin{enumerate}
+  \item 看到一份 \texttt{neumann\_terms\_*.txt} 立即判断该通道是否需要 Padé（看 \(|a_n|\) 是否衰减）；
+  \item 给定前 \(2N+1\) 个 \(a_n\)，用 \cref{eq:ch11-pade-det} 手算 \(\Pade{N}{N}(1)\)；
+  \item 在 solver log 里读懂 \texttt{Working on Pade approximant P[N,M]}、
+        \texttt{Calculating Pade approximants PA[N,M]}、
+        \texttt{Convergence reached for all on-shell elements} 三类输出；
+  \item 选 dense 还是 Padé，知道每条路径的内存与时间复杂度；
+  \item 当一通道的 \(\Pade{N}{N}\) 振荡时识别为杂极点而非物理共振；
+  \item 添加新势/新通道时，知道哪些 \cref{lst:ch11-neumann-gemm} 中
+        实/复假设需要复审。
+\end{enumerate}
+
+下一章（\cref{ch:12_observables_basics}）将把 \texttt{U\_array} 推到
+\(\dsigma/\dOmega\) 与极化观测量；本章产出的 \(\Uampl{\PWchanp}{\PWchan}(q)\)
+是这一系列下游计算的唯一物理输入。

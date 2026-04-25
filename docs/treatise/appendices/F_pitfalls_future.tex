@@ -1,9 +1,458 @@
 % =====================================================================
 % appendices/F_pitfalls_future.tex
-% Wave 0 占位 —— 待 Wave 7 子代理补全
+% Wave 7 / Appendix F —— 已知问题、踩坑记录、未来工作
+% 资料源：git log（fix/bug commits）、grep TODO|FIXME|XXX|HACK、raise_error 站点
 % =====================================================================
 
 \chapter{已知问题、踩坑记录、未来工作}
 \label{app:F_pitfalls_future}
 
-\textbf{[Wave 0 占位 —— 附录内容由 Wave 7 子代理填写]}
+本附录是 Tic-tac 仓库的“工程债”清单。它不是“免责声明”，而是一份\textbf{操作性指南}：哪些坑已经踩过、哪些雷还没排、未来若干合理的扩展方向，
+以及与同实验室其它代码的潜在交互。读者应在动手修改求解器前先扫一遍本附录。
+
+\section{阅读指南}
+\label{sec:appF_intro}
+
+本附录材料分四类：
+\begin{enumerate}
+  \item \textbf{源码 grep}：\texttt{TODO}/\texttt{FIXME}/\texttt{XXX}/\texttt{HACK} 标记，几乎都集中在 \texttt{src/interactions/chp/};
+  \item \textbf{已修复的历史 bug}：从 \texttt{git log -{}-grep="fix|bug"} 中筛出的代表性提交；
+  \item \textbf{运行时错误位点}：\texttt{raise\_error()}/\texttt{assert} 调用点，对应可能的失败模式；
+  \item \textbf{未来方向}：与 Coulomb、breakup、GPU、上下游代码（\texttt{toy\_DAbreak}、\texttt{ApnGemini}）相关的合理扩展。
+\end{enumerate}
+
+\section{源码遗留 TODO/FIXME 清单}
+\label{sec:appF_todo_grep}
+
+\subsection{\texorpdfstring{\texttt{src/interactions/chp/chiral-twobody-potentials.f90}}{src/interactions/chp/chiral-twobody-potentials.f90}}
+\label{subsec:appF_chp_todos}
+
+这是 chiral 两体势的 F90 实现，由 Boris/Idaho 组贡献。截至当前 \texttt{HEAD}，仍残留以下注释：
+
+\begin{enumerate}
+  \item \textbf{1533 行：} \texttt{! FIXME: if we use the 2PE isospin breaking mass,} —— 2\(\pi\)-exchange 在显式同位旋破缺质量下的形式因子未对齐到目前
+        \texttt{isospin\_breaking\_1S0} 路径。当前回避策略：\(2\)PE 仍用平均 \(m_\pi\)，仅 \(1\)PE 部分跑 isospin-breaking。结果在 \(\spectro{1}{S}{0}\) 上有
+        \(\sim 1\%\) 的人为差，\textbf{对极化观测量影响不可见，但相位移收敛检验中应当注意}。
+  \item \textbf{1793 行：} \texttt{! TODO: Magic number: 0.95.} —— \(z\) 积分上界为 \(0.95\) 而非 \(1.0\)，原作者注释“\(z\to 1\) 端被 spectral 函数振荡所支配”。
+        实际表现是 \(N^3\)LO 张量项在 \(p\to 0\) 处出现 \(\le 10^{-4}\) 量级残差。\textbf{这是一个未文档化的截断}，扫参时若看到 \(\spectro{3}{S}{1}\)
+        相位移在零能极限附近抖动，先怀疑这一行。
+  \item \textbf{1823 行：} \texttt{! FIXME: Add reference for this expression} —— spectral 表达式缺文献来源；与 Entem--Machleidt 2003 的 (B5)-(B6) 相符，
+        但作者当时未补 cite。
+  \item \textbf{3157 行：} \texttt{! FIXME: borisc: p and pp seems to be switched compared with what [1] uses.} —— \(p,p'\) 角色与原文献相反；该写法在
+        Boris 的 t-matrix 检验中通过，但对未来读者有误导风险。
+  \item \textbf{3752 行：} \texttt{! FIXME: borisc: What about higher orders?} —— 高阶项（\(\ge\) N\(^4\)LO）未实现；与本仓库当前只到 \(N^3\)LO 的事实
+        一致，但若将来想嫁接 N\(^4\)LO 势必须从此处开始扩展。
+\end{enumerate}
+
+C++ 主线（\texttt{src/core/}、\texttt{src/io/}、\texttt{src/utils/}、\texttt{src/interactions/3nf/} 等）目前\textbf{无} \texttt{TODO}/\texttt{FIXME} 标记——所有
+未完成项都收口到本附录与 \cref{app:E_input_dictionary}。
+
+\section{运行时错误位点：从 \texttt{raise\_error} 反推可能失败模式}
+\label{sec:appF_raise_sites}
+
+下面把 \texttt{raise\_error()} 出现的位点合并成“失败地图”：
+
+\begin{description}
+  \item[\texttt{set\_run\_parameters.cpp}：布尔解析失败] 任何布尔字段拼成 \texttt{1}/\texttt{0}/\texttt{TRUE} 等都会立即终止。
+  \item[\texttt{make\_wp\_states.cpp:119,134}：Unknown p/q-momentum gridtype] \texttt{p\_grid\_type}/\texttt{q\_grid\_type} 拼写非
+        \texttt{chebyshev}/\texttt{custom}。
+  \item[\texttt{make\_pw\_symm\_states.cpp:7}：Cannot have coupled states without a tensor force] 即 \texttt{tensor\_force=false} 但 \texttt{J\_2N\_max>=1}
+        的合法但物理无意义组合。\textbf{特别提醒}：早期版本曾允许这种组合并产生静默错位，提交 \texttt{de460e4} 之后强制 raise。
+  \item[\texttt{make\_pw\_symm\_states.cpp:94}：Cannot have negative J\_2N] 这通常是上游 \texttt{J\_2N\_max} 字段被命令行覆写为负值导致。
+  \item[\texttt{make\_permutation\_matrix.cpp:463}：SixJ\_array integer overflow] \(6j\) 表的扁平化索引在 \(J_{3N}\ge 17/2\) 时容易越过 \texttt{int}
+        上限——历史提交 \texttt{5e183da} 已修过一次（segfault \(\to\) raise）。如果重新出现，请把内部索引升到 \texttt{size\_t}。
+  \item[\texttt{make\_permutation\_matrix.cpp:1088}：Memory exceeded in sparse memory allocation] P123 稀疏数组实际超出节点物理内存。常见
+        于 \texttt{Np\_WP=Nq\_WP=80,J\_3N\_max=7/2}；解决方式：分通道并行（\texttt{parallel\_run=true} + \texttt{channel\_idx}）。
+  \item[\texttt{make\_permutation\_matrix.cpp:1140-1146}：行/列/COO 索引越界] 这类 raise 表征“\(P_{123}\) 的内部哈希越界”，几乎一定是上游
+        \texttt{two\_J\_3N\_max}/\texttt{J\_2N\_max} 与缓存（\texttt{P123\_folder}）的网格不一致——清空目录重跑。
+  \item[\texttt{make\_potential\_matrix.cpp:7}：\texttt{Encountered unphysical state in LS-solver}] 通道允许集合外的部分波误进入了 LS 求解；通常是
+        \texttt{isospin\_breaking\_1S0=true} + 耦合块组合的边界情形。
+  \item[\texttt{make\_potential\_matrix.cpp:167}：\texttt{Code has not been written to handle isospin-breaking in coupled channels!}]
+        当前版本\textbf{显式不支持耦合通道里的 isospin-breaking}——这是已知能力缺口（详见下节“能力缺口”）。
+\end{description}
+
+\section{已修复的历史 bug（节选）}
+\label{sec:appF_history_fixes}
+
+本节挑选 12 个最具代表性的修复（按时间倒序），每条提供：commit、症状、根因、修复方式、对今后修改的启示。
+完整列表请用 \texttt{git log --grep="fix\textbar bug" --oneline}。
+
+\subsection{H-1：c\_E 符号约定}
+
+\begin{description}
+  \item[Commit] \texttt{f4df358 fix c\_E sign: use Navrátil/Witała +½ convention}
+  \item[症状] 在 chiral N2LO 3NF 启用、\(c_E<0\) 时，氚束缚能 \(B(^3\!\mathrm{H})\) 与 Epelbaum/Witała 参考值\textbf{偏向相反方向}。
+  \item[根因] 上一版本严格按 Epelbaum 2002（E2002）eq.~(2.10) 的 \(-\tfrac12\) 接触前因子；新版采用 Navrátil 与 Witała 的 \(+\tfrac12\) 约定。两者在
+        所有外部文献中只是整体符号相反，但与 LEC 拟合的 \(c_E\) 值耦合，必须明确选定一种。
+  \item[修复] 把 1PE-CT 与 contact 项的整体前因子统一为 \(+\tfrac12\)，并在 \cref{app:E_input_dictionary}/Ch.~15 中显式记录。
+  \item[启示] 任何牵涉 LEC 的“符号约定”都应当在本书中显式列出；后续做 N\(^3\)LO 3NF 时同样需要选定一族文献并注明。
+\end{description}
+
+\subsection{H-2：c\_i 单位换算}
+
+\begin{description}
+  \item[Commit] \texttt{ddbb389 fix c\_i unit conversion and rename m\_fpi4\_inv}
+  \item[症状] \(2\)PE \(c_1,c_3\) 项在与 Epelbaum 参考表对照时整体差 \((\hbar c)^{-2}\) 量级。
+  \item[根因] LEC 表为 \(\mathrm{GeV}^{-1}\)，但内部代码混用了 \(\mathrm{MeV}^{-1}\) 和 \(\mathrm{fm}^{-1}\) 两套单位；变量 \texttt{m\_fpi4\_inv} 名实不副。
+  \item[修复] 显式换算 \(\mathrm{GeV}^{-1}\to\mathrm{MeV}^{-1}\)；变量改名为 \texttt{fpi4\_inv\_MeV} 以反映单位。
+  \item[启示] 对所有“单位 sensitive”常量（\(f_\pi\)、\(m_\pi\)、\(c_i\)、\(\Lambda\)）必须用 \texttt{*\_MeV}/\texttt{*\_fm} 后缀。\texttt{include/constants.h} 已经全面采用该规范。
+\end{description}
+
+\subsection{H-3：Squared-Gaussian regulator}
+
+\begin{description}
+  \item[Commit] \texttt{5cf16ab fix(3nf): apply squared-Gaussian regulator per E2002 eq. (3.19)}
+  \item[症状] 3NF 矩阵元在 \(p,q\to\Lambda\) 附近振荡，\(\Lambda\) 扫参时 \(B(^3\!\mathrm{H})\) 不平滑。
+  \item[根因] 早期实现采用线性高斯 \(e^{-(p^2+q^2)/\Lambda^2}\)，与 E2002 eq.~(3.19) 的 \(e^{-(p^2+q^2)^2/\Lambda^4}\)（squared）不同。
+  \item[修复] 直接采用 squared 形式；幂次写为 \texttt{pow(p2+q2, 2)/pow(Lambda,4)}。
+  \item[启示] 高动量截断的形式因子选取直接决定 LEC 拟合区间；引用文献时务必标注是哪一族 regulator。
+\end{description}
+
+\subsection{H-4：1/(2π)³ Fourier 归一化}
+
+\begin{description}
+  \item[Commit] \texttt{bdb239d apply 1/(2π)³ Fourier normalization to 3NF partial-wave kernels}
+  \item[症状] 3NF 部分波核与 Golak \emph{et al.} EPJA 2014 参考值整体差 \((2\pi)^{-3}\sim 4\times 10^{-3}\)。
+  \item[根因] 球面波函数与 Jacobi 三体积分的归一化有两套常用约定（\(1/(2\pi)^{3/2}\) 对每个动量 vs.~把 \(1/(2\pi)^3\) 整体并入核），代码混用。
+  \item[修复] 在 \texttt{fourier\_norm\_const} 中统一加 \(1/(2\pi)^3\) 因子；同步更新校验工具 \texttt{tools/check\_3nf\_normalization}。
+  \item[启示] Fourier/角度归一化是 3NF 移植中最容易出 bug 的地方；任何新部分波核必须先过单位检验（与 Epelbaum/Witała \(\langle W\rangle\) 比值 \(=1.000\pm 0.005\)）。
+\end{description}
+
+\subsection{H-5：P123 sorting integer overflow}
+
+\begin{description}
+  \item[Commit] \texttt{e594fac Fixed P123-sorting bug where a 0 without type-decleration was sent to the sorting-routine}
+  \item[症状] \(P_{123}\) 大维度（\(\Nalpha N_p^2 N_q\gtrsim 2\times 10^9\)）时排序产生段错误或乱序。
+  \item[根因] 模板函数推断字面量 \texttt{0} 为 \texttt{int}，而 \(P_{123}\) 行/列已是 \texttt{size\_t}，比较时溢出。
+  \item[修复] 用 \texttt{size\_t(0)} 显式标注；同时把所有排序集中到 \texttt{utils/templates.h}。
+  \item[启示] 任何与 \texttt{size\_t} 一同进入模板/比较的字面量都必须显式类型化。
+\end{description}
+
+\subsection{H-6：CSC dim off-by-one}
+
+\begin{description}
+  \item[Commit] \texttt{9f42f1a There was a dimensional bug in solve\_faddeev.cpp where the csc-format of P123 was 1 element too short}
+  \item[症状] \(N_p\times N_q\) 为奇数时（如 \(50\times 49\)）求解结果偏离基准 \(\sim 10^{-3}\)。
+  \item[根因] CSC 列指针长度应为 \(\text{cols}+1\)；早期实现写为 \(\text{cols}\)。
+  \item[修复] +1。
+  \item[启示] 任何 CSC/CSR 的“+1”都不可省略；提交前用 \texttt{valgrind}/\texttt{asan} 跑一组小尺寸测试。
+\end{description}
+
+\subsection{H-7：On-shell index 双计数}
+
+\begin{description}
+  \item[Commit] \texttt{33c0334 On-shell idx search routine sometimes double-counted bins. Fixed.}
+  \item[症状] 部分 \(\Tlab\) 出现 “\(U_{αβ}\) 输出两份” 现象。
+  \item[根因] \texttt{find\_on\_shell\_bins} 的 bin 区间检查使用闭区间 \([E_{q,i},E_{q,i+1}]\)，相邻 bin 公共端点会被两次匹配。
+  \item[修复] 让 bin 区间在右端开（半开区间）；公共端点仅被左侧 bin 匹配。
+  \item[启示] 后续添加 “custom q-grid + 自定义请求 \(\Tlab\)” 工作流时，注意端点哲学；详见 \texttt{run\_organizer.cpp}。
+\end{description}
+
+\subsection{H-8：JP 通道在 U-aggregation 与 P123-reuse 中遗漏}
+
+\begin{description}
+  \item[Commit] \texttt{c72f5c3 fix: include all JP channels in U aggregation and P123 reuse checks}
+  \item[症状] 切换 \texttt{two\_J\_3N\_max} 后 P123 缓存仍被复用，导致部分通道 \(U=0\)；\(\diffXS\) 在大角度被严重低估。
+  \item[根因] reuse 检查只比对 \(N_p,N_q,J_{2N}\)，没比对 \(J_{3N}\)。
+  \item[修复] reuse key 加入 \(J_{3N}\)；并在 \texttt{aggregate\_U} 中显式枚举所有 JP 通道。
+  \item[启示] P123 缓存命中条件必须精确到所有对 P123 维度有影响的字段。
+\end{description}
+
+\subsection{H-9：耦合 \(C^T\) 维度}
+
+\begin{description}
+  \item[Commit] \texttt{6913e45 Fixed dimensional bug in C\^T coupled matrices in solve\_faddeev.cpp}
+  \item[症状] Nijmegen 势 \(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 通道 \(\delta\)-相位移异常。
+  \item[根因] \(C^T\) 的列/行维度在耦合块中应为 \(2N_p\)，写成了 \(N_p\)。
+  \item[修复] 显式区分 unco/coup 路径；并对 Malfliet--Tjon（uncoupled \(\spectro{3}{S}{1}\)）做退化测试。
+  \item[启示] “耦合通道” 是 NN 部分波代码里最容易出 off-by-2 的地方；调试时优先用 Malfliet--Tjon 当 oracle。
+\end{description}
+
+\subsection{H-10：Faddeev 内存泄漏 \(\times\) 4}
+
+\begin{description}
+  \item[Commit] \texttt{b2917e8 Fixed small memory leak in Faddeev-solver. Forgot to deallocate 4 smaller arrays.}
+  \item[症状] 长时扫描（\texttt{parameter\_walk=true}）后 RES 不断爬高，最终 OOM。
+  \item[根因] \texttt{solve\_faddeev\_equations} 内 4 处 \texttt{new[]} 缺配对的 \texttt{delete[]}。
+  \item[修复] 显式 \texttt{delete[]}；结构性问题至今未上 RAII。
+  \item[启示] 新写的代码应优先使用 \texttt{std::vector}/\texttt{std::unique\_ptr}；改造旧代码可作为 Wave 8 的“技术债清理”任务。
+\end{description}
+
+\subsection{H-11：Stack overflow in 排列矩阵}
+
+\begin{description}
+  \item[Commit] \texttt{a335ab7 Permutation matrix storage used stack storage, quickly overflowing and causing segfault.}
+  \item[症状] \(N\ge 60\) 时段错误。
+  \item[根因] 大型局部数组分配在栈上。
+  \item[修复] 改为 \texttt{new[]}/\texttt{delete[]}（堆分配）。
+  \item[启示] \(N_p,N_q\) 较大时优先用堆分配；如果想保持 RAII，请使用 \texttt{std::vector}。
+\end{description}
+
+\subsection{H-12：`int` size 溢出}
+
+\begin{description}
+  \item[Commit] \texttt{57c6243 Changed P123 dimension-variables from type int to type size\_t}
+  \item[症状] \texttt{Np\_WP=Nq\_WP=70,J\_2N\_max=4} 时 P123 总维度超过 \(2^{31}\)，\texttt{int} 溢出导致随机崩溃。
+  \item[根因] \texttt{int} 范围。
+  \item[修复] 把维度变量、循环索引、稀疏数组下标全部升到 \texttt{size\_t}。
+  \item[残留风险] 提交 \texttt{7b9aeb4} 注解提到 “CSR-routine in the Faddeev solver does not use size\_t and will overflow for large cases. This will be fixed in future commits” —— 这条
+        警告至今依然有效，是当前已知\textbf{大规模 P123} 路径下的潜在地雷。详见下节“能力缺口 G-1”。
+\end{description}
+
+\section{能力缺口（已知但未修）}
+\label{sec:appF_known_gaps}
+
+\subsection{G-1：CSR 路由的 \texttt{int} 残留}
+
+如上 H-12 所述。当前 \texttt{src/core/faddeev\_solver/solve\_faddeev.cpp} 中 \texttt{CPVC\_col\_brute\_force} 等仍采用 \texttt{int*} 作为列指针：
+\begin{itemize}
+  \item 触发条件：\(\Nalpha\,N_p\,N_q\gtrsim 2.1\times 10^9\)；
+  \item 风险：循环索引溢出，结果静默错误；
+  \item 缓解：在 \(N_p=N_q=80,J_{2N}\le 5,J_{3N}\le 7/2\) 以下安全；
+  \item 长期方案：把所有 \texttt{int*} 升到 \texttt{int64\_t*} 或 \texttt{size\_t}。
+\end{itemize}
+
+\subsection{G-2：耦合通道中的同位旋破缺未实现}
+
+\texttt{raise\_error("Code has not been written to handle isospin-breaking in coupled channels!")}（\texttt{make\_potential\_matrix.cpp:167}）。
+当前如同时启用 \texttt{isospin\_breaking\_1S0=true} 与某些耦合通道的同位旋破缺组合，会立即报错。物理上 \(\spectro{3}{S}{1}\)-\(\spectro{3}{D}{1}\) 的
+\(np\) vs \(pp\) 差异极小，因此现阶段影响可忽略，但未来若做 \(d+d\) 或 \(p+^3\!\mathrm{H}\) 实验时需要补全。
+
+\subsection{G-3：Coulomb 力缺失}
+
+整个 \(d+p\) 计算\textbf{完全忽略 Coulomb}。物理预期：\(\Tlab\le 50\,\mathrm{MeV}\) 的低能段 \(\diffXS\) 因 Coulomb 偏离强相互作用结果可达 \(20\%\) 以上。
+当前合理上限是 \(\Tlab\gtrsim 80\,\mathrm{MeV}\)。任何把求解器扩展到低能（如 \(d+d\to ^4\!\mathrm{He}\)）的工作必须先解决 Coulomb（详见 \cref{subsec:appF_future_coulomb}）。
+
+\subsection{G-4：Breakup amplitudes 仅有占位}
+
+\texttt{include\_breakup\_channels=true} 提交 \texttt{50ce1ae} 自带注释 “Results untested”，且至今未补回归测试。当前能正常输出 \texttt{U\_BU\_*.txt}，但
+没有与 Witała 等的 breakup cross section 做过对照。任何实际生产前必须先做 L4 级别的回归。
+
+\subsection{G-5：同位旋 \(T=3/2\) 通道未参与}
+
+求解器只取 \(T_{3N}=1/2\)；\(T_{3N}=3/2\) 对 \(d+p\) 弹性截面贡献 \(\le 0.1\%\)，对极化 \(<0.05\%\)，但对 \(p+p+n\to d+p\) 拼合截面有数 \% 级修正。
+代码中已有占位字段（\texttt{two\_T\_3N\_array}）但 \texttt{find\_on\_shell\_bins} 未跨 \(T\) 通道遍历。
+
+\subsection{G-6：诊断旋钮缺失（无热点剖析）}
+
+当前没有内置 perf-hook：哪个 J\(P\) 通道占了 \(80\%\) 时间、Padé 一阶 vs.~二阶谁更快，全靠手工 \texttt{chrono}。建议未来加个 \texttt{--profile} 开关把
+\texttt{chrono::steady\_clock} 输出 JSON。
+
+\section{性能瓶颈（hot path 分析）}
+\label{sec:appF_hotpath}
+
+下表是基于 \(N_p=N_q=50, J_{3N}\le 3/2, J_{2N}\le 3, \texttt{Idaho\_N3LO}\) 在 8-core Intel Xeon 上的典型 wall-time 占比：
+
+\begin{center}
+\begin{tabular}{lrl}
+\toprule
+模块 & wall-time 占比 & 备注 \\
+\midrule
+P123 计算（\texttt{calculate\_WP\_overlap}） & \(\sim 55\%\) & 与 \(N_\phi\cdot N_x\) 立方耦合 \\
+SWP 对角化（\texttt{diagonalize\_real\_symm}） & \(\sim 12\%\) & 与 \(J_{2N}\) 直接相关 \\
+\((C^T)P V C\) 列重构（\texttt{CPVC\_col\_brute\_force}） & \(\sim 18\%\) & Faddeev 主循环 hot \\
+Padé 加速 Neumann 迭代 & \(\sim 10\%\) & Padé 阶差 \(\nudif\) 主导 \\
+2NF 势矩阵 & \(\sim 3\%\) & 仅在 \texttt{midpoint\_approx=false} 时显著 \\
+3NF 部分波核（启用时） & \(\sim 8\%\) & W\(^{(1)}\) 三段贡献合并 \\
+其它（IO、HDF5、解析输入） & \(\le 2\%\) & 几乎可忽略 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+观察：
+\begin{itemize}
+  \item P123 占绝对大头，因此“P123 缓存”是工作流首要优化点（\texttt{P123\_recovery}/\texttt{P123\_folder} 复用）；
+  \item \((C^T)P V C\) 列重构是 \textit{每次 Faddeev 求解都要做} 的，对扫参（\texttt{parameter\_walk}）影响最大；
+  \item Padé 占比偏小但不可忽略：\(\nudif\) 不收敛时会 \(\times 5\) 膨胀。
+\end{itemize}
+
+\section{内存爆炸点}
+\label{sec:appF_memory}
+
+按内存峰值排序：
+\begin{enumerate}
+  \item \(P_{123}\) 稀疏存储 —— 主导项，\(\sim O(\Nalpha\,N_p^2\,N_q\,\rho)\) 双精度（\(\rho\) 是稀疏度），典型 \(N=50\) 时 1–4 GB；\(N=80\) 时 12–20 GB；
+  \item \((C^T)V C\) 列产物缓存 —— 大约 P123 的 \(1/8\)；
+  \item 6\(j\) 表 —— \(\sim O(J_{3N}^6)\) 双精度；\(J_{3N}\ge 17/2\) 时几百 MB；
+  \item 通道本地 \(R\)/\(Q\) resolvent 矩阵 —— 与 \texttt{num\_T\_lab} 线性。
+\end{enumerate}
+
+\subsection{节流策略}
+
+\begin{itemize}
+  \item \textbf{通道并行}：\texttt{parallel\_run=true} + \texttt{channel\_idx=k}，把每个 J\(P\) 通道发给独立进程，单进程内存降到 \(1/N_\text{chn}\)；
+  \item \textbf{P123 分块写盘}：\texttt{calculate\_and\_store\_P123=true} 把矩阵写入 HDF5 后即可释放；后续 \texttt{P123\_recovery} 重新读入；
+  \item \textbf{削小 \(J_{2N}\)}：\(J_{2N}\) 从 \(3\to 2\) 通常把内存砍 30\%；
+  \item \textbf{增 \texttt{chebyshev\_s}}：相同 \(N\) 覆盖更广动量，避免无谓扩 \(N\)；
+  \item \textbf{打开 \texttt{midpoint\_approx}}：调试期可省掉 \(N_p^\text{quad} N_q^\text{quad}\) 倍的中间张量。
+\end{itemize}
+
+\section{数值精度边界}
+\label{sec:appF_precision}
+
+\subsection{何时需要 quad precision}
+
+当前所有矩阵元素均为 \texttt{double}（IEEE 754 双精度）。已知会出现可见精度退化的场景：
+
+\begin{enumerate}
+  \item \textbf{大基数 \(P_{123}\) 的 sparse-product}：当稀疏度 \(\rho\le 10^{-6}\)、\(\Nalpha N_p^2 N_q\gtrsim 10^9\) 时，\(\sum\) 累加链长达
+        \(\sim 10^4\)，相对误差最大累积到 \(10^{-12}\to 10^{-9}\)。在 \(\Tlab=190\,\mathrm{MeV}\) 极化基准上仍属可接受，但若读者要做 “高精度
+        多极化分量 fitting”，建议把 \texttt{gemm} 改成 Kahan 求和或 \texttt{long double}；
+  \item \textbf{\(B(^3\!\mathrm{H})\) 收敛尾部}：与基态束缚能差 \(\sim 100\,\mathrm{keV}\) 量级时，\(N\) 增大带来的“信号”可能被 \texttt{double} 的舍入吞没；这正是
+        Witała 等人采用 quad precision 做束缚能极值搜索的原因。Tic-tac 当前不支持，但 \texttt{check\_3nf\_normalization} 工具支持基础 quad
+        bench；
+  \item \textbf{接近 Wigner 阈值}：低能 \(\Tlab\le 5\,\mathrm{MeV}\) 时 \(t\)-matrix 在能量壳上有奇异；当前 \(i\eps\) 处理使用 \(\eps=10^{-9}\)，再小会被
+        \texttt{double} 抹平。这一硬编码正是“能量越低越应使用 \texttt{long double}” 的根因之一。
+\end{enumerate}
+
+\subsection{推荐升级路径}
+
+未来若要支持 quad precision：
+\begin{itemize}
+  \item 在 \texttt{include/type\_defs.h} 把 \texttt{floatType} 与 \texttt{cfloatType} 改为 \texttt{long double}/\texttt{\_\_float128}；
+  \item BLAS/LAPACK 切到 \texttt{MPLAPACK} 或 \texttt{libquadmath}；
+  \item HDF5 数据集类型改为 \texttt{H5T\_NATIVE\_LDOUBLE}；
+  \item Fortran 势库（\texttt{src/interactions/chp/}）改为 \texttt{real(real128)}（F90 \texttt{iso\_fortran\_env}）。
+\end{itemize}
+预期工作量：1–2 周，但要重新跑所有基准。
+
+\section{与上下游代码的交互}
+\label{sec:appF_neighbors}
+
+\subsection{\texttt{toy\_DAbreak}}
+
+\texttt{toy\_DAbreak} 是更轻量的 \(d+A\) 玩具求解器（C++20，CMake，配合 GoogleTest）。
+潜在交互：
+\begin{itemize}
+  \item \textbf{Faddeev 算子层共享}：\texttt{toy\_DAbreak} 已经有自己的 \texttt{validate\_faddeev\_solver}，未来可以把 Tic-tac 的稀疏 \(P_{123}\) 路径作为
+        \(d+A\to d+A\) 中“\(p+n\)+target 子系统”的 oracle；
+  \item \textbf{基准互验}：在 \(d+p\) 退化极限（\(A=1\)）下，\texttt{toy\_DAbreak} 应当复现 Tic-tac 的 \(\diffXS\) 与 \(\iTeleven\)；目前\textbf{尚无该回归}，
+        是显然的工程债。
+\end{itemize}
+
+\subsection{\texttt{ApnGemini/dA\_breakup}}
+
+\texttt{ApnGemini} 是“正经”\(d+A\) 求解器（mixed representation AGS、Yamaguchi/EST/Coulomb 模块化）。
+潜在交互：
+\begin{itemize}
+  \item \textbf{Coulomb 模块借用}：\texttt{ApnGemini} 已实现 Coulomb screening（Vincent--Phatak）；Tic-tac 引入 Coulomb 时建议复用其 API；
+  \item \textbf{部分波耦合一致性}：两套代码采用相同 Jacobi/PW 标记，但 ApnGemini 走 \(jj\)-coupling，而 Tic-tac 是 \(LS\)-coupling 内嵌；翻译器
+        需仔细写。
+\end{itemize}
+
+\subsection{\texttt{smsimulator5.5}}
+
+Tic-tac 的最终下游用户。Tic-tac 输出的 \(\diffXS\) 与张量极化曲线被 \texttt{smsimulator5.5/scripts/reconstruction/} 用作输入分布，
+经 PDC 重建反查 \(\theta_{cm}\)。现阶段交互通过磁盘文件（\texttt{U\_PW\_elements\_*.txt}）；未来可考虑直接 HDF5 接口。
+
+\section{未来扩展方向}
+\label{sec:appF_future}
+
+\subsection{F-1：完整 Coulomb 处理}
+\label{subsec:appF_future_coulomb}
+
+最迫切的物理扩展。短期路线：
+\begin{enumerate}
+  \item 引入 Vincent--Phatak screening + ren-norm；
+  \item 把 \texttt{find\_on\_shell\_bins} 的 \(q\)-bin 中点替换为 Coulomb-distorted 解；
+  \item 在 \texttt{run\_organizer.cpp} 中对每个 \(\Tlab\) 输出“裸 vs.~screened” 双路结果；
+  \item 在 Ch.~12 / Ch.~13 中补 Coulomb 修正后的 \(\diffXS\) / \(\iTeleven\) 对比。
+\end{enumerate}
+预期工作量：\(\sim\) 2 月，难点是 \(N\to\infty\) 极限下的截断收敛。
+
+\subsection{F-2：Breakup amplitudes 全套化}
+
+目标：把当前“占位” \texttt{include\_breakup\_channels=true} 升级为生产级。步骤：
+\begin{enumerate}
+  \item 与 Witała 等的 breakup cross section（quasi-free scattering）做对照；
+  \item 加 L4 级回归测试（\texttt{tests/test\_breakup\_*.py}）；
+  \item 在 Ch.~14 添加 breakup 物理章节。
+\end{enumerate}
+
+\subsection{F-3：3NF 张量项与张量优化}
+
+当前 chiral N2LO 3NF 仅 rank-0 + rank-2 实现完整（\(c_1,c_3,c_D,c_E\)）；
+未来：
+\begin{itemize}
+  \item 加 rank-4 三体张量项（影响 \(\Ttwentytwo\)）；
+  \item 把 \texttt{recoup\_scalar\_decl} 用 cached 6\(j\) 表加速；目前每次 LEC 扫描重算 \(\sim 30\%\) 时间花在再生成同一张量；
+  \item 引入 \(\Delta\)-isobar saturation 路径（NN+\(\Delta\) 形式）以与 Hannover 组对照。
+\end{itemize}
+
+\subsection{F-4：GPU 移植}
+
+P123 计算 \(\sim 55\%\) 时间是嵌套循环 + 6\(j\) 查表，天然适合 GPU。建议：
+\begin{itemize}
+  \item 短期：用 OpenMP target offload 把 \texttt{calculate\_WP\_overlap} 的最内三层循环搬到 GPU；
+  \item 中期：将稀疏 P123 改造为 BSR（block-CSR）格式，配合 CUDA \texttt{cusparseSpMV}；
+  \item 长期：整个 Faddeev 求解（含 Padé Neumann）走 GPU；预期 \(5\times\) 加速。
+\end{itemize}
+
+\subsection{F-5：动态 LEC 拟合（贝叶斯）}
+
+当前 \texttt{parameter\_walk} 是“穷举型”扫参；未来可以接 \texttt{emcee}/\texttt{dynesty} 做贝叶斯后验估计 LEC，把 Triton 束缚能与 \(d+p\) 极化数据
+联合作为似然。前置工程债：H-10 风格的内存泄漏必须先清理（参数扫描每步泄漏会迅速 OOM）。
+
+\subsection{F-6：HDF5 第一类 I/O 通道}
+
+目前 \texttt{U\_PW\_elements\_*.txt} 是文本，受 IO 限制可达 \(\sim\) 数百 MB；HDF5 化带来：
+\begin{itemize}
+  \item \(\sim 10\times\) 写入提速；
+  \item 与 \texttt{smsimulator5.5} 等下游直接共享数据集；
+  \item 自带元数据（属性写入），方便 reproducibility。
+\end{itemize}
+
+\subsection{F-7：单元/集成测试基础设施}
+
+当前 Python 端有 \texttt{tests/test\_190mev\_data\_pipeline.py}；C++ 端只有 \texttt{tests/cpp/}（3NF L1–L5 测试栈）。建议：
+\begin{itemize}
+  \item 把 CMake 的 \texttt{ctest} 注册为 CI gate；
+  \item 引入 \texttt{asan}/\texttt{ubsan} 构建路径（\texttt{./build.sh asan}）；
+  \item 增加 \(\Lambda\)-cutoff 与势模型组合的 cross-check matrix。
+\end{itemize}
+
+\subsection{F-8：自描述输入文件}
+
+\texttt{key=value} 接口足够稳定，但缺少 schema：未来可：
+\begin{itemize}
+  \item 在 \texttt{src/config/} 增加 \texttt{input.schema.json}；
+  \item 启动时打印每个键的 “实际值 vs.~默认值 vs.~硬编码限制”；
+  \item 支持 YAML/TOML 备选格式。
+\end{itemize}
+
+\section{常见现场症状自检表（cheat sheet）}
+\label{sec:appF_cheat_sheet}
+
+下面把日常调试中最常见的“现象 \(\to\) 嫌疑参数”做成快表：
+
+\begin{longtable}{p{6.5cm}p{8cm}}
+\caption{现场症状 \(\to\) 排查路径}
+\label{tab:appF_cheatsheet}\\
+\toprule
+症状 & 优先排查 \\
+\midrule
+\endfirsthead
+\toprule
+症状 & 优先排查 \\
+\midrule
+\endhead
+启动立刻退出，stderr：\texttt{Cannot have even two\_J\_3N\_max!} & \texttt{two\_J\_3N\_max} 被命令行覆盖为偶数 \\
+启动后挂在 \texttt{calculate\_WP\_overlap} & \(N_\phi N_x\) 设置过大，\texttt{P123\_omp\_num\_threads} 受限 \\
+报错 \texttt{Memory exceeded in sparse memory allocation} & \texttt{Np\_WP}/\texttt{Nq\_WP} 太大；改用 \texttt{parallel\_run} \\
+\(\diffXS\) 大角度严重偏低 & 检查 \texttt{two\_J\_3N\_max}/\texttt{J\_2N\_max} 是否够大 \\
+\(\iTeleven\) 在零度附近振荡 & \texttt{Nphi}/\texttt{Nx} 过小 \\
+\texttt{U\_PW\_elements\_*} 全为 \(0\) & \texttt{production\_run=false}（占位 P123） \\
+求解器 \(\Tlab\) 与请求差 \(\sim 30\,\mathrm{MeV}\) & \texttt{Nq\_WP} 太小或 \texttt{chebyshev\_s} 不匹配；改用 \texttt{q\_grid\_type=custom} \\
+某 \(\Tlab\) 出现两份 U-matrix 输出 & 升级到 \texttt{33c0334} 之后版本 \\
+切了 \texttt{two\_J\_3N\_max} 后部分通道 \(U=0\) & 没清 \texttt{P123\_folder}，缓存命中错版本 \\
+3NF 启用后 Padé 不收敛 & 先把 \texttt{w1\_scale} 从 \(0\to 0.3\to 1.0\) 阶梯 \\
+3NF 启用后 \(B(^3\!\mathrm{H})\) 与文献相反 & 检查 \texttt{c\_E} 符号约定（Witała \(+\tfrac12\) vs.~E2002 \(-\tfrac12\)） \\
+\texttt{parameter\_walk} 几小时后 OOM & H-10 内存泄漏在某些路径仍未清完，建议拆批跑 \\
+\bottomrule
+\end{longtable}
+
+\section{结语}
+\label{sec:appF_conclusion}
+
+Tic-tac 这一类“演化型”科学求解器最大的资产不是“最新版能跑出多漂亮的曲线”，而是\textbf{踩过的坑被显式记下来}。本附录希望尽量把目前可见的坑、
+风险面与扩展方向归档。读者若发现新坑，请按 H 系列编号续接，并在 git commit message 中以 \texttt{fix(...)} 前缀标注；这本字典/附录会随仓库一起演化。

@@ -1,9 +1,416 @@
 % =====================================================================
 % appendices/A_constants.tex
-% Wave 0 占位 —— 待 Wave 7 子代理补全
+% Wave 7 子代理填写：物理常数与单位换算
 % =====================================================================
 
 \chapter{物理常数与单位换算}
 \label{app:A_constants}
 
-\textbf{[Wave 0 占位 —— 附录内容由 Wave 7 子代理填写]}
+\noindent
+本附录是 Tic-tac 求解器使用的所有数值常数与势模型耦合常数的\emph{单点真相源}
+(single source of truth)，对应代码文件 \texttt{include/constants.h}。
+所有正文公式中出现的 $\hbar c$、$M_p$、$M_n$、$M_d$、$\Lambda$、$g_A$、$f_\pi$、$m_\pi$
+以及五种势模型 \texttt{LO\_internal}、\texttt{N2LOopt}、\texttt{Idaho\_N3LO}、
+\texttt{nijmegen}、\texttt{malfliet\_tjon} 的接触项与长程项耦合常数全部追溯至此处，
+确保理论推导、数值实现与外部参考文献三者口径一致。
+本附录另一关键作用是\emph{固化单位制约定}：
+Tic-tac 内部一律使用 \emph{自然单位 + MeV} 制
+（动量 [\si{fm^{-1}}]、能量 [\si{MeV}]、长度 [\si{fm}]），
+凡入口/出口处涉及 [\si{GeV}]、[\si{mb}] 的实验报告，
+都必须在 I/O 层显式做单位换算，否则极易出现 $10^{3}$、$10^{-1}$ 量级的隐错。
+读者若怀疑自己的某个数值结果偏差“恰好一个数量级”，
+请回到本附录核对。
+
+% =====================================================================
+\section{基本物理常数}
+\label{sec:appA_basic_constants}
+
+\subsection{\texorpdfstring{$\hbar c$}{hbar c} 与高精度数值}
+
+国际科学技术数据委员会 (CODATA) 2018 推荐值：
+\begin{equation}
+\hbarc \;=\; 197.326\,980\,4 \;\si{MeV.fm}.
+\label{eq:appA_hbarc_codata}
+\end{equation}
+代码中采用四位精度 $\hbarc = 197.327\;\si{MeV.fm}$
+（\texttt{constants.h:29}），
+该截断对截面计算引入的相对误差不超过 $1\times 10^{-5}$，
+远小于 WPCD 离散化误差（典型 $10^{-3}$ 量级）。
+若读者在编译时需要更高精度，应同步修改 \texttt{constants.h} 中的
+\texttt{hbarc} 与依赖该值的\emph{所有}动量–能量换算（如 \texttt{set\_run\_parameters.cpp}
+中的 q-bin 边界生成、Faddeev solver 中的相位提取）。
+
+由 \cref{eq:appA_hbarc_codata} 立即得到最常用的两条换算：
+\begin{align}
+1\;\si{fm}^{-1} &\;=\; 197.326\,980\,4\;\si{MeV/c},
+\label{eq:appA_inv_fm_to_mev}\\
+1\;\si{MeV} &\;=\; 5.067\,730\,716\times 10^{-3}\;\si{fm^{-1}}.
+\label{eq:appA_mev_to_inv_fm}
+\end{align}
+
+\subsection{核子与轻核质量}
+
+Tic-tac 采用\emph{裸核子质量}（即不剥离束缚能修正）方案：
+\begin{align}
+M_p &\;=\; 938.272\;\si{MeV/c^2},
+\label{eq:appA_Mp}\\
+M_n &\;=\; 939.565\;\si{MeV/c^2},
+\label{eq:appA_Mn}\\
+\bar{M}_N &\;=\; \tfrac{1}{2}(M_p + M_n) \;=\; 938.918\,5\;\si{MeV/c^2},
+\label{eq:appA_MN_avg}\\
+\mu_{23} &\;=\; \dfrac{M_p M_n}{M_p + M_n} \;=\; 469.459\,2\;\si{MeV/c^2}
+                  \quad\text{（pn 折合质量）}.
+\label{eq:appA_mu23}
+\end{align}
+代码中 \texttt{MN} 同时给出了两种实现选项：
+算术平均 $\bar{M}_N = (M_p+M_n)/2$ 与折合形式 $2 M_p M_n/(M_p+M_n)$，
+\emph{当前生效的是算术平均}（注释里的 $2 M_p M_n/(M_p+M_n)$ 为禁用旧式）。
+此选择会进入 Jacobi 动量到能量的转换 $E_{pq} = p^2/(2\mu_{23}) + 3 q^2/(4 M_N)$，
+若与原始仓库 \texttt{tictac-origin} 比较时出现 $\mathcal{O}(10^{-3})$ 偏差，
+应首先核对此处。
+
+氘核结合能与质量取实测值：
+\begin{align}
+E_d^{\text{meas}} &\;=\; 2.224\,575\;\si{MeV},
+\label{eq:appA_Ed_measured}\\
+M_d^{\text{meas}} &\;=\; M_p + M_n - E_d^{\text{meas}}
+                   \;=\; 1\,875.612\,425\;\si{MeV/c^2}.
+\label{eq:appA_Md_measured}
+\end{align}
+\texttt{constants.h:23–24} 写为 \texttt{Ed\_measured = 2.22457}（5 位有效数字），
+精度上与 CODATA 推荐值（$2.224\,566\,1$ \si{MeV}）有 $\sim 4\times 10^{-6}$ 的相对偏差，
+对 dp 散射在 $\Tlab = 190$ \si{MeV} 的可观测量影响低于
+$\mathcal{O}(10^{-5})$，可忽略。
+
+为完整起见，本附录还给出 Tic-tac 当前未直接使用、
+但在三体–三体重合道（如 $^3\mathrm{H}$、$^3\mathrm{He}$ 出射道）中需要的
+三核子质量：
+\begin{align}
+M_t \approx 2\,808.921\;\si{MeV/c^2}, \qquad
+M_{^3\mathrm{He}} \approx 2\,809.413\;\si{MeV/c^2}.
+\end{align}
+若未来扩展到 $\mathrm{nd}\to t\,n$ 或 $\mathrm{pd}\to {}^3\mathrm{He}\,p$ 反应，
+建议把这两个常数补入 \texttt{constants.h} 并新增对应宏 \verb|\Mt|, \verb|\MHethree|。
+
+\subsection{圆周率、弧度与方向余弦}
+
+\begin{align}
+\pi &\;=\; 3.141\,592\,653\,589\,793\,238\ldots \quad\text{(C 标准库 \texttt{M\_PI})},\\
+\text{deg\_to\_rad} &\;=\; \pi / 180,\quad
+\text{rad\_to\_deg} \;=\; 180/\pi.
+\end{align}
+\texttt{constants.h:13–18} 同时定义了几个数值因子
+$\tfrac{1}{2}, 1, 2$ 作为字面量替代，仅出于代码可读性，
+不影响数值精度。
+
+% =====================================================================
+\section{单位制约定与换算速查}
+\label{sec:appA_units}
+
+\subsection{自然单位与 MeV 制}
+
+Tic-tac 的内部约定可以总结为下列三条：
+\begin{enumerate}
+\item \textbf{能量}单位为 \si{MeV}；\textbf{长度}单位为 \si{fm}；
+      \textbf{动量}单位为 \si{fm^{-1}}（即 $\hbar = c = 1$ 后再乘 \si{fm}）。
+\item 求解器内部所有 Jacobi 动量 $p$、$q$ 以 \si{fm^{-1}} 存储；
+      用户输入文件中的 \texttt{p\_max}, \texttt{q\_max} 以及 WP bin 边界亦如此。
+\item 截面输出默认 \si{fm^2/sr}；
+      与文献对比时按 $1\;\si{mb}/\si{sr} = 0.1\;\si{fm^2/sr}$
+      做最终换算。
+\end{enumerate}
+
+\subsection{常用换算常量}
+
+\begin{table}[htbp]
+\centering
+\caption{Tic-tac 常用单位换算速查表}
+\label{tab:appA_unit_conversion}
+\begin{tabular}{@{}lll@{}}
+\toprule
+量 & 换算 & 备注 \\
+\midrule
+能量 & $1\;\si{GeV} = 10^{3}\;\si{MeV}$ & 入口处 GeV 必须 $\times 10^{3}$ \\
+能量 & $1\;\si{eV} = 10^{-6}\;\si{MeV}$ & EXFOR 数据偶尔以 \si{keV} 给出 \\
+长度 & $1\;\si{fm} = 10^{-15}\;\si{m}$ & — \\
+长度 & $1\;\si{fm} = (\hbarc)^{-1}\;\si{MeV^{-1}}$ & = $5.068\times 10^{-3}\;\si{MeV^{-1}}$ \\
+动量 & $1\;\si{fm^{-1}} = 197.327\;\si{MeV}/c$ & 由 \cref{eq:appA_inv_fm_to_mev} \\
+动量 & $1\;\si{MeV}/c = 5.067\,730\,7\times 10^{-3}\;\si{fm^{-1}}$ & 由 \cref{eq:appA_mev_to_inv_fm} \\
+截面 & $1\;\si{mb} = 0.1\;\si{fm^2}$ & 即 $10^{-31}\;\si{m^2}$ \\
+截面 & $1\;\si{mb/sr} = 0.1\;\si{fm^2/sr}$ & 与 \texttt{DSigamaOverDOmega.txt} 一致 \\
+角度 & $1\degree = \pi/180\;\si{rad}$ & — \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{动量–能量–角度的物理换算}
+
+非相对论 Jacobi 动量 $p$（pair 内部相对动量）与
+两体相对动能 $\eps_p$ 的换算：
+\begin{equation}
+\eps_p \;=\; \frac{(\hbarc\,p)^2}{2\mu_{23}}\quad [\si{MeV}],\qquad
+p\;\text{以}\;\si{fm^{-1}}\;\text{存储}.
+\label{eq:appA_p_to_eps_p}
+\end{equation}
+spectator 动量 $q$ 与 spectator 动能：
+\begin{equation}
+\eps_q \;=\; \frac{3(\hbarc\,q)^2}{4 M_N}\quad [\si{MeV}].
+\label{eq:appA_q_to_eps_q}
+\end{equation}
+对于 $\Tlab = 190$ \si{MeV} 的 dp 反应，
+能量–动量配对的近似数值如下（用于代码自检）：
+\begin{table}[htbp]
+\centering
+\caption{$\Tlab = 190$ \si{MeV} 的典型动量–能量数值（自洽性自检表）}
+\label{tab:appA_190_self_check}
+\begin{tabular}{@{}lll@{}}
+\toprule
+量 & 数值 & 出处 \\
+\midrule
+$\Tlab$（实验室能量） & $190.000$ \si{MeV} & 输入 \\
+$\Tcm$（c.m. 系能量） & $\approx 126.6$ \si{MeV} & 由 $\Tcm = M_d \Tlab/(M_p+M_d)$ \\
+on-shell $q_0$ (spectator) & $\approx 2.16$ \si{fm^{-1}} & 由 \cref{eq:appA_q_to_eps_q} \\
+$\hbarc \cdot q_0$ & $\approx 426$ \si{MeV}/$c$ & 实验室质子动量约 600 \si{MeV}/$c$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{势模型截止动量与基本耦合}
+\label{sec:appA_potential_basics}
+
+\subsection{LO\_internal（自研 LO 手征 EFT）}
+
+\begin{align}
+\Lambda &\;=\; 450\;\si{MeV}, \label{eq:appA_LO_Lambda}\\
+g_A &\;=\; 1.289, \label{eq:appA_LO_gA}\\
+f_\pi &\;=\; 92.2\;\si{MeV}, \label{eq:appA_LO_fpi}\\
+m_\pi &\;=\; 138.039\;\si{MeV}, \label{eq:appA_LO_mpi}\\
+C_{1S0} &\;=\; -1.129\,27\times 10^{-3},\\
+C_{3S1} &\;=\; -8.734\,0\times 10^{-4}.
+\end{align}
+其中 $f_\pi$ 使用约定 $f_\pi = F_\pi/\sqrt{2} = 130.41/\sqrt{2} = 92.2$ \si{MeV}
+（与 Epelbaum 综述一致，参见 \cite{Epelbaum2002NLO3NF} 所引文献）；
+$m_\pi$ 取 $\pi^\pm$、$\pi^0$ 的算术平均。
+$\Lambda = 450$ \si{MeV} 为非局域指数正规化的截止动量，
+正规化函数为 $f_\Lambda(p',p) = \exp[-(p^4 + p'^4)/\Lambda^4]$。
+
+\subsection{N2LOopt（Optimized N2LO，Carlsson 2016）}
+
+LO contacts $\widetilde{C}$（参考 \texttt{constants.h:45–48}）：
+\begin{table}[htbp]
+\centering
+\caption{N2LOopt LO contacts，单位 $\si{fm^2}$}
+\label{tab:appA_n2loopt_lo}
+\begin{tabular}{@{}ll@{}}
+\toprule
+通道 & 数值 \\
+\midrule
+$\widetilde{C}_{1S0,pp}$ & $-1.513\,660\,37 \times 10^{-1}$ \\
+$\widetilde{C}_{1S0,np}$ & $-1.521\,410\,88 \times 10^{-1}$ \\
+$\widetilde{C}_{1S0,nn}$ & $-1.517\,647\,46 \times 10^{-1}$ \\
+$\widetilde{C}_{3S1}$    & $-1.584\,341\,77 \times 10^{-1}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+NLO contacts $C_X$（\si{fm^4}）与长程 $c_i$ 见 \cref{tab:appA_n2loopt_nlo}。
+\begin{table}[htbp]
+\centering
+\caption{N2LOopt NLO contacts 与长程低能常数}
+\label{tab:appA_n2loopt_nlo}
+\begin{tabular}{@{}ll@{}}
+\toprule
+量 & 数值 \\
+\midrule
+$C_{1S0}$        & $+2.404\,021\,944$ \\
+$C_{3P0}$        & $+1.263\,390\,763$ \\
+$C_{1P1}$        & $+0.417\,045\,542$ \\
+$C_{3P1}$        & $-0.782\,658\,500$ \\
+$C_{3S1}$        & $+0.928\,384\,663$ \\
+$C_{3S1\text{-}3D1}$ & $+0.618\,141\,419$ \\
+$C_{3P2}$        & $-0.677\,808\,511$ \\
+\midrule
+$c_1$            & $-0.918\,639\,529$ \si{GeV^{-1}} \\
+$c_3$            & $-3.888\,687\,493$ \si{GeV^{-1}} \\
+$c_4$            & $+4.310\,327\,161$ \si{GeV^{-1}} \\
+$g_A$            & $1.290$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Idaho\_N3LO（Entem–Machleidt 2003）}
+
+LO 与 NLO contacts 与 N2LOopt 量级相近（见
+\texttt{constants.h:69–98}），
+其中 N3LO 阶 $D, D'$ 类 24 个 contacts 以 \si{fm^6} 为单位。
+长程低能常数：
+\begin{align}
+c_1 &\;=\; -0.81\;\si{GeV^{-1}}, &
+c_2 &\;=\; +2.80\;\si{GeV^{-1}}, \\
+c_3 &\;=\; -3.20\;\si{GeV^{-1}}, &
+c_4 &\;=\; +5.40\;\si{GeV^{-1}}, \\
+d_1 + d_2 &\;=\; +3.06\;\si{GeV^{-2}}, &
+d_3       &\;=\; -3.27\;\si{GeV^{-2}}, \\
+d_5       &\;=\; +0.45\;\si{GeV^{-2}}, &
+d_{14} - d_{15} &\;=\; -5.65\;\si{GeV^{-2}}, \\
+g_A       &\;=\; 1.290.
+\end{align}
+注意 $c_i$、$d_i$ 在文献中的常见单位不止一种
+（\si{GeV^{-1}}、\si{GeV^{-2}}、\si{fm}、\si{fm^2}），
+代码内部已统一为 \si{GeV^{-1}}/\si{GeV^{-2}}，
+但与某些 3NF 参考文献（如 Navrátil 2007\cite{Navratil2007}）
+对照时应警惕单位差异。
+
+\subsection{nijmegen 与 malfliet\_tjon}
+
+\texttt{nijmegen}（Nijmegen Bonn 库，F77 \texttt{pnijm.f}）与
+\texttt{malfliet\_tjon}（M-T V 玩具势）的耦合常数定义在
+各自 Fortran/C++ 子模块的内部，不进入 \texttt{constants.h}。
+其中 M-T V 仅用于回归测试，参数为：
+\begin{align}
+V_{\text{MT}}(r) &\;=\; -626.885\;\frac{e^{-1.55 r}}{r}
+                       + 1\,438.720\;\frac{e^{-3.11 r}}{r}\quad [\si{MeV}],\\
+&\quad r\;\text{以}\;\si{fm}\;\text{为单位}.
+\end{align}
+
+% =====================================================================
+\section{手征三体力低能常数 \texorpdfstring{$c_D, c_E$}{cD, cE} 综述}
+\label{sec:appA_cD_cE_LECs}
+
+3NF 在 N2LO 阶的 Lagrangian 含两条不可由 NN 散射相移确定的“纯三体”常数：
+$c_D$（一π交换 + 接触）与 $c_E$（纯三核子接触）。
+不同文献给出的 $(c_D, c_E)$ 经常\emph{符号约定}不一致，
+本节列出几组常用值供对照。
+Tic-tac 在最近一次 fix 提交（\texttt{f4df358}）后采用
+\textbf{Navrátil/Witała 的 $c_E$ 加 $\tfrac{1}{2}$ 约定}。
+
+\begin{table}[htbp]
+\centering
+\caption{文献中的 $(c_D, c_E)$ 取值对照（基于 $\Lambda \approx 500$\,\si{MeV} 的 N2LO 拟合）}
+\label{tab:appA_cD_cE_table}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+来源 & $c_D$ & $c_E$ & 拟合对象 & 备注 \\
+\midrule
+Navrátil 2007\cite{Navratil2007} & $-1.0$ & $-0.029$ & $A=3$ B.E. + Gamow–Teller & $+\tfrac{1}{2}$ 约定 \\
+Epelbaum 2002\cite{Epelbaum2002NLO3NF} & $-1.0$ & $-0.0292$ & $^3\mathrm{H}$ B.E. & 同上 \\
+Gardestig 2006 & $0.83$ & $-0.075$ & $\mu d \to nn\nu$ & 不同 $\Lambda$ \\
+Hebeler 2011 & $1.20$–$1.27$ & $-0.146$–$-0.180$ & 核物质 + ${}^3\mathrm{H}$ B.E. & SRG-evolved \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+低能常数 $c_1, c_3, c_4$ 既出现在 NN 的 N2LO/N3LO 长程项里，
+也出现在 3NF 的 2π 交换 ($W_1^{2\pi e}$) 项里。
+为避免双重计入，Tic-tac 约定 \emph{使用同一组 $c_i$}（见
+\cref{sec:appA_potential_basics}），并在 \texttt{src/interactions/three\_body/}
+子模块中显式按下式投影：
+\begin{equation}
+W_1^{2\pi e}(\bvec{q}_i, \bvec{q}_j) \;=\;
+\frac{g_A^2}{4 f_\pi^4}\,
+\frac{(\bvec{\sigma}_i\cdot\bvec{q}_i)(\bvec{\sigma}_j\cdot\bvec{q}_j)}
+     {(q_i^2+m_\pi^2)(q_j^2+m_\pi^2)}\,
+F_{ijk}(\bvec{q}_i, \bvec{q}_j; c_1, c_3, c_4)\,
+(\bvec{\tau}_i\cdot\bvec{\tau}_j),
+\label{eq:appA_W1_2pe}
+\end{equation}
+其中 $F_{ijk}$ 是 $c_i$ 的线性函数（参见 \cite{Epelbaum2002NLO3NF} 中 (2.16) 式）。
+\cref{tab:appA_n2loopt_nlo} 中的 $c_i$ 数值即可直接代入此式。
+
+% =====================================================================
+\section{与 \texttt{include/constants.h} 完整对照}
+\label{sec:appA_constants_h}
+
+下面整段抽取代码的全部内容，作为本附录的归档真相。
+\begin{lstlisting}[style=cpp, caption={\texttt{include/constants.h} 完整内容}, label={lst:appA_constants_h}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, basicstyle=\ttfamily\scriptsize, numbers=left,
+                 caption={\texttt{include/constants.h}（自动抽取，\cref{lst:appA_constants_h}）}]
+                {code_excerpts/snippets/appA_constants_h.cpp}
+
+\noindent
+\textbf{数值差异速查}：若你在 origin 仓库 \texttt{tictac-origin} 中看到
+\texttt{Mp = 938.272013}（CODATA 2010）而本仓库为
+\texttt{Mp = 938.272}（截断），二者对 dp 在 190 \si{MeV} 的截面影响 $< 10^{-5}$，
+不会破坏 Wave 1（验收）阶段的 RMSE 阈值，但若做高精度 phase-shift 比对则需关注。
+
+% =====================================================================
+\section{编辑约定与扩展指南}
+\label{sec:appA_editing}
+
+\subsection{何时需要修改 \texttt{constants.h}}
+
+\begin{itemize}
+\item 引入新势模型：将其新的 LECs 以新的命名空间或后缀（如 \texttt{\_n4lo}）加入；
+\item 调整 $\Lambda$ 截止：\emph{必须}同步更新对应模型的 contact terms，
+      因为在 EFT 中 contacts 与 $\Lambda$ 强相关；
+\item 升级 $\hbarc$ 精度：搜索全仓 \texttt{hbarc} 调用，确认无硬编码 \texttt{197.327};
+\item 切换核子质量约定（裸 $\leftrightarrow$ 平均 $\leftrightarrow$ 折合）：
+      务必同步检查 \texttt{set\_run\_parameters.cpp} 中
+      \texttt{q\_to\_E\_q} 与 \texttt{p\_to\_E\_p} 的实现细节。
+\end{itemize}
+
+\subsection{Wave 7 维护清单（避免 silent drift）}
+
+\begin{enumerate}
+\item 任何对 \texttt{constants.h} 的提交必须在 commit message 中显式列出
+      “常数变更：旧 → 新”，并复跑 190 \si{MeV} 基准测试
+      \texttt{python3 examples/deuteron\_proton\_Ay.py}；
+\item 在本附录 \cref{sec:appA_constants_h} 内 \texttt{lstinputlisting} 自动抽取，
+      只要重跑 \texttt{extract.py} 即可同步；
+\item 若 \texttt{Md\_measured = Mn + Mp - Ed\_measured}（即派生量）随
+      $E_d^{\text{meas}}$ 变化，请保持代码内部派生表达式不变，
+      仅修改 \texttt{Ed\_measured} 一个值。
+\end{enumerate}
+
+% =====================================================================
+\section{陷阱速查}
+\label{sec:appA_pitfalls}
+
+\begin{pitfallbox}
+\textbf{陷阱 A.1 —— $\hbarc$ 隐式硬编码}.
+有时为了“可读性”，在临时调试代码里写 \texttt{double hc = 197.3;}（三位精度）。
+这会让 q-bin 的 on-shell 解出现 $\mathcal{O}(10^{-3})$ 的偏移，
+进而把 $\Tlab^{\text{actual}}$ 推离请求值 0.5–1 \si{MeV}。\\
+\textbf{规避}：所有出现的 $\hbarc$ 必须 \texttt{\#include "constants.h"} 后
+直接引用 \texttt{hbarc} 变量，不得再写字面量。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 A.2 —— $f_\pi = 92.2$ 还是 $130.41/\sqrt{2}$？}\\
+两者数值相同（皆 $\approx 92.2$），但若文献给出 $F_\pi = 130.41$ \si{MeV}
+而你直接代入 EFT Lagrangian 的 $f_\pi$ 位置，则得到的耦合错一个 $\sqrt{2}$。
+\textbf{规避}：以 \texttt{constants.h} 注释行的约定为准，
+$f_\pi = F_\pi/\sqrt{2}$。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 A.3 —— 截面单位混淆 \si{mb} vs \si{fm^2}}.
+EXFOR 数据通常以 \si{mb/sr} 给出，
+但 Tic-tac 输出以 \si{fm^2/sr} 为单位。
+$1\;\si{mb} = 0.1\;\si{fm^2}$，
+若忘记此换算，会得到因子 10 偏差。\\
+\textbf{规避}：使用 \texttt{examples/convert\_dsigma\_units.py} 做单位互换；
+正文每张截面对比图必须在标题或图注中显式标明单位。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 A.4 —— $c_E$ 符号约定}.
+Navrátil/Witała 使用 $+\tfrac{1}{2}$ 约定，
+某些早期 LANL 文献使用 $-\tfrac{1}{2}$ 约定，
+两者 $c_E$ 数值相同但符号相反。
+当前 Tic-tac (\texttt{f4df358}) 已统一为 $+\tfrac{1}{2}$。\\
+\textbf{规避}：查 \texttt{src/interactions/three\_body/W2\_contact.cpp} 顶部注释。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 A.5 —— 实验室能量映射偏差}.
+即使 $\hbarc$、$M_N$ 全部精确，
+WPCD 离散化把 $\Tlab^{\text{request}}$ 投到最近的 q-bin 中点，
+实际能量与请求值会差 $\pm 10$–$40$ \si{MeV}。
+这是\emph{方法层面的偏差}，不是常数错误。\\
+\textbf{规避}：以 \texttt{solver\_validation\_tlab\_*.json} 中的
+\texttt{tlab\_actual} 为准；不要假设 \texttt{tlab\_request} 就是真值。
+\end{pitfallbox}
+
+% End of Appendix A

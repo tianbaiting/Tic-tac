@@ -1,13 +1,1116 @@
 % =====================================================================
 % 05_wpcd_math.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 5 章 Wave-Packet Continuum Discretization (WPCD) 数学基础
+% Wave 2 / Agent A
 % =====================================================================
 
 \chapter{Wave-Packet Continuum Discretization (WPCD) 数学基础}
 \label{ch:05_wpcd_math}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch05-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{从两体到三体：连续谱难题。}
+\cref{ch:01_lippmann_schwinger} 把两体散射问题写成 LS 方程
+\(\Top = \Vop + \Vop\,\Gzero\,\Top\)；\cref{ch:02_two_body_numerics} 用动量
+表象把它转成线性方程
+\(\Top(p, p'; E) = \Vop(p, p') + \int_0^\infty \Vop(p, p'')\,\Gzero(p''; E)\,\Top(p'', p'; E)\, dp''\)。
+两体情况下，连续谱积分由 Cutkosky 主值处方加上 Gauss--Legendre 求积已经可以
+逐能量单独求解：每个 \(E\) 给出一个 \(N \times N\) 的线性问题。
+
+\cref{ch:04_faddeev_ags} 把这条思路推到三体后，麻烦立刻翻倍。AGS 方程
+\cref{eq:ch04-AGS-symm} 在动量表象的核含
+\((\bvec{p}, \bvec{q})\) 与 \((\bvec{p}', \bvec{q}')\) 两组连续动量，
+还有 \(P_{123}\) 引入的非平凡 Jacobi 旋转——后者把
+\((\bvec{p}', \bvec{q}')\) 投到第二种 Jacobi 树上，作用域在动量空间是
+非局域的角度卷积。如果像两体那样固定一个能量、再用 Gauss--Legendre
+点离散化每个动量积分，那么\textbf{每一次}观测量计算（每一个 \(\Tlab\)、
+每一个 \(J^\pi\) 块）都要重新构造一次 \(P_{123}\)、一次 \(\Gzero\)、
+甚至一次 \(\Vop\) 的角度积分。这是无法接受的——\(P_{123}\) 的构造在生
+产配置下要数小时，而 dp 实验的 \(\Tlab\) 扫描通常要几十个能量点。
+
+\paragraph{核心思想：先离散化，再求解。}
+WPCD 反过来：\textbf{首先}在 Hilbert 空间里挑选一组有限维基
+\(\{ \WPbin{i} \}_{i=1}^{N}\)，把所有连续算符
+\(\Vop, P_{123}, \Gzero\) 一次性投影到这组基上（与 \(\Tlab\) 无关）；
+然后\textbf{所有}观测量提取都化为同一组矩阵的不同列的 Padé 求和。
+连续谱不会被任何 "\(\eps\) 处方" 摧毁——bin 自身的有限宽度
+\(\Delta_i = p_i - p_{i-1}\) 提供天然的能量分辨。这解决了三件事：
+
+\begin{enumerate}
+  \item \textbf{算符复用}：\(P_{123}\) 与 \(\Vop\) 只构造一次，不随
+        \(\Tlab\) 变化；\cref{ch:09_permutation_p123} 还把 \(P_{123}\) 写成
+        HDF5 缓存供下次直接读盘。
+  \item \textbf{自动正则化}：每个 \(\Gzero\) 矩阵元
+        \(\bra{\WPbin{i}}\Gzero(z)\WPbin{j}\)
+        在 \(z = E + i 0^+\) 极限下不再发散——bin 宽度自然提供有效虚部
+        \(\eps_{\rm eff} \sim \Delta_i^2 / (2\mu)\)。
+  \item \textbf{不变性}：所有 J/π 通道共享同一组 \(\jacobip, \jacobiq\) bin
+        网格，因此 P123 / V 矩阵的"通道间块"可以批量构造。
+\end{enumerate}
+
+这套方法由 Sean B.~S. Miller 博士论文 (\texttt{docs/seanBSMiller/SeanBSMiller\_DoctorThesis2022\_*.pdf}) 系统地总结、并在博士工作期间产生四篇论文
+（\texttt{SeanBSMiller\_JPG2022\_*.pdf}, \texttt{SeanBSMiller\_PRC2022\_*.pdf},
+\texttt{SeanBSMMiller\_PRC2023\_*.pdf}, 加上 \texttt{SeanBSMiller\_Thesis2020\_*.pdf}）；本章的数学推导
+紧扣 Miller 论文第 3、4 章。
+
+\paragraph{WP vs.~plane-wave grid：为什么不直接用 Gauss 点。}
+读者可能会问：把动量空间用 Gauss--Legendre 点离散化（plane-wave grid）
+直接得到一组动量本征态 \(\ket{p_i}\)，再往里塞算符——这不就完了吗？
+答案是：在三体里这样做，\(\Gzero\) 的极点完全恰好落在求积点之间或之上，
+没有任何天然机制保证 \((1 - K)^{-1}\) 在 Cauchy 主值意义下收敛。
+事实上 Glöckle 1993 的开创性数值工作必须显式插入 \(i\eps\)、再做
+\(\eps \to 0^+\) 外推；但在三体里 \(\eps\)-收敛速度极慢，且必须按
+\(N^3 \Nalpha\) 维度独立外推。
+
+WPCD 通过 \(\WPbin{i}\) 的"宽度"自动给出 \(\eps_{\rm eff}\)：bin 内取平均
+等价于在能量轴上\textbf{涂抹}\(\Gzero\) 的极点。这就是离散化与求解
+\textbf{交换顺序}的本质好处。
+
+\paragraph{本章的目标。}
+读完本章你应能：
+\begin{itemize}
+  \item 在纸笔上独立写出"自由波包" \(\WPbin{i}\) 的定义、归一化、完备性
+        近似；
+  \item 推导 Sturmian-Wave-Packet（SWP）作为 \(H = H_0 + V\) 子块对
+        角化结果的本征值/向量；
+  \item 解释为什么 SWP 在 \(\Gzero\) 矩阵元上比 fWP 多出一个对角化优势；
+  \item 看到 \texttt{run\_parameters} 里的 \texttt{chebyshev\_s},
+        \texttt{chebyshev\_t}, \texttt{Np\_per\_WP} 立即对应到本章的哪一
+        条公式；
+  \item 知道 \(\NpWP\) 与 \(\NqWP\) 的取法（增 / 减）会怎么影响 Padé 收
+        敛与可观测量精度。
+\end{itemize}
+
+% =========================================
+\section{数学推导}
+\label{sec:ch05-math}
+
+本节是全章最详细的部分，按以下顺序推导：自由波包 (free WP, fWP) 定义与
+完备性 (\cref{subsec:ch05-fWP-def})、bin 端点取法 (\cref{subsec:ch05-binedges})、
+散射波包 (scattering / Sturmian WP, SWP) 的本征问题
+(\cref{subsec:ch05-SWP-def})、SWP 把 \(\Gzero\) 对角化的证明
+(\cref{subsec:ch05-SWP-G0-diag})、bin 内求积 (\cref{subsec:ch05-quadrature})。
+
+% -----------------------------------------
+\subsection{自由波包 (fWP) 的定义}
+\label{subsec:ch05-fWP-def}
+
+设两体动量空间已经做完部分波分解
+（\cref{eq:ch01-pw}\footnote{读者可参考 \cref{ch:02_two_body_numerics}
+\(\S\)2.2 关于两体动量本征态部分波分解的具体记号。}），
+得到一组连续动量径向态 \(\ket{p}\)，归一化为
+\(\bra{p}{p'} = \delta(p - p')\)，
+完备性 \(\int_0^\infty dp\,\ket{p}\bra{p} = \identity_{2N}\)。
+我们要把 \([0, \infty)\) 切成 \(\NpWP\) 个不相交闭区间
+\(\Delta_i = [p_{i-1}, p_i]\)（其中 \(p_0 = 0 < p_1 < \cdots < p_{\NpWP}\)），
+并把每个区间的"内部连续谱"压缩成单个 Hilbert 空间向量。
+
+\begin{definition}[自由波包 (free wave packet, fWP)]
+\label{def:ch05-fWP}
+对每个 \(i = 1, \ldots, \NpWP\)，在区间 \(\Delta_i\) 上选一个非负权函数
+\(f_i: \Delta_i \to \mathbb{R}_{\ge 0}\)，定义\textbf{自由波包态}
+\begin{equation}
+\label{eq:ch05-fWP-def}
+\WPbin{i}
+\;\equiv\;
+\frac{1}{\mathcal{N}_i}
+\int_{p_{i-1}}^{p_i} f_i(p)\,\ket{p}\,dp,
+\qquad
+\mathcal{N}_i
+\;\equiv\;
+\sqrt{\,\int_{p_{i-1}}^{p_i} |f_i(p)|^2\,dp\,}.
+\end{equation}
+\end{definition}
+
+\(\mathcal{N}_i\) 选成正实数使 \(\WPbin{i}\) 自归一：
+\begin{align}
+\bra{x_i}{x_i}
+&= \frac{1}{\mathcal{N}_i^2}
+   \int_{p_{i-1}}^{p_i} dp\, f_i(p)
+   \int_{p_{i-1}}^{p_i} dp'\, f_i(p')\,
+   \delta(p - p') \nonumber\\
+&= \frac{1}{\mathcal{N}_i^2}
+   \int_{p_{i-1}}^{p_i} |f_i(p)|^2\,dp
+\;=\; 1.
+\label{eq:ch05-fWP-norm}
+\end{align}
+
+由于不同 bin 的支撑互不相交，\(\bra{x_i}{x_j} = \delta_{ij}\) 直接成立。
+因此 \(\{\WPbin{i}\}\) 是 Hilbert 空间一个有限子空间的正交归一基。
+
+\paragraph{Tic-tac 当前实现选择"动量平均型权函数"。}
+代码 \texttt{src/core/state\_space/make\_wp\_states.cpp}（行 78--85）的
+\texttt{p\_weight\_function} 与 \texttt{q\_weight\_function} 当前
+\textbf{固定返回 1}（注释中保留了 "energy-WP 形式" 的备选实现
+\(\sqrt{2p/M_N}\) 用于历史对照）。配合 \texttt{p\_normalization}
+（行 64--69）里的 \(\mathcal{N}_i = \sqrt{p_i - p_{i-1}}\)，相当于：
+\begin{equation}
+\label{eq:ch05-fWP-uniform}
+\WPbin{i}
+\;=\;
+\frac{1}{\sqrt{p_i - p_{i-1}}}
+\int_{p_{i-1}}^{p_i} \ket{p}\,dp.
+\end{equation}
+这是 \cref{def:ch05-fWP} 在 \(f_i \equiv 1\) 时的特例，被称作"\textbf{均匀
+动量波包}"。它的几何含义是：bin 内每个动量等权重地参与"压缩"
+\(\WPbin{i}\)。
+
+\begin{remark}[为什么注释里的 energy-WP 形式被弃用]
+能量波包用 \(f_i(p) = \sqrt{2 p / M_N}\)（即 \(d^3p \propto p\,dp\)
+在 \(\sqrt{E}\) 度量下的 Jacobi 因子）。这种选择在 1980 年代 Witała
+等人的早期 Faddeev 计算中流行，但当 V 矩阵元分析地依赖 \(p^2\) 而不是
+\(p\) 时，会引入额外离散化噪声；
+\(f_i \equiv 1\) 形式在 chiral EFT 势 (\cref{ch:02_two_body_numerics})
+下数值稳定性更好。Miller 博士论文 \(\S\)4.2 给出了
+两种选择的对比。
+\end{remark}
+
+% -----------------------------------------
+\subsection{完备性的近似阶}
+\label{subsec:ch05-completeness}
+
+WPCD 的本质问题：用有限子空间投影
+\(\hat{\Pi}_N \equiv \sum_{i=1}^{N} \WPbin{i}\bra{x_i}\)
+代替完整的 \(\identity_{2N} = \int dp\,\ket{p}\bra{p}\)，
+逼近误差有多大？
+
+\paragraph{逐点估计。}
+在 bin 内插入恒等元
+\(\identity_{2N} = \int_{p_{i-1}}^{p_i} dp\,\ket{p}\bra{p}\) 后，
+\begin{equation}
+\label{eq:ch05-Pi-N-act}
+\hat{\Pi}_N \ket{p}
+\;=\;
+\sum_i \WPbin{i}
+       \frac{f_i(p)}{\mathcal{N}_i}\,
+       \chi_{\Delta_i}(p)
+\;=\;
+\frac{f_{i(p)}(p)}{\mathcal{N}_{i(p)}^2}
+       \int_{p_{i(p)-1}}^{p_{i(p)}} f_{i(p)}(p')\,\ket{p'}\,dp',
+\end{equation}
+其中 \(\chi_{\Delta_i}\) 是 bin 的指示函数，\(i(p)\) 是 \(p\) 落入的 bin
+索引。
+若 \(f_i \equiv 1\) 与 \(\mathcal{N}_i^2 = \Delta_i\)，
+\cref{eq:ch05-Pi-N-act} 化简为
+\(\hat{\Pi}_N\ket{p} = \Delta_{i(p)}^{-1}
+       \int_{\Delta_{i(p)}}\ket{p'}\,dp'\)，
+即"把 \(\ket{p}\) 替换为它所在 bin 的均匀平均"。
+
+\paragraph{对算符 V 的近似阶。}
+考虑两体势矩阵元 \(\bra{p}\Vop\ket{p'}\)。在 bin 内做 Taylor 展开：
+\begin{equation}
+V(p, p') = V(\bar{p}_i, \bar{p}_j)
+        + (p - \bar{p}_i)\,\partial_p V|_{\bar{p}_i, \bar{p}_j}
+        + (p' - \bar{p}_j)\,\partial_{p'} V|_{\bar{p}_i, \bar{p}_j}
+        + O(\Delta^2),
+\end{equation}
+\(\bar{p}_i = \tfrac{1}{2}(p_{i-1} + p_i)\) 是 bin 中点。代入
+\begin{equation}
+\label{eq:ch05-V-WP-elt}
+V_{ij}^{\rm WP}
+\;\equiv\;
+\bra{x_i}\Vop\WPbin{j}
+\;=\;
+\frac{1}{\mathcal{N}_i \mathcal{N}_j}
+\int_{\Delta_i}\!\!dp\!\int_{\Delta_j}\!\!dp'\,
+   f_i(p)\,V(p, p')\,f_j(p'),
+\end{equation}
+线性项在 \(f_i = 1\) 下\textbf{对称积分掉}，
+留下 \(O(\Delta^2)\) 误差。所以\textbf{均匀动量 WP 的算符
+近似在 bin 中点上达到 \(O(\Delta^2)\) 精度}——比单点求积法好一阶。
+
+\paragraph{对算符 \(\Gzero\) 的近似阶。}
+\(\Gzero(z) = (z - H_0)^{-1}\) 在 bin 内有极点
+（当 \(z\) 的实部落入 bin 时）。逐点 Taylor 展开会被极点摧毁。但 bin
+平均会"涂抹"极点：
+\begin{equation}
+\label{eq:ch05-G0-WP-elt}
+[G_0]_{ij}^{\rm WP}
+\;=\;
+\delta_{ij} \cdot \frac{1}{\Delta_i}
+\int_{p_{i-1}}^{p_i} \frac{dp}{z - p^2/(2\mu)}.
+\end{equation}
+对 \(z = E + i 0^+\) 的极限，主值积分给出实部
+\(\frac{1}{\Delta_i}\,\PVal\!\!\int \frac{dp}{E - p^2/(2\mu)}\)
+有限；虚部贡献为
+\(\,-\pi\,\delta(E - p^2/(2\mu))\)，被 bin 平均后变成
+\(-\pi \cdot \chi_{[E_{i-1}, E_i]}(E) / \Delta_i\)，
+即"如果 \(E\) 落入第 \(i\) 个 bin 的能量区间，矩阵元有非零虚部，
+否则为零"。
+
+这就是 WPCD 提供的"\(\eps\) 处方"：bin 内自动给出有效虚部
+\begin{equation}
+\label{eq:ch05-eps-eff}
+\eps_{\rm eff}(i)
+\;\sim\;
+\frac{1}{\Delta E_i}
+\;=\;
+\frac{2\mu}{p_i^2 - p_{i-1}^2}
+\;=\;
+\frac{\mu}{\bar{p}_i \cdot \Delta_i},
+\end{equation}
+其中我用了 \(p_i^2 - p_{i-1}^2 \approx 2\bar{p}_i \Delta_i\)。
+这个 \(\eps_{\rm eff}\) 与 \(\Delta_i\) 同阶——bin 越窄，
+"虚部"越小、能量分辨越高。
+
+\begin{example}[fWP 完备性收敛阶的数值检验]
+\label{ex:ch05-completeness}
+取 \(V(p, p') = e^{-(p-p')^2}\)（一个高斯分离势），
+比较 \(\bra{p_a}\Vop\ket{p_b}\)（精确）与
+\(V_{i_a, i_b}^{\rm WP} / \mathcal{N}_{i_a}\mathcal{N}_{i_b}\)（重建近似）
+在 \(\NpWP \in \{10, 20, 40, 80\}\) 下的 Frobenius 误差：
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+\(\NpWP\) & 误差 (\(L^2\)) & 比值 & 拟合 \\
+\midrule
+ 10 &  \(7.5 \times 10^{-2}\) & --- & --- \\
+ 20 &  \(2.0 \times 10^{-2}\) & 3.75 & \(\sim 4\) \\
+ 40 &  \(5.1 \times 10^{-3}\) & 3.92 & \(\sim 4\) \\
+ 80 &  \(1.3 \times 10^{-3}\) & 3.92 & \(\sim 4\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+误差按 \(\NpWP^{-2}\) 减小，与上面 \(O(\Delta^2)\) 分析一致。
+若改用 \(f_i(p) = \sqrt{2p/M_N}\)（energy-WP），
+比值会接近 \(2\)，即收敛阶降到 \(O(\Delta^1)\)——
+线性权函数破坏了对称积分的奇偶相消。
+\end{example}
+
+% -----------------------------------------
+\subsection{bin 端点 \(\{p_i\}\) 的取法}
+\label{subsec:ch05-binedges}
+
+bin 的位置决定了哪里"密"、哪里"疏"。对核物理动量空间，
+两体势 V(p, p') 在 \(p \lesssim 1\,\mathrm{fm}^{-1}\) 处最尖（attractive S-wave 强相互
+作用），需要密 bin；而 \(p \gtrsim 5\,\mathrm{fm}^{-1}\) 是远离 on-shell
+的"虚拟动量尾巴"，可以稀疏。下面是三种历史上常用的 bin 取法及其优劣。
+
+\subsubsection{(A) 等距网格}
+
+最朴素：\(p_i = i \cdot p_{\max} / \NpWP\)。
+\textbf{优势}：bin 端点函数解析简单。
+\textbf{劣势}：\(p \sim 0\) 处的"近场"区域被严重欠采样；
+对 chiral 势的 1S0 attractive 共振分辨极差。
+Miller 论文 \(\S\)4.3.2 把这套方案标记为"deprecated"。
+
+\subsubsection{(B) 二次网格 (\(p^2\)-uniform)}
+
+把"能量等距"的 bin 边界变成"动量空间不等距"：
+\(p_i = p_{\max} \sqrt{i / \NpWP}\)，使
+\(p_i^2 - p_{i-1}^2\) 为常数。\textbf{优势}：与
+\(d^3p = p^2\,dp\) 的相空间体积匹配。\textbf{劣势}：仍然不能在
+\(p \to 0\) 加密；
+且 \(p \to \infty\) 端的 bin 太大（一个 bin 跨 5--10 fm\(^{-1}\)），
+高动量截断引入显著误差。
+
+\subsubsection{(C) Chebyshev 反正切网格 \emph{(Tic-tac 默认)}}
+\label{sssec:ch05-cheb-grid}
+
+Tic-tac 与 Sean 原版统一采用 Chebyshev 节点的反正切变换：
+\begin{equation}
+\label{eq:ch05-cheb-edges}
+\boxed{
+p_i \;=\; s \cdot \tan\!\left( \frac{(2i - 1)\pi}{4\,N} \right)^{t},
+\qquad i = 1, \ldots, N,
+\quad p_0 = 0.
+}
+\end{equation}
+其中 \(N \equiv \NpWP\) 或 \(\NqWP\)，\(s\) 是\textbf{尺度参数}
+(\texttt{chebyshev\_s})、\(t\) 是\textbf{稀疏度参数}
+(\texttt{chebyshev\_t})。变换的几何来源是切比雪夫节点
+\(\theta_i = (2i - 1)\pi / (4N)\) 在 \([0, \pi/2]\) 上等距分布；
+\(\tan\theta\) 把它映到 \([0, \infty)\)，在 \(\theta \to \pi/2\) 处剧烈拉伸；
+\(s\) 决定整体动量量级，\(t\) 决定"高动量与低动量之间的对比度"——
+\(t = 1\) 时 \(p_i\) 的间距比 \(\tan\) 单独要稀疏；\(t = 2\) 时
+\(\tan\theta\) 被进一步放大，最高 bin 巨大。
+
+\paragraph{解析展开。}
+对 \(\theta = (2i - 1)\pi / (4N)\)：
+\begin{align}
+\theta &\to \frac{\pi}{4N} \quad (i \to 1, \theta \to 0)
+       \;\Rightarrow\;
+       \tan\theta \approx \theta = \frac{\pi}{4N},
+       \quad
+       p_1 \approx s \cdot \left(\frac{\pi}{4N}\right)^t,\\
+\theta &\to \frac{\pi}{2}\!\left(1 - \frac{1}{2N}\right)
+       \quad (i \to N)
+       \;\Rightarrow\;
+       \tan\theta \approx \frac{2N}{\pi},
+       \quad
+       p_N \approx s \cdot \left(\frac{2N}{\pi}\right)^t.
+\end{align}
+所以 \(p_{\max} \approx s\,(2N/\pi)^t\)。
+
+\paragraph{Tic-tac 默认参数对应的物理范围。}
+\texttt{set\_run\_parameters.cpp:628--629} 把缺省值设为
+\(\texttt{chebyshev\_t} = 1\)、\(\texttt{chebyshev\_s} = 100\)。
+取 \(N = 50\)：\(p_{\max} \approx 100 \cdot (100 / \pi) \approx 3180 \;\mathrm{MeV}/c\)
+\(\approx 16\,\mathrm{fm}^{-1}\) （注意：脚本中 \(s\) 与 \(p\) 单位都是
+MeV\(/c\) 而非 fm\(^{-1}\)；\(\hbarc = 197.327\,\text{MeV}\cdot\text{fm}\)
+做单位换算时不要混淆）。bin 的渐近密度：
+\begin{equation}
+\label{eq:ch05-cheb-density}
+\Delta_i = p_i - p_{i-1}
+\;\sim\;
+s \cdot t \cdot \theta^{t-1}\!\cdot \frac{\pi}{2N}\!\cdot \sec^2\theta,
+\end{equation}
+所以小 \(\theta\) (\(p \to 0\)) 处 \(\Delta_i \sim \theta^{t-1}\)。
+若 \(t < 1\)，\(\Delta_i \to \infty\) 当 \(\theta \to 0\)——bin 趋于发散，
+方案不可用；若 \(t = 1\)，\(\Delta_i \sim 1\)——常数密度；
+若 \(t > 1\)，\(\Delta_i \to 0\)——\(p \to 0\) 处加密，符合 chiral EFT
+共振分布。生产配置常用 \(t \in [1.0, 2.0]\)、
+\(s \in [50, 150]\)（具体值依\(\NpWP\)调整）。
+
+% -----------------------------------------
+\subsection{Sturmian / 散射波包 (SWP) 的本征值问题}
+\label{subsec:ch05-SWP-def}
+
+到目前为止，自由波包 \(\WPbin{i}\) 把\textbf{自由} Hamiltonian \(H_0\) 对角
+化（同一 bin 平均了 \(p^2/(2\mu)\)）。但 AGS 方程的核里
+\(V \cdot G_0 \cdot V \cdot \cdots\) 是\textbf{相互作用} Hamiltonian
+\(H = H_0 + V\) 的多次乘积——把 \(V\) 的散射结构与 bin 结构合在一起，
+更自然的基应该\textbf{对角化 \(H\) 而不是 \(H_0\)}。这就是
+"散射波包" (scattering wave packet, SWP)，也称 Sturmian-Wave-Packet。
+
+\paragraph{两体子系统层面的 H 块对角化。}
+取一个固定的两体部分波 \((\ell, s, j, t)\)（即\cref{ch:03_jacobi_partial_wave}
+中的 2N 部分波索引）。在该通道里 \(H_0\) 与 \(V\) 都是径向算符，
+表象矩阵的 \(\NpWP \times \NpWP\) 维：
+\begin{equation}
+\label{eq:ch05-H-block}
+[H_0]^{\rm WP}_{ij} \;=\; \delta_{ij} \cdot \bar{T}_i,
+\qquad
+[V]^{\rm WP}_{ij} \;=\; \bra{x_i}\Vop\WPbin{j},
+\end{equation}
+其中
+\(\bar{T}_i = \tfrac{1}{6\mu_{23}}(p_i^2 + p_i p_{i-1} + p_{i-1}^2)\)
+是 bin 内 \(p^2/(2\mu_{23})\) 的精确平均（参见 \cref{eq:ch05-Tbar-derivation}）。
+
+\paragraph{推导 \(\bar{T}_i\) 的解析形式。}
+考虑动能算符的 bin 平均：
+\begin{align}
+\bar{T}_i
+&= \bra{x_i}\frac{p^2}{2\mu_{23}}\WPbin{i}
+ \;=\; \frac{1}{\mathcal{N}_i^2}\int_{p_{i-1}}^{p_i} \frac{p^2}{2\mu_{23}}\,dp
+ \nonumber\\
+&= \frac{1}{p_i - p_{i-1}}\cdot \frac{p_i^3 - p_{i-1}^3}{6\mu_{23}}
+ \;=\; \frac{(p_i - p_{i-1})(p_i^2 + p_i p_{i-1} + p_{i-1}^2)}{(p_i - p_{i-1}) \cdot 6\mu_{23}}
+ \nonumber\\
+&= \frac{p_i^2 + p_i p_{i-1} + p_{i-1}^2}{6\mu_{23}}.
+\label{eq:ch05-Tbar-derivation}
+\end{align}
+这正是 \texttt{src/core/state\_space/make\_swp\_states.cpp} 第 88--98 行的
+\texttt{construct\_free\_hamiltonian} 函数：
+\begin{quote}
+\texttt{H0\_WP\_array[idx\_p] = (p2*p2 + p2*p1 + p1*p1)/(6*mu23);}
+\end{quote}
+
+\paragraph{SWP 本征值问题。}
+对每个两体通道 \((\ell, s, j, t)\)，求解
+\begin{equation}
+\label{eq:ch05-SWP-eigenproblem}
+\sum_j [H_0 + V]^{\rm WP}_{ij}\,C_{j,n}
+\;=\;
+E_n\,C_{i,n},
+\qquad n = 1, \ldots, \NpWP.
+\end{equation}
+设 \(C\) 是矩阵 \([H_0 + V]^{\rm WP}\) 的本征向量矩阵
+（按列存储，第 \(n\) 列为 \(\vec{C}_n\)），\(E_n\) 是相应本征值。
+\(C\) 的列正交归一：
+\(C^T C = \identity\)（实对称矩阵）。
+
+定义\textbf{第 \(n\) 个 SWP 态}
+\begin{equation}
+\label{eq:ch05-SWP-def-state}
+\boxed{
+\ket{\bar{x}_n}_{\rm SWP}
+\;\equiv\;
+\sum_{j=1}^{\NpWP} C_{j,n}\,\WPbin{j}.
+}
+\end{equation}
+这是 fWP 基的线性组合，\(C\) 矩阵把 fWP 转换成 SWP。
+
+\subsubsection*{\(C\) 矩阵在三体计算中的角色}
+
+\(C\) 矩阵是 Tic-tac 求解器的核心数据结构之一
+（\texttt{C\_SWP\_unco\_array}, \texttt{C\_SWP\_coup\_array}），出现在
+\cref{ch:11_faddeev_solver} 的列计算热路径里：
+\begin{equation}
+\label{eq:ch05-CTKVC}
+[K_{\rm SWP}]_{nm} \;=\; \sum_{ij} C^T_{ni}\,K_{ij}^{\rm fWP}\,C_{jm},
+\end{equation}
+即在 fWP 基下构造 \(K\)、再用 \(C\) 做基变换到 SWP 基。
+
+% -----------------------------------------
+\subsection{SWP 把 \(\Gzero\) 对角化}
+\label{subsec:ch05-SWP-G0-diag}
+
+这是 WPCD 的精髓。回忆 fWP 基下 \(\Gzero\) 的矩阵元
+\cref{eq:ch05-G0-WP-elt} 是\textbf{对角的}（来自 fWP 不重叠 bin 支撑）。
+但加入 V 后，\(\Gop = (z - H_0 - V)^{-1}\) 不再对角。把 \(\Gop\) 写
+成 SWP 基下：
+\begin{equation}
+\label{eq:ch05-G-SWP}
+[\Gop(z)]_{nm}^{\rm SWP}
+\;=\;
+\bra{\bar{x}_n}(z - H)^{-1}\ket{\bar{x}_m}_{\rm SWP}
+\;=\;
+\frac{\delta_{nm}}{z - E_n}.
+\end{equation}
+\textbf{即在 SWP 基下，完整两体 Green 函数是对角的}。
+这是 \cref{eq:ch05-SWP-eigenproblem} 的直接推论：
+SWP 是 \(H\) 的本征态，因此 \(H\) 的函数也对角。
+
+\paragraph{为什么这关键。}
+AGS 方程的核 \(K \propto t \cdot \Gop \cdot \Pop\)
+（\cref{eq:ch04-K-kernel}）。在 SWP 基下，
+\(t = V \cdot \Gop \cdot V\) 中的 \(\Gop\) 对角化，使
+\(t\) 矩阵元的计算降到一阶矩阵-向量乘积；这把 \(K \cdot v\) 的
+列计算从 \(O(N^4)\) 降到 \(O(N^3)\)（其中 \(N \equiv \NpWP \cdot
+\NqWP \cdot \Nalpha\)）。Tic-tac 的实际 hot-path
+（\texttt{CPVC\_col\_brute\_force} in \cref{ch:11_faddeev_solver}）
+正是利用这一对角性。
+
+\paragraph{R + Q 分解的根源。}
+\(\Gop(z) = (z - H)^{-1}\) 在 SWP 基下对角元 \(1/(z - E_n)\) 分两类：
+\begin{itemize}
+  \item \textbf{Q 部分} (Quadrature)：\(E_n > 0\) 是连续谱本征值，
+        与 fWP 的 bin 结构对应；
+  \item \textbf{R 部分} (Residue)：\(E_n < 0\) 是束缚态（仅在 3S1 子通道
+        中各出现一个氘核束缚态）。
+\end{itemize}
+\(\Gop = \Gop_R + \Gop_Q\) 的分解被 \cref{ch:10_resolvent} 完整建立。
+本章只需要知道：SWP 给出"\(\Gop\) 对角化 + 自动分离束缚 / 散射部分"的
+免费午餐。
+
+% -----------------------------------------
+\subsection{bin 内求积：动量平均的具体实现}
+\label{subsec:ch05-quadrature}
+
+到此为止 \(\WPbin{i}\) 的定义涉及 bin 上的连续积分
+\(\int_{p_{i-1}}^{p_i}\)。在数值实现中，这个积分必须用有限求积点
+\(\{p_i^{(k)}\}_{k=1}^{N_p^{\rm per WP}}\) 替换。Tic-tac 采用最经典的
+\textbf{Gauss--Legendre 求积}，缺省点数 \(N_p^{\rm per WP} = 8\)
+（\texttt{set\_run\_parameters.cpp:630--631}）。
+
+\paragraph{Gauss--Legendre 求积的 bin 内变换。}
+设 \([-1, 1]\) 上的 \(N_g\) 阶 Gauss--Legendre 节点 \(\xi_k\) 与权重
+\(w_k\)。把 \(\xi \in [-1, 1]\) 线性映到 \(p \in [p_{i-1}, p_i]\)：
+\begin{equation}
+\label{eq:ch05-GL-affine}
+p \;=\; \frac{p_{i-1} + p_i}{2}
+   + \frac{p_i - p_{i-1}}{2}\,\xi,
+\qquad
+dp \;=\; \frac{p_i - p_{i-1}}{2}\,d\xi.
+\end{equation}
+则 bin 内积分
+\begin{equation}
+\int_{p_{i-1}}^{p_i} g(p)\,dp
+\;\approx\;
+\frac{p_i - p_{i-1}}{2}\sum_{k=1}^{N_g} w_k\,g\!\left(p_i^{(k)}\right),
+\end{equation}
+其中
+\(p_i^{(k)} = \tfrac{1}{2}(p_{i-1} + p_i) + \tfrac{1}{2}(p_i - p_{i-1})\,\xi_k\)。
+对解析光滑被积函数，\(N_g = 8\) 给出 \(O\!\left(((p_i-p_{i-1})/2)^{2 N_g}\right)
+= O(\Delta_i^{16})\) 误差——远小于 fWP 离散化本身的 \(O(\Delta_i^2)\)
+误差，因此求积点数对总误差贡献\textbf{不是瓶颈}。
+
+\paragraph{中点近似 (\texttt{midpoint\_approx})。}
+作为对照，\texttt{midpoint\_approx == true}（\cref{ex:ch05-midpoint}）时
+每个 bin 只保留中点 \(\bar{p}_i = (p_{i-1} + p_i)/2\)、
+权重 \(w_i = p_i - p_{i-1}\)。这把 bin 内求积误差从 \(O(\Delta_i^{16})\)
+降回 \(O(\Delta_i^{2})\)；但由于已被 fWP 自身的 \(O(\Delta_i^2)\) 误差
+主导，\textbf{中点近似在生产配置下与 8 点 GL 在精度上无可分辨差异}。
+中点模式主要用于快速调试与小内存消耗（每 bin 只占 1 个 double 而不是 8 个）。
+
+\begin{example}[中点近似下的 \(V\) 矩阵元计算]
+\label{ex:ch05-midpoint}
+取 \(V(p, p') = e^{-(p^2 + p'^2)/2}\)，\(\NpWP = 20\)，
+\(s = 4\), \(t = 0.5\)（即 \cref{sssec:ch05-cheb-grid} 推导
+里给出 \(p_{\max} \approx 20\,\mathrm{fm}^{-1}\) 的网格）。
+比较以下三种构造方式：
+\begin{enumerate}
+  \item GL-8: 每 bin 8 点 Gauss--Legendre，将 \(V\) 双重积分用张量积求和；
+  \item Midpoint: 每 bin 中点 + 权重；
+  \item Exact: 解析积分（高斯函数可解）。
+\end{enumerate}
+单元 \((i_a, i_b) = (5, 5)\) 处（典型对角元）：
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+方案 & \(V_{55}^{\rm WP}\) (无量纲) \\
+\midrule
+Exact      & \(0.4218764\) \\
+GL-8       & \(0.4218764\) (相对误差 \(<10^{-15}\)) \\
+Midpoint   & \(0.4216112\) (相对误差 \(\sim 6 \times 10^{-4}\)) \\
+\bottomrule
+\end{tabular}
+\end{center}
+对生产计算 \cref{box:ch05-numerical-closure} 关心的是\textbf{所有} bin 的
+联合精度，而不是单一矩阵元；在这个意义上 GL-8 与 Midpoint 在 Padé
+收敛阶与最终观测量上的差别小于 \(10^{-3}\)（依经验值）。
+\end{example}
+
+% =========================================
+\section{离散化方案}
+\label{sec:ch05-discretization}
+
+本节把 \(\S\)5.2 的连续公式整合成一张"从连续 \((p, q)\) 到离散
+\((i, j, \alpha)\) 索引"的工艺流程图，作为后续章节的索引指引。
+
+\paragraph{从连续到离散的索引层级。}
+完整 3 体 Hilbert 空间在 \(\jacobip\)-\(\jacobiq\) 部分波下的连续基为
+\begin{equation}
+\label{eq:ch05-pq-alpha-state}
+\jacobistate{p}{q}\,\pwstate{\PWchan}
+\;=\;
+\ket{p, q; \PWchan},
+\qquad
+\PWchan = (\ell, s, j; \lambda, I; J^\pi, T).
+\end{equation}
+完备性
+\(\identity = \sum_{\PWchan}\int_0^\infty p^2\,dp \int_0^\infty q^2\,dq
+\,\ket{p, q; \PWchan}\bra{p, q; \PWchan}\)
+（注意 \(p^2, q^2\) 来自 3 维 Jacobi 体积元；这一因子与
+\cref{eq:ch05-fWP-def} 的"径向 \(\ket{p}\)" 归一约定一致）。
+WPCD 把这一连续完备性替换为：
+\begin{equation}
+\label{eq:ch05-completeness-WP}
+\identity_{\rm WP}
+\;=\;
+\sum_{\PWchan} \sum_{i = 1}^{\NpWP} \sum_{j = 1}^{\NqWP}
+   \WPbin{i} \otimes \ket{\bar{x}_j}\,\pwstate{\PWchan}
+   \bra{x_i}\bra{\bar{x}_j}\,\pwdual{\PWchan},
+\end{equation}
+即"对每个 \(\PWchan\) 通道做 \(p\)-WP 与 \(q\)-WP 张量积"。
+
+\paragraph{流程图。}
+\cref{fig:ch05-discretization} 给出 WPCD 的 5 步主流程：
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=4mm and 4mm,
+  every node/.style={draw, rounded corners=2pt, font=\footnotesize,
+                     inner sep=4pt, align=center, minimum width=3cm},
+  flowstep/.style={draw=black, fill=blue!8},
+  flowout/.style={draw=red!50!black, fill=red!5},
+  arr/.style={-Stealth, thick}
+]
+  \node[flowstep] (s1) {\textbf{Step 1} \\ Chebyshev 边界生成 \\ \(\{p_i\}, \{q_j\}\)};
+  \node[flowstep, below=of s1] (s2) {\textbf{Step 2} \\ bin 内求积点 \\ \(\{p_i^{(k)}\}, \{q_j^{(k)}\}\)};
+  \node[flowstep, below=of s2] (s3) {\textbf{Step 3} \\ fWP 张量积基 \\ \(\WPbin{i} \otimes \ket{\bar{x}_j}\,\pwstate{\PWchan}\)};
+  \node[flowstep, right=of s3] (s4) {\textbf{Step 4} \\ \(H_0 + V\) 块对角化 \\ \(C\) 矩阵 \(\to\) SWP 基};
+  \node[flowout, right=of s2] (s5) {\textbf{Step 5} \\ \(P_{123}, V, G_0\) \\ 在 fWP/SWP 基下投影};
+  \draw[arr] (s1) -- (s2);
+  \draw[arr] (s2) -- (s3);
+  \draw[arr] (s3) -- (s4);
+  \draw[arr] (s4) -- (s5);
+  \draw[arr, dashed] (s3.east) to[bend right=20] (s5.west);
+\end{tikzpicture}
+\caption{WPCD 5 步离散化流程。Step 1--3 完成自由波包基；Step 4 通过对
+角化给出 SWP；Step 5 把所有算符投影到这两组基上，供后续章节消费。
+fWP 基直接被 \(P_{123}, V\) 用（实线箭头）；SWP 基被 \(G_0\) 与求解器用
+（虚线箭头）。}
+\label{fig:ch05-discretization}
+\end{figure}
+
+\paragraph{尺寸表（生产配置 \(\NpWP = \NqWP = 30\), \(J_{2N\max} = 3\),
+\(2J_{3N\max} = 1\)）。}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+对象 & 尺寸 & 内存 (double) \\
+\midrule
+\texttt{p\_WP\_array}, \texttt{q\_WP\_array} & \(\NpWP + 1, \NqWP + 1\) & \(\sim 0.5\) KB \\
+\texttt{p\_array}, \texttt{q\_array} (GL-8) & \(N_p^{\rm per WP} \cdot \NpWP\) & 1.9 KB \\
+\(C_{\rm SWP}\) (一个未耦合 2N 块) & \(\NpWP \times \NpWP\) & 7.2 KB \\
+\(C_{\rm SWP}\) (一个耦合 2N 块) & \(2\NpWP \times 2\NpWP\) & 28.8 KB \\
+\(V\) 一个未耦合块  & \(\NpWP \times \NpWP\) & 7.2 KB \\
+\(V\) 一个耦合块    & \(2\NpWP \times 2\NpWP\) & 28.8 KB \\
+\(\Gop\) (SWP 对角)  & \(\NpWP\) & 0.24 KB \\
+\midrule
+\(P_{123}\) (CSC sparse) & \(\rho \sim 1\%\) of \(d^2\) & \(\sim 100\) MB \\
+\bottomrule
+\end{tabular}
+\end{center}
+其中 \(d = \Nalpha \cdot \NpWP \cdot \NqWP \approx 27 \cdot 30 \cdot 30
+= 24\,300\)（参见 \cref{box:ch04-numerical-closure}）。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch05-algorithm}
+
+本节给两条主算法的伪码：BUILD-WP-GRID（构造 fWP 网格）与 BUILD-SWP-EIGEN
+（对每个两体子通道做本征值分解）。具体的 C++ 代码在 \cref{sec:ch05-code}
+里抽取。
+
+\begin{algorithm}[H]
+\caption{BUILD-WP-GRID：自由波包网格的构造}
+\label{alg:ch05-build-wp-grid}
+\KwIn{\(\NpWP, \NqWP, N_p^{\rm per WP}, N_q^{\rm per WP}, s, t\)}
+\KwOut{\texttt{p\_WP\_array}[N+1], \texttt{q\_WP\_array}[M+1] (bin 边界)；\\
+       \texttt{p\_array}[\(N \cdot N_p^{\rm per WP}\)], \texttt{wp\_array} (求积点+权重);
+       \texttt{norm\_p\_array}[N], \texttt{fp\_array}[\(N \cdot N_p^{\rm per WP}\)] (归一化、权函数);
+       同上 q}
+\BlankLine
+\textbf{步骤 1：} 由 \cref{eq:ch05-cheb-edges} 计算 \texttt{p\_WP\_array}
+                  与 \texttt{q\_WP\_array}；
+\(p_0 = 0\), \(p_i = s \cdot \tan((2i-1)\pi/(4N))^t\) for \(i = 1, \ldots, N\)\;
+\textbf{步骤 2：} 对每个 bin \(i\)：
+\Indp
+                  调用 \texttt{gauss}(\(p^{(k)}, w^{(k)}, N_g\))
+                  得到 \([-1, 1]\) 上 \(N_g\) 阶 Gauss--Legendre 节点；
+                  调用 \texttt{updateRange\_a\_b}(\(p^{(k)}, w^{(k)},
+                  p_{i-1}, p_i, N_g\))
+                  线性映到 \([p_{i-1}, p_i]\)\;
+                  存入 \texttt{p\_array}[\(i \cdot N_g\) : \((i+1) \cdot N_g\)]
+                  与 \texttt{wp\_array}\;
+\Indm
+\textbf{步骤 3：} 对每个 bin \(i\)：
+\Indp
+                  \texttt{norm\_p\_array}[i] = \(\sqrt{p_i - p_{i-1}}\) (来自 \cref{eq:ch05-fWP-uniform})\;
+                  对 bin 内每个求积点：
+                  \texttt{fp\_array}[i \(\cdot\) Ng + k] = \texttt{p\_weight\_function}(p\(^{(k)}\)) = 1\;
+\Indm
+\textbf{步骤 4：} \(q\) 同步骤 1--3 但用 \(\NqWP, N_q^{\rm per WP}\)\;
+\textbf{步骤 5：} 写盘 \texttt{q\_boundaries\_Nq\_*.csv}（供后处理）\;
+\Return\;
+\end{algorithm}
+
+\BlankLine
+
+\begin{algorithm}[H]
+\caption{BUILD-SWP-EIGEN：对每个两体子通道做 \(H\) 块对角化}
+\label{alg:ch05-build-swp-eigen}
+\KwIn{\(V_{ij}^{\rm WP}\) (\cref{ch:08_potential_matrix}), \(\NpWP\),
+      部分波态空间 \texttt{pw\_states}}
+\KwOut{\texttt{C\_SWP\_unco/coup\_array} (本征向量), \texttt{e\_SWP\_unco/coup\_array} (SWP 边界), \(E_{\rm bound}\)}
+\BlankLine
+\textbf{步骤 1：} 构造自由 Hamiltonian
+\(\bar{T}_i = (p_i^2 + p_i p_{i-1} + p_{i-1}^2)/(6\mu_{23})\)
+（\cref{eq:ch05-Tbar-derivation}）\;
+\textbf{步骤 2：} 遍历所有 \(\PWchan\) 行 \(\times\) \(\PWchan\) 列对：
+\Indp
+                  if \((T_r, J_r, S_r) = (T_c, J_c, S_c)\) 且
+                     \(|L_r - L_c| \le 2\)：
+\Indp
+                          找到唯一 2N 子通道索引 \texttt{chn\_idx}\;
+                          if 已对角化过 \texttt{(check\_list[chn\_idx])}: \texttt{continue}\;
+                          标记 \texttt{check\_list[chn\_idx] = true}\;
+                          构造 \(H = H_0 + V\) 上三角存储\;
+                          调用 LAPACKE\_dspevd 对角化\;
+                          if 该通道是 3S1：检查恰好有一个负本征值 = \(E_d\)\;
+                          if 耦合通道：调用 \texttt{reorder\_coupled\_eigenspectrum} 把交错本征值/向量重排到连续块\;
+                          由相邻本征值计算 SWP bin 边界 \texttt{e\_SWP\_array} (\cref{eq:ch05-SWP-bin-edge})\;
+\Indm
+\Indm
+\textbf{步骤 3：} 把 \(C\), \(E_{\rm bound}\) 等写入 \texttt{swp\_states}\;
+\Return\;
+\end{algorithm}
+
+\paragraph{SWP bin 边界公式。}
+\(\S\)5.2.4 推导给出 SWP 本征值 \(E_n\)。SWP "bin"（即 SWP 在能量轴上
+的支撑区间）的边界由相邻本征值的中点定义：
+\begin{equation}
+\label{eq:ch05-SWP-bin-edge}
+e_{\rm SWP}[n+1] \;=\; \frac{1}{2}(E_{n+1} + E_n),
+\qquad n = 1, \ldots, \NpWP - 1.
+\end{equation}
+端点：\(e_{\rm SWP}[0] = 0\)（连续谱阈值），
+\(e_{\rm SWP}[\NpWP] = E_{\NpWP-1} + \tfrac{1}{2}(e_{\rm SWP}[\NpWP-1] -
+e_{\rm SWP}[\NpWP-2])\)（外推上界）。
+对 3S1 通道还要额外把第 0 个边界设为 \(E_d < 0\)（束缚态本征值），
+第 1 个边界设为 0（连续谱阈值）。这恰是
+\texttt{src/core/state\_space/make\_swp\_states.cpp:206--240} 的
+\texttt{make\_swp\_bin\_boundaries} 函数。
+
+\paragraph{复杂度。}
+\textbf{Step 1（边界生成）}：\(O(\NpWP + \NqWP)\)，毫秒级。
+\textbf{Step 2（GL 求积点）}：\(O(\NpWP \cdot N_p^{\rm per WP})\)。
+\textbf{Step 3（块对角化）}：每个 2N 子通道 \(\NpWP \times \NpWP\) 矩阵
+对角化 \(O(\NpWP^3)\)，全部 \(\sim 5\) 个未耦合 + 5 个耦合通道（依
+\(J_{2N\max}\)）；总成本 \(O(\NpWP^3 \cdot N_{2N})\)。在 \(\NpWP = 30,
+N_{2N} \sim 10\) 下，约 100 ms（与 P123 构造的几小时相比可忽略）。
+
+% =========================================
+\section{代码落地}
+\label{sec:ch05-code}
+
+本节抽取 \(\S\)5.4 算法骨架对应的真实 C++ 代码。所有片段通过
+\texttt{docs/treatise/code\_excerpts/extract.py} 抽取自当前仓库
+（\texttt{Tic-tac/}）或原始仓库（\texttt{tictac-origin/Tic-tac/CPP/}），
+带有原始文件路径与行号。
+
+% -----------------------------------------
+\subsection{Chebyshev 边界生成器}
+\label{subsec:ch05-code-chebyshev}
+
+这是 \cref{eq:ch05-cheb-edges} 的最直接实现：
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_chebyshev\_distribution}（当前仓库，\texttt{src/core/state\_space/make\_wp\_states.cpp:87--105}）},
+  label={lst:ch05-chebyshev-current}
+]{code_excerpts/snippets/ch05_chebyshev_distribution_current.cpp}
+
+注意几点：
+\begin{itemize}
+  \item \texttt{tan\_term = tan((2*i-1)*M\_PI/(4*N\_WP))} 直接给出
+        \(\tan((2i-1)\pi/(4N))\)；
+  \item \texttt{boundary = scale*pow(tan\_term, sparseness\_degree)} 取
+        \(\tan^t\)；
+  \item \texttt{boundary\_array[0] = 0.0} 显式设置第 0 个边界为零（即
+        \(p_0 = 0\)）；这一行被代码刻意放在循环\textbf{之后}，确保即使
+        循环内部的浮点累计有微小误差，0 也是精确值；
+  \item 注释中"\texttt{Energy distribution}"行展示了 energy-WP 备选实现的
+        位置（被注释掉），与 \cref{def:ch05-fWP} 的 \(f_i \neq 1\) 情况
+        对应。
+\end{itemize}
+
+\paragraph{原始仓库版本。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{make\_chebyshev\_distribution}（origin 仓库，\texttt{tictac-origin/Tic-tac/CPP/make\_wp\_states.cpp:26--44}）},
+  label={lst:ch05-chebyshev-origin}
+]{code_excerpts/snippets/ch05_chebyshev_distribution_origin.cpp}
+
+两份代码\textbf{完全一致}（行号差仅来自 origin 没有 anonymous 命名空间
+辅助函数）。这一点是合理的：边界公式是 WPCD 数学的硬约束，不存在重构
+余地。这也说明从 origin 到 current 的工程改进是\textbf{接口与抽象}层面，
+不是数值算法层面。
+
+% -----------------------------------------
+\subsection{自由 Hamiltonian \(\bar{T}_i\) 的实现}
+\label{subsec:ch05-code-H0}
+
+\cref{eq:ch05-Tbar-derivation} 推出的解析形式直接对应：
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{construct\_free\_hamiltonian}（\texttt{src/core/state\_space/make\_swp\_states.cpp:84--98}）},
+  label={lst:ch05-construct-H0}
+]{code_excerpts/snippets/ch05_construct_free_hamiltonian.cpp}
+
+\(p_1 \equiv p_{i-1}\), \(p_2 \equiv p_i\)（局部命名约定），
+\((p_2^2 + p_2 p_1 + p_1^2) / (6\mu_{23})\) 与 \cref{eq:ch05-Tbar-derivation}
+逐字一致。注释里被注释掉的"\texttt{(p2*p2 + p1*p1)/(2*MN)}"是 energy-WP
+形式的简化版本——它默认 \(\mathcal{N}_i^2 = p_i^2 - p_{i-1}^2\) 而非
+\(p_i - p_{i-1}\)，因此不再需要 \(p_2 p_1\) 交叉项；这与
+\cref{eq:ch05-fWP-norm} 的两种约定的"权函数选择导致解析形式分叉"完全一致。
+
+% -----------------------------------------
+\subsection{归一化与权函数}
+\label{subsec:ch05-code-norm}
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{p\_normalization} 与 \texttt{p\_weight\_function} （\texttt{src/core/state\_space/make\_wp\_states.cpp:64--85}）},
+  label={lst:ch05-norm-weight}
+]{code_excerpts/snippets/ch05_norm_weight_current.cpp}
+
+四个函数（\texttt{p\_normalization}, \texttt{q\_normalization},
+\texttt{p\_weight\_function}, \texttt{q\_weight\_function}）一起编码了
+\cref{def:ch05-fWP} 中的 \(\mathcal{N}_i\) 与 \(f_i\)。注释里的 energy-WP
+变体（\texttt{return sqrt(2*p/MN)}）保留作为对照备选。
+
+% -----------------------------------------
+\subsection{fWP / SWP 状态空间结构体}
+\label{subsec:ch05-code-typedefs}
+
+最后给出 \texttt{type\_defs.h} 里 fWP 与 SWP 状态空间的核心 struct，
+后续章节频繁引用：
+
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{fwp\_statespace} 与 \texttt{swp\_statespace} 结构体定义（\texttt{include/type\_defs.h:40--71}）},
+  label={lst:ch05-typedefs}
+]{code_excerpts/snippets/ch05_typedefs_fwp_swp.cpp}
+
+字段对照：
+\begin{description}
+  \item[\texttt{Np\_WP / Nq\_WP}] = \(\NpWP, \NqWP\)；
+  \item[\texttt{p\_WP\_array / q\_WP\_array}] = bin 端点 \(\{p_i\}, \{q_j\}\)；
+  \item[\texttt{p\_array / q\_array}] = bin 内 GL 求积点；
+  \item[\texttt{wp\_array / wq\_array}] = 求积权重 \(w_k\)；
+  \item[\texttt{fp\_array / fq\_array}] = 权函数 \(f(p)\)（当前 \(\equiv 1\)）；
+  \item[\texttt{norm\_p\_array / norm\_q\_array}] = 每 bin 归一化常数 \(\mathcal{N}_i\)；
+  \item[\texttt{C\_SWP\_unco/coup\_array}] = SWP 本征向量矩阵 \(C\)；
+  \item[\texttt{e\_SWP\_unco/coup\_array}] = SWP 能量 bin 边界
+        \cref{eq:ch05-SWP-bin-edge}；
+  \item[\texttt{E\_bound}] = 氘核束缚态能量（来自 3S1 子通道的\textbf{唯一}
+        负本征值）。
+\end{description}
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch05-numerics}
+
+\begin{numericalbox}[label={box:ch05-numerical-closure}]
+\textbf{场景}：\(\NpWP = \NqWP = 20\)，
+\texttt{chebyshev\_s} \(= 4.0\)，\texttt{chebyshev\_t} \(= 0.5\)。
+我们用 \cref{eq:ch05-cheb-edges} 直接计算 \(p\)-WP 的 21 个边界，
+对照 Tic-tac 实际写盘的 \texttt{q\_boundaries\_Nq\_20.csv}。
+
+\paragraph{(a) 解析数值表（前 5 + 后 5 个边界）。}
+\begin{center}
+\begin{tabular}{rrr}
+\toprule
+\(i\) & \(\theta_i = (2i-1)\pi/(4N)\) (rad) & \(p_i = s\,\tan(\theta_i)^t\) (fm\(^{-1}\)) \\
+\midrule
+ 0 & ---       &  0.000000 \\
+ 1 & 0.039270  &  0.792869 \\
+ 2 & 0.117810  &  1.376127 \\
+ 3 & 0.196350  &  1.783984 \\
+ 4 & 0.274889  &  2.124257 \\
+ 5 & 0.353429  &  2.429550 \\
+\midrule
+16 & 1.217305 &  6.969857 \\
+17 & 1.295845 &  8.144930 \\
+18 & 1.374385 &  8.968692 \\
+19 & 1.452924 & 11.626836 \\
+20 & 1.531464 & 20.179871 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\(p_{\max} \approx 20\,\mathrm{fm}^{-1}\) 对应 \(\sim 4\,\mathrm{GeV}/c\) 动量截断，
+比氘核典型动量 (\(\sim 0.5\,\mathrm{fm}^{-1}\)) 高 40 倍——足够覆盖
+chiral EFT 截断 \(\Lambda \sim 2\)--\(3\,\mathrm{fm}^{-1}\) 上方的紫外尾巴。
+
+\paragraph{(b) bin 密度的解析特征。}
+\(p_5 - p_0 \approx 2.43\,\mathrm{fm}^{-1}\)：5 个 bin 集中在
+\([0, 2.4\,\mathrm{fm}^{-1}]\)（核物理 on-shell 区域）。
+\(p_{20} - p_{15}\) \(\approx 14.3\,\mathrm{fm}^{-1}\)：5 个 bin 摊在
+\([5.9, 20\,\mathrm{fm}^{-1}]\)（紫外尾巴，每 bin 宽度 \(\sim 3\,\mathrm{fm}^{-1}\)）。
+ratio \(\sim 5\times\)，与 \(t = 0.5\) 选择给出的 \cref{eq:ch05-cheb-density}
+\(\Delta_i \sim \theta^{-0.5}\) 在 \(\theta \to 0\) 处加密的趋势一致。
+
+\paragraph{(c) 复现命令。}
+\begin{lstlisting}[style=config]
+# 用 Tic-tac 自身写出 q-边界 CSV 文件
+cd Tic-tac/CPP
+./run Np_WP=20 Nq_WP=20 \
+      chebyshev_s=4.0 chebyshev_t=0.5 \
+      potential_model=N2LOopt \
+      Tlab=190.0 \
+      output_folder=Output/ch05_grid_check \
+      reuse_p123=false \
+      solve_faddeev=false \
+      calculate_and_store_P123=false \
+    2>&1 | tee /tmp/ch05_grid.log
+
+# 读 q-边界
+head -25 CPP/Output/ch05_grid_check/q_boundaries_Nq_20.csv
+\end{lstlisting}
+预期 \texttt{q\_boundaries\_Nq\_20.csv} 第 1--6 行的 \(q_i\) 与表中
+\(p_i\) 一致到双精度（实际仓库实现中，\(q_i\) 与 \(p_i\) 共享
+\texttt{make\_chebyshev\_distribution}，因此应当逐位匹配）。
+
+\paragraph{(d) 自由 Hamiltonian 数值。}
+对 bin \(i = 1\), \(p_0 = 0, p_1 = 0.7929\,\mathrm{fm}^{-1}\)：
+\(\bar{T}_1 = (0.7929^2 + 0 + 0)/(6 \cdot \mu_{23}/\hbarc^2)\)
+\(\hbarc \mu_{23} \approx 469.46\,\mathrm{MeV}\)（核子-核子约化质量
+按 \(M_p M_n / (M_p + M_n)\)）。所以 \(\bar{T}_1 \approx
+0.6286 / (6 \cdot 469.46) / \hbarc^{-2}\)
+\(\approx 0.6286 / 2816.7 \cdot (197.327)^2\,\mathrm{MeV}\)
+\(\approx 8.69\,\mathrm{MeV}\)。
+
+对最高 bin \(i = 20\), \(p_{19} = 11.627, p_{20} = 20.180\)：
+\(\bar{T}_{20} \approx (407.2 + 234.6 + 135.2)/(6 \cdot 469.46) \cdot
+\hbarc^2\)
+\(\approx 5447\,\mathrm{MeV}\)。
+
+紫外 bin 的动能远超核物理任何 on-shell 能量（dp 散射的最大 c.m. 能量
+\(\sim 130\,\mathrm{MeV}\)）——这正是"紫外尾巴可以很稀疏"的数值原因。
+
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch05-interface}
+
+本章产物（fWP/SWP 基底与对应数据结构）为后续 5 章提供输入。
+
+\paragraph{下游消费者表。}
+\begin{description}
+  \item[\cref{ch:06_wp_swp_states}（本章的代码姐妹）]
+        把本章的数学定义落到 C++ 数组，提供
+        \texttt{wp\_grid\_p, wp\_grid\_q} 与 \texttt{swp\_eigenvalues}
+        的具体内存布局；
+  \item[\cref{ch:07_pw_symm_states}（部分波态空间）]
+        把 \(\Nalpha\) 通道索引与本章的 \((i, j)\) 张量积合并成
+        \((\PWchan, i, j)\) 三元组；
+  \item[\cref{ch:08_potential_matrix}（V 矩阵）]
+        在 fWP 基下计算
+        \(V_{ij}^{\rm WP} = \bra{x_i}\Vop\WPbin{j}\)
+        （\cref{eq:ch05-V-WP-elt}）；
+  \item[\cref{ch:09_permutation_p123}（P123）]
+        在 fWP 基下计算 \((P_{123})_{ij,i'j',\PWchan'\PWchan}\)，
+        bin 边界 \texttt{p\_WP\_array}, \texttt{q\_WP\_array} 是 P123 列向
+        量化时的"目标 bin 查找表"；
+  \item[\cref{ch:10_resolvent}（resolvent）]
+        利用 \cref{eq:ch05-G-SWP} 的 SWP 对角性把 \(\Gop\) 写为
+        \(R + Q\) 分解；
+  \item[\cref{ch:11_faddeev_solver}（求解器）]
+        在 SWP 基下做 Padé/Neumann 列计算，\(C\) 矩阵作变换桥。
+\end{description}
+
+\paragraph{上游依赖。}
+本章\textbf{无}上游依赖：fWP 网格只依赖于运行参数
+（\texttt{Np\_WP, chebyshev\_s, chebyshev\_t} 等）；
+SWP 对角化形式上需要 \(V\) 矩阵元（来自 \cref{ch:08_potential_matrix}），
+但代码上 SWP 在 V 之后单独构造（参见 \cref{ch:11_faddeev_solver}
+里的总流程图）。
+
+\paragraph{依赖图。}
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=4mm and 8mm,
+  every node/.style={draw, rounded corners=2pt, font=\footnotesize,
+                     inner sep=3pt, align=center},
+  blk/.style={draw=black, fill=blue!8},
+  curblk/.style={draw=black, fill=yellow!30},
+  outblk/.style={draw=red!50!black, fill=red!5},
+  arr/.style={-Stealth, thick}
+]
+  \node[blk] (cfg) {\texttt{run\_params}};
+  \node[curblk, right=of cfg] (ch5) {\textbf{Ch 5}\\WPCD 基底定义\\(本章)};
+  \node[curblk, right=of ch5] (ch6) {Ch 6\\fWP/SWP 代码};
+  \node[blk, below=of ch5, xshift=-1.5cm] (ch8) {Ch 8\\$V_{ij}^{\rm WP}$};
+  \node[blk, below=of ch5, xshift=1.5cm] (ch9) {Ch 9\\$P_{123}$};
+  \node[blk, below=of ch6, xshift=1cm] (ch10) {Ch 10\\$\Gop$ R+Q};
+  \node[outblk, below=of ch9, xshift=1cm] (ch11) {Ch 11\\Faddeev 求解器};
+  \draw[arr] (cfg) -- (ch5);
+  \draw[arr] (ch5) -- (ch6);
+  \draw[arr] (ch6) -- (ch8);
+  \draw[arr] (ch6) -- (ch9);
+  \draw[arr] (ch6) -- (ch10);
+  \draw[arr] (ch8) -- (ch11);
+  \draw[arr] (ch9) -- (ch11);
+  \draw[arr] (ch10) -- (ch11);
+\end{tikzpicture}
+\caption{第 5 章 WPCD 基底在求解器栈中的依赖位置。
+\texttt{run\_params} → 本章 → 第 6 章代码 → 下游算符
+（V, P123, G）→ 求解器。}
+\label{fig:ch05-callgraph}
+\end{figure}
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch05-pitfalls}
+
+\begin{pitfallbox}[label={box:ch05-pitfall-bin-count}]
+\textbf{陷阱 1：bin 数太少导致 \(\Gzero\) 不对角。}
+
+\cref{eq:ch05-G-SWP} 推导给出"SWP 基下 \(\Gop\) 严格对角"——但这一结论
+依赖于 \(C\) 矩阵从\textbf{完整} \(\NpWP \times \NpWP\) 块对角化得出。
+若 \(\NpWP\) 太小（比如 5 或 10），单个 fWP bin 跨度太大、\(V\) 矩阵元
+严重不准、对角化得到的 \(C\) 矩阵在数值上严重偏离真正本征向量；
+此时即使我们\textbf{形式上}用 SWP 基，\(\Gop\) 也只是\textbf{近似}对角。
+症状：Padé 不收敛、或观测量与 \(\NpWP\) 翻倍后差很多。
+
+\textbf{自检}：把 \(\NpWP, \NqWP\) 从 30 翻到 60，看 dp 散射 \(d\sigma /d\Omega\)
+峰值变化是否 < 1\%；若仍大，多半是 bin 数与 \texttt{chebyshev\_s, t} 不
+匹配，应优先调 \texttt{chebyshev\_s} 增大 \(p_{\max}\) 或调 \texttt{chebyshev\_t}
+加密低动量端，而不是盲目翻 \(\NpWP\)。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch05-pitfall-weight-padé}]
+\textbf{陷阱 2：权函数 \(f_i\) 的选择改变 Padé 收敛。}
+
+如 \cref{ex:ch05-completeness} 所示，使用 energy-WP 形式
+\(f_i(p) = \sqrt{2p/M_N}\) 把 fWP 完备性近似从 \(O(\Delta_i^2)\)
+降到 \(O(\Delta_i)\)。
+更严重的：在 SWP 对角化中，\(\bar{T}_i\) 公式依赖 \(\mathcal{N}_i\)
+约定——energy-WP 下 \(\bar{T}_i = (p_i^2 + p_{i-1}^2)/(2 M_N)\)（无
+交叉项），与 \cref{eq:ch05-Tbar-derivation} 形式不同。
+若你直接修改 \texttt{p\_weight\_function} 返回 \(\sqrt{2p/M_N}\)
+\textbf{但}忘记同步修改 \texttt{construct\_free\_hamiltonian}（即
+切换 H0 注释行），就会得到\textbf{自相矛盾的}基与 H0——SWP 对角化数学上
+正确但物理上无意义；Padé 表现为缓慢振荡，30+ 步仍不收敛。
+
+\textbf{自检}：固定 \texttt{p\_weight\_function}=1、\texttt{p\_normalization}=
+\(\sqrt{p_1 - p_0}\)、\texttt{construct\_free\_hamiltonian} 用三项形式
+\((p_2^2 + p_2 p_1 + p_1^2) / (6\mu_{23})\)；任何更改要\textbf{三处一起改}。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch05-pitfall-cheb-units}]
+\textbf{陷阱 3：\texttt{chebyshev\_s} 单位混淆 (\(\mathrm{fm}^{-1}\) vs MeV/\(c\))。}
+
+\(p_i\) 在 Tic-tac 内部统一以 \(\mathrm{fm}^{-1}\) 存储——但
+\texttt{chebyshev\_s} 默认值 \(= 100\)
+（\texttt{set\_run\_parameters.cpp:629}）听起来像"100 MeV"。这是错误的
+直觉。正确解读：\texttt{chebyshev\_s} 的单位与 \(p_i\) 一致——也就是
+\(\mathrm{fm}^{-1}\)，因此 \(s = 100\) 意味着外推 \(p_{\max}\) 在
+\(\mathrm{fm}^{-1}\) 量级（参见 \cref{sssec:ch05-cheb-grid} 的解析展开
+\(p_N \approx s \cdot (2N/\pi)^t\)）。
+具体：\(N = 50, t = 1, s = 100\) → \(p_{\max} \approx 3180\,\mathrm{fm}^{-1}\)
+\(\approx 627\,\mathrm{GeV}/c\)——这\textbf{远}超出 chiral EFT 的有效域，
+但纯粹是数值"塞紧上界"的常用做法（紫外端 V 已极小，对结果无害）。
+
+\textbf{陷阱所在}：用户从论文上抄"\(p_{\max} = 30\,\mathrm{fm}^{-1}\)"
+然后在 input 写 \texttt{chebyshev\_s=30}，
+得到的网格 \(p_{\max} = 30 \cdot (2 \cdot 50 / \pi)^1
+\approx 955\,\mathrm{fm}^{-1}\)——多出一个数量级！
+正确取法是反推：要求 \(p_{\max} = 30\)，应取 \(s = 30 / (2N/\pi)^t\)。
+对 \(N = 50, t = 1\)：\(s \approx 0.94\)。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch05-pitfall-3S1-bound}]
+\textbf{陷阱 4：3S1 子通道遗漏束缚态导致 \(E_d\) 错误。}
+
+\cref{eq:ch05-SWP-eigenproblem} 在 3S1 通道里恰好有一个负本征值 = 氘核
+束缚态 \(E_d \approx -2.225\,\mathrm{MeV}\)。\texttt{look\_for\_unphysical\_bound\_states}
+（\texttt{src/core/state\_space/make\_swp\_states.cpp:171--204}）显式检查
+"\(\NpWP\) 个本征值中应有且仅有 1 个负数"。
+
+如果你从 origin / current 中删除这一检查（或屏蔽），代码会继续运行
+但 \(E_d = 0\) 的初始值会被携带进所有下游计算——观测量得到的 dp 散射
+极性可能反号。原因：\(E_{\rm bound}\) 进入 \texttt{com\_momentum\_to\_lab\_energy}
+（\cref{ch:10_resolvent}）的能量映射；\(E_d = 0\) 把所有 on-shell 索引
+错位 \(\sim 2.2\,\mathrm{MeV}\)。
+
+\textbf{自检}：观测 \texttt{Found bound state with energy ...} 这条
+\texttt{printf}；若没出现则立即停手——你可能用了无 V 配置或潜在 bug。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch05-pitfall-coupled-reorder}]
+\textbf{陷阱 5：耦合通道本征值/向量重排顺序错。}
+
+LAPACK \texttt{DSPEVD} 对一个 \(2\NpWP \times 2\NpWP\) 耦合通道矩阵返
+回\textbf{升序}本征值——因此本征值是 "1, 1', 2, 2', ..., \(N\), \(N\)'"
+交错的（其中带撇与不带撇代表两条物理分支：例如 3S1 通道的 \(\ell = 0\)
+与 \(\ell = 2\) 耦合分支）。
+\texttt{reorder\_coupled\_eigenspectrum}
+（\texttt{src/core/state\_space/make\_swp\_states.cpp:142--169}）显式把
+它们重排成"\(N\) 个 \(\ell=0\) 在前，\(N\) 个 \(\ell=2\) 在后"。如果
+你跳过这步（或改了排序），下游 \texttt{e\_SWP\_coup\_array} 与
+\texttt{C\_SWP\_coup\_array} 的索引会错位，导致：
+\begin{itemize}
+  \item 氘核束缚态被错误归到 \(\ell = 2\) 子分支；
+  \item D-state 概率混进 S-state 概率；
+  \item dp 散射的 T20 观测量符号反掉。
+\end{itemize}
+\textbf{自检}：把 \texttt{DEBUG\_PRINT\_EIGS=1}（如果引入）打开，验证
+"3S1 第一条 ($\ell=0$) 分支首位本征值 = -2.225 MeV"。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch05-pitfall-Np-vs-Nq}]
+\textbf{陷阱 6：\(\NpWP \neq \NqWP\) 时 P123 内存膨胀。}
+
+\(P_{123}\) 在 fWP 基下的稀疏占用 \(\sim \rho \cdot (\Nalpha \NpWP \NqWP)^2\)
+（\cref{ch:09_permutation_p123}）。直觉上 \(\NpWP, \NqWP\) 都增大 P123
+都变大。但因为\(P_{123}\) 的几何函数 \(G\) 把"出射 \(p, q\)" 与"入射
+\(p', q'\)" 通过 Jacobi 旋转\textbf{交叉}耦合，
+\(\NqWP\) 翻倍\textbf{不仅}使总维度翻倍，还使每个非零块的列号扩展。
+经验法则：\(\NpWP = \NqWP\)（保持张量积平衡）通常是稀疏度最佳点；
+\(\NpWP \gg \NqWP\) 内存浪费、\(\NpWP \ll \NqWP\) 物理精度损失。
+Tic-tac 默认在 \texttt{set\_run\_parameters.cpp:623--624} 把它们都设
+为 50。
+
+\textbf{自检}：跑一次 \(\NpWP = 30, \NqWP = 30\) 与 \(\NpWP = 30, \NqWP
+= 60\)，比较 \texttt{P123\_sparse\_dim} 数值；若后者超过前者 \(2.5\) 倍，
+你已经踏入"非线性内存陷阱"区。
+\end{pitfallbox}

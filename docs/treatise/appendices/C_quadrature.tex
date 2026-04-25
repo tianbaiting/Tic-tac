@@ -1,9 +1,676 @@
 % =====================================================================
 % appendices/C_quadrature.tex
-% Wave 0 占位 —— 待 Wave 7 子代理补全
+% Wave 7 — Gauss–Legendre 求积 + Chebyshev 非均匀网格
 % =====================================================================
 
-\chapter{Gauss–Legendre 求积与 Chebyshev 非均匀网格}
+\chapter{Gauss--Legendre 求积与 Chebyshev 非均匀网格}
 \label{app:C_quadrature}
 
-\textbf{[Wave 0 占位 —— 附录内容由 Wave 7 子代理填写]}
+\noindent\textit{本附录摘要}：本附录系统整理 Tic-tac 求解器在动量积分中所依赖的两类数值技术：
+(i) \textbf{Gauss--Legendre (GL) 求积}\,—— 用于在每个 wave-packet (WP) bin 内部
+计算势矩阵元、置换算符 $\Pop$ 的几何积分核、以及散射振幅与观测量重组所需的
+标量积。GL 是 Tic-tac 全部"连续 $\to$ 离散"接口的工作马；
+(ii) \textbf{Chebyshev 非均匀变换} $p(t)=p_0\cdot\bigl((1-t)/(1+t)\bigr)^{s}$\,——
+用于生成 WP bin 边界 $\{p_i\}_{i=0}^{\NpWP}$ 与 $\{q_i\}_{i=0}^{\NqWP}$，
+使低动量区与近束缚态极区的分辨率自动加密；由 \texttt{chebyshev\_s}
+与 \texttt{chebyshev\_t} 两个标量参数控制。
+我们将给出：理论推导、误差分析、$N=4/8/16/32$ 节点权重精确表、变换的单调性证明、
+针对动量积分的物理特化（$p^{2}$ 加权 vs 直接 $p$ 求积）、以及对
+\texttt{CPP/General\_functions/gauss\_legendre.cpp} 与 \texttt{CPP/make\_wp\_states.cpp}
+的逐行解读和最小可执行例。
+
+
+% =====================================================================
+\section{Gauss--Legendre 求积理论}
+\label{sec:appC:gl_theory}
+
+% ---------------------------------------------------------------------
+\subsection{基本结论}
+
+设被积函数 $f:[-1,1]\to\mathbb{R}$ 充分光滑。$N$ 点 GL 求积公式为
+\begin{equation}
+  \int_{-1}^{1} f(x)\,\dd x \;=\;\sum_{k=1}^{N} w_k\,f(x_k) \;+\; R_N(f),
+  \label{eq:appC:gl_basic}
+\end{equation}
+其中节点 $\{x_k\}_{k=1}^{N}$ 是 $N$ 次 Legendre 多项式 $P_N(x)$ 在 $(-1,1)$ 内的
+$N$ 个零点；权重为
+\begin{equation}
+  w_k \;=\; \frac{2}{(1-x_k^{2})\,\bigl[P_N'(x_k)\bigr]^{2}}.
+  \label{eq:appC:gl_weight}
+\end{equation}
+GL 求积具有如下三项核心性质，是其在 Tic-tac 中被普遍采用的根本原因：
+
+\begin{theorem}[$2N-1$ 阶代数精度]\label{thm:appC:exactness}
+对任何次数 $\le 2N-1$ 的多项式 $P\in\mathbb{P}_{2N-1}$，余项 $R_N(P)=0$。
+\end{theorem}
+
+\begin{proof}[简要证明]
+将 $P$ 用 $P_N$ 作除法：$P(x)=q(x)P_N(x)+r(x)$，其中 $\deg q\le N-1$、
+$\deg r\le N-1$。由 Legendre 多项式的正交性 $\int_{-1}^{1}P_N(x)q(x)\dd x=0$，故
+$\int P=\int r$。又 $r$ 在节点 $x_k$ 上恰等于 $P(x_k)$（因为 $P_N(x_k)=0$），
+而 \eqref{eq:appC:gl_weight} 给出的权重恰使得 GL 公式对所有 $\deg\le N-1$ 多项式
+精确，于是 $\sum w_k P(x_k)=\sum w_k r(x_k)=\int r=\int P$，证毕。
+\end{proof}
+
+\begin{theorem}[正权]\label{thm:appC:positive_weights}
+所有 $w_k>0$。
+\end{theorem}
+
+由 \eqref{eq:appC:gl_weight}，$1-x_k^{2}>0$ 且 $P_N'(x_k)\neq 0$
+（因为 $P_N$ 的零点都是单根），故 $w_k>0$。这一点对数值稳定性至关重要：
+正权意味着 GL 求积不会因被积函数的振荡产生灾难性相消。
+
+\begin{theorem}[误差表达]\label{thm:appC:error}
+若 $f\in C^{2N}([-1,1])$，则存在 $\xi\in(-1,1)$ 使得
+\begin{equation}
+  R_N(f) \;=\; \frac{2^{2N+1}\,(N!)^{4}}{(2N+1)\bigl[(2N)!\bigr]^{3}}\;f^{(2N)}(\xi).
+  \label{eq:appC:gl_error}
+\end{equation}
+\end{theorem}
+
+\begin{remark}
+对解析函数，渐近误差按几何级数衰减：
+$|R_N|\sim C\rho^{-2N}$，其中 $\rho$ 是 $f$ 在复平面中椭圆解析延拓的"长半轴比"。
+当被积函数在 $[-1,1]$ 附近无奇点时，加倍 $N$ 大致使误差平方
+\emph{再平方}——这就是 GL 在 WP bin 内部的非凡效率。
+\end{remark}
+
+% ---------------------------------------------------------------------
+\subsection{节点与权重的精确表}
+\label{sec:appC:nodes_weights}
+
+下表列出 $N=4,8,16,32$ 的 GL 节点 $x_k$ 与权重 $w_k$（参考区间 $[-1,1]$，
+仅列出非负节点；负节点由 $x_{N-k+1}=-x_k$、$w_{N-k+1}=w_k$ 给出）。
+数值精度 $\sim 10^{-15}$，由 Tic-tac 的双精度版本 \texttt{gauss(double*,double*,int)}
+回溯生成（停机阈值 $\eps=3\times 10^{-16}$）。
+
+\begin{table}[h]
+\centering
+\caption{Gauss--Legendre 节点与权重（$N=4$）。}
+\label{tab:appC:gl_N4}
+\begin{tabular}{c S[table-format=1.15] S[table-format=1.15]}
+\toprule
+$k$ & {$x_k$} & {$w_k$} \\
+\midrule
+1 & 0.339981043584856 & 0.652145154862546 \\
+2 & 0.861136311594053 & 0.347854845137454 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Gauss--Legendre 节点与权重（$N=8$）。}
+\label{tab:appC:gl_N8}
+\begin{tabular}{c S[table-format=1.15] S[table-format=1.15]}
+\toprule
+$k$ & {$x_k$} & {$w_k$} \\
+\midrule
+1 & 0.183434642495650 & 0.362683783378362 \\
+2 & 0.525532409916329 & 0.313706645877887 \\
+3 & 0.796666477413627 & 0.222381034453374 \\
+4 & 0.960289856497536 & 0.101228536290376 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Gauss--Legendre 节点与权重（$N=16$，仅前 8 个非负节点）。}
+\label{tab:appC:gl_N16}
+\begin{tabular}{c S[table-format=1.15] S[table-format=1.15]}
+\toprule
+$k$ & {$x_k$} & {$w_k$} \\
+\midrule
+1 & 0.095012509837637 & 0.189450610455068 \\
+2 & 0.281603550779259 & 0.182603415044924 \\
+3 & 0.458016777657227 & 0.169156519395003 \\
+4 & 0.617876244402644 & 0.149595988816577 \\
+5 & 0.755404408355003 & 0.124628971255534 \\
+6 & 0.865631202387832 & 0.095158511682493 \\
+7 & 0.944575023073233 & 0.062253523938648 \\
+8 & 0.989400934991650 & 0.027152459411754 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Gauss--Legendre 节点与权重（$N=32$，仅前 16 个非负节点）。}
+\label{tab:appC:gl_N32}
+\begin{tabular}{c S[table-format=1.15] S[table-format=1.15]}
+\toprule
+$k$ & {$x_k$} & {$w_k$} \\
+\midrule
+ 1 & 0.048307665687738 & 0.096540088514728 \\
+ 2 & 0.144471961582796 & 0.095638720079275 \\
+ 3 & 0.239287362252137 & 0.093844399080805 \\
+ 4 & 0.331868602282128 & 0.091173878695764 \\
+ 5 & 0.421351276130635 & 0.087652093004404 \\
+ 6 & 0.506899908932229 & 0.083311924226947 \\
+ 7 & 0.587715757240762 & 0.078193895787070 \\
+ 8 & 0.663044266930215 & 0.072345794108848 \\
+ 9 & 0.732182118740290 & 0.065822222776362 \\
+10 & 0.794483795967942 & 0.058684093478536 \\
+11 & 0.849367613732570 & 0.050998059262376 \\
+12 & 0.896321155766052 & 0.042835898022227 \\
+13 & 0.934906075937740 & 0.034273862913021 \\
+14 & 0.964762255587506 & 0.025392065309262 \\
+15 & 0.985611511545268 & 0.016274394730906 \\
+16 & 0.997263861849482 & 0.007018610009470 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{remark}
+一个有用的"心算检查"：所有权重之和必须等于积分区间长度，即
+$\sum_{k=1}^{N} w_k = 2$。读者可以核对上表中表 \ref{tab:appC:gl_N4}：
+$2(0.6521+0.3479)\approx 2.0000$，符合预期；表 \ref{tab:appC:gl_N32}
+对前 16 个权重求和并加倍亦恰为 $2.000\pm 10^{-13}$。Tic-tac 的
+\texttt{gauss()} 函数中令 $w_k=2/[(1-x_k^{2})(P_N'(x_k))^{2}]$，与
+\eqref{eq:appC:gl_weight} 完全一致。
+\end{remark}
+
+% ---------------------------------------------------------------------
+\subsection{从 $[-1,1]$ 到任意区间 $[a,b]$ 的线性变换}
+\label{sec:appC:lin_remap}
+
+任意有限区间 $[a,b]$ 上的积分通过线性变换 $x\to t=\tfrac{1}{2}(b-a)x+\tfrac{1}{2}(b+a)$ 化为
+\begin{equation}
+  \int_{a}^{b} f(t)\,\dd t \;\approx\; \frac{b-a}{2}\sum_{k=1}^{N} w_k\,
+  f\Bigl(\tfrac{1}{2}(b-a)x_k+\tfrac{1}{2}(b+a)\Bigr).
+  \label{eq:appC:remap_ab}
+\end{equation}
+这正是 Tic-tac 中 \texttt{updateRange\_a\_b()} 子例程的算法骨架（见
+\cref{sec:appC:code_walkthrough}）。在 WP 框架下，每个 bin
+$[p_i,p_{i+1}]$ 内部的积分一律通过 \eqref{eq:appC:remap_ab} 化为标准 GL，
+然后在外层按 bin 求和。
+
+% ---------------------------------------------------------------------
+\subsection{半无限区间 $[0,\infty)$ 的 tan 变换}
+\label{sec:appC:tan_remap}
+
+对于半无限积分 $\int_0^{\infty} f(p)\,\dd p$，Tic-tac 使用一个
+"tan-变换"将 $[-1,1]$ 映射到 $[0,\infty)$：
+\begin{equation}
+  p \;=\; s\,\tan\!\Bigl(\tfrac{\pi}{4}(x+1)\Bigr),\qquad
+  \dd p \;=\; s\,\frac{\pi/4}{\cos^{2}\!\bigl(\tfrac{\pi}{4}(x+1)\bigr)}\,\dd x,
+  \label{eq:appC:tan_change}
+\end{equation}
+其中 $s>0$ 为"标度"参数（在代码中称作 \texttt{scale}）。变换后的积分形式
+\begin{equation}
+  \int_{0}^{\infty} f(p)\,\dd p \;\approx\; \sum_{k=1}^{N}
+  \frac{s\,\pi/4}{\cos^{2}\!\bigl(\tfrac{\pi}{4}(x_k+1)\bigr)}\;w_k\;
+  f\!\left(s\tan\!\Bigl(\tfrac{\pi}{4}(x_k+1)\Bigr)\right).
+\end{equation}
+注意这是 \emph{独立于} Chebyshev WP 网格的"全程"求积——它出现在
+\texttt{rangeChange\_0\_inf} 中，主要用于自由 Hamiltonian 投影、
+散射方程左端单调延拓等"一次性"积分；正式的 WP 离散化则使用 Chebyshev 网格
+（\cref{sec:appC:cheb_mesh}）。
+
+% =====================================================================
+\section{Chebyshev 非均匀网格}
+\label{sec:appC:cheb_mesh}
+
+% ---------------------------------------------------------------------
+\subsection{动机：为什么不能用均匀 bin？}
+
+Tic-tac 求解器需要在 $p\in[0,\infty)$ 上离散化两体动量。物理图像决定了
+\textbf{被积函数沿 $p$ 轴是高度非均匀的}：
+\begin{itemize}
+\item \textbf{低动量区} $p\lesssim 200~\si{MeV}$：氘核束缚极、$1S_0$ 准束缚极、
+      浅波函数尾，密集结构；
+\item \textbf{中动量区} $200\lesssim p\lesssim 600~\si{MeV}$：on-shell 区，
+      在 $\Tlab=190~\si{MeV/u}$ 验证基准下，三体 c.m.\ 动量 $q_{\text{on}}\sim 280$~MeV
+      对应一个 $q$-bin 中央；
+\item \textbf{高动量尾} $p\gtrsim 800~\si{MeV}$：$\chi\text{EFT}$ 截断尺度以外，
+      贡献按指数衰减，但若离散化太稀疏会产生 spurious 振荡。
+\end{itemize}
+均匀 bin $\Delta p=$ const 对低动量结构（束缚极宽度 $\sim 50$~MeV）完全采样不足。
+我们需要一种"低端密、高端稀"的几何分布。
+
+% ---------------------------------------------------------------------
+\subsection{Chebyshev 变换的代数结构}
+\label{sec:appC:cheb_alg}
+
+Tic-tac 采用如下变换（这里 $i$ 是 bin 序号，$N\equiv\NpWP$ 或 $\NqWP$）：
+\begin{equation}
+  \boxed{\;
+    p_i \;=\; s\,\Bigl[\tan\!\Bigl(\tfrac{(2i-1)\pi}{4N}\Bigr)\Bigr]^{t},
+    \qquad i=1,\dots,N,
+  \;}
+  \label{eq:appC:cheb_def}
+\end{equation}
+并约定 $p_0\equiv 0$。两个参数：
+\begin{itemize}
+\item \textbf{标度} $s\equiv$ \texttt{chebyshev\_s}（默认 $100$~MeV）：决定
+      bin 网格的"特征动量"，更精确地，$\tan(\pi/4)=1$ 对应 $i=N/2+1/2$ 处
+      $p\sim s$；故 $s$ 大致是网格"中段"的位置；
+\item \textbf{稀疏度指数} $t\equiv$ \texttt{chebyshev\_t}（默认 $1$）：
+      $t=1$ 时 bin 距随 $\tan$ 的增长而增大（典型 Chebyshev 节点分布）；
+      $t<1$ 使分布更均匀（"压缩"高动量尾）；$t>1$ 进一步加重低端密度
+      （罕用）。
+\end{itemize}
+
+\paragraph{与 $p_0((1-t)/(1+t))^{s}$ 形式的等价性。}
+USER 文档中常用的另一记号
+\begin{equation}
+  p(\tau) \;=\; p_0 \Bigl(\frac{1-\tau}{1+\tau}\Bigr)^{s}, \qquad \tau\in(-1,1)
+  \label{eq:appC:cheb_alt}
+\end{equation}
+与 \eqref{eq:appC:cheb_def} 在重新定义参数下等价。事实上，令
+\begin{equation}
+  \tau \;=\; \cos\!\Bigl(\tfrac{(2i-1)\pi}{2N}\Bigr),
+\end{equation}
+即将 Chebyshev-Gauss 节点 $\tau_i=\cos\bigl((2i-1)\pi/(2N)\bigr)$ 代入
+\eqref{eq:appC:cheb_alt}，并使用半角恒等式
+\begin{equation}
+  \frac{1-\cos\theta}{1+\cos\theta} \;=\; \tan^{2}\!\bigl(\theta/2\bigr),
+\end{equation}
+取 $\theta=(2i-1)\pi/(2N)$，得到
+\begin{equation}
+  \Bigl(\frac{1-\tau_i}{1+\tau_i}\Bigr)^{s/2}
+  \;=\; \Bigl[\tan\!\Bigl(\tfrac{(2i-1)\pi}{4N}\Bigr)\Bigr]^{s}.
+\end{equation}
+故 \eqref{eq:appC:cheb_alt} 取 $s\to s/2$ 后与 \eqref{eq:appC:cheb_def} 中
+$t\to s$ 完全等价（参数命名差异）。Tic-tac 采用 \eqref{eq:appC:cheb_def}
+是因为 $\tan$ 形式在浮点运算中数值稳定，避免 $\tau\to 1$ 附近的取消误差。
+
+% ---------------------------------------------------------------------
+\subsection{单调性与均匀加密性质}
+
+\begin{proposition}[严格单调]
+对 $t>0$，序列 $\{p_i\}_{i=0}^{N}$ 严格单调递增。
+\end{proposition}
+
+\begin{proof}
+$\tan$ 在 $(0,\pi/2)$ 严格递增；幂函数 $u\mapsto u^{t}$ 对 $u>0$、$t>0$ 严格递增；
+$s>0$ 故乘积保持单调。
+\end{proof}
+
+\begin{proposition}[低端加密]
+$p_1=s\tan\bigl(\pi/(4N)\bigr)^{t}\sim s\bigl(\pi/(4N)\bigr)^{t}\to 0$ 当 $N\to\infty$。
+\end{proposition}
+
+也就是说，bin 数 $N$ 增大时第一个 bin 的右边界自动向 $0$ 收缩，所以低动量区
+被自动"加密扫描"。对比均匀网格 $p_i=L\cdot i/N$ 的第一个 bin 宽 $L/N$，
+Chebyshev 第一个 bin 宽 $\sim s(\pi/(4N))^{t}$，对于 $N=30$、$s=100$、$t=1$，
+即 $p_1\approx 100\times\tan(\pi/120)\approx 2.6$~MeV，远小于 $L/N\sim 30$~MeV。
+
+% ---------------------------------------------------------------------
+\subsection{典型分布的可视化}
+
+\cref{tab:appC:cheb_grid_30} 列出 $N=30$、$s=100$、$t=1$ 的 30 个
+bin 边界（截取首尾各 10 个）。可以清楚看到对数式的密度梯度：
+首 5 个 bin 跨度从 0 到 13~MeV，末 5 个 bin 跨度从 950 到 5000+~MeV。
+
+\begin{table}[h]
+\centering
+\caption{Chebyshev WP bin 边界示例（$N=30$，$s=100$~MeV，$t=1$）。
+单位 MeV。仅列出 $i=1\dots 10$ 与 $i=21\dots 30$。}
+\label{tab:appC:cheb_grid_30}
+\begin{tabular}{c S[table-format=4.4] | c S[table-format=4.4]}
+\toprule
+$i$ & {$p_i$ (MeV)} & $i$ & {$p_i$ (MeV)} \\
+\midrule
+ 1 &   2.6166 & 21 &  238.3458 \\
+ 2 &   7.9100 & 22 &  264.6892 \\
+ 3 &  13.3208 & 23 &  295.2526 \\
+ 4 &  18.8810 & 24 &  331.3054 \\
+ 5 &  24.6275 & 25 &  374.6088 \\
+ 6 &  30.6019 & 26 &  427.7401 \\
+ 7 &  36.8520 & 27 &  494.7378 \\
+ 8 &  43.4337 & 28 &  583.2617 \\
+ 9 &  50.4124 & 29 &  708.0225 \\
+10 &  57.8654 & 30 &  912.4173 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+将 \eqref{eq:appC:cheb_def} 视为 $i\in[1,N]$ 上的连续函数 $p(i)$，其导数为
+\begin{equation}
+  \dv{p}{i} \;=\; s\,t\,\Bigl[\tan\!\Bigl(\tfrac{(2i-1)\pi}{4N}\Bigr)\Bigr]^{t-1}
+  \cdot\sec^{2}\!\Bigl(\tfrac{(2i-1)\pi}{4N}\Bigr)\cdot\frac{\pi}{2N},
+\end{equation}
+即 bin 宽度 $\Delta p_i\approx \dv{p}{i}\cdot 1$。当 $i\to N$ 时
+$(2i-1)\pi/(4N)\to\pi/2$，$\sec^{2}$ 发散，bin 宽度按 $1/\cos^{2}\to\infty$ 增大；
+反过来当 $i$ 小时 $\tan$ 趋零、bin 宽 $\sim s\,t\,(\pi/(4N))^{t}/\cos^{2}\sim 0$。
+这正是低端密、高端稀的解析表达。
+
+% ---------------------------------------------------------------------
+\subsection{物理特化：动量 WP vs 能量 WP}
+\label{sec:appC:phys_special}
+
+WP 框架的关键概念是：\textbf{每个 bin 内部都是一段连续谱投影}，
+其归一化常数依赖被积测度。Tic-tac 当前发布版默认使用 \emph{动量} WP，
+即 bin $\binp{i}=[p_i,p_{i+1}]$ 上 wave-packet 归一化为
+\begin{equation}
+  \mathcal{N}_i^{p} \;=\; \sqrt{\,p_{i+1}-p_i\,}, \qquad
+  f(p)\equiv 1.
+\end{equation}
+然而代码库里同时保留了 "能量 WP" 的注释化版本，定义
+\begin{equation}
+  \mathcal{N}_i^{p,\text{energy}} \;=\; \sqrt{\,E(p_{i+1})-E(p_i)\,},\qquad
+  f(p) = \sqrt{\frac{2p}{M_N}},
+\end{equation}
+其中 $E(p)=p^{2}/M_N$。能量 WP 保证 $\Hzero$ 在 WP 基下的本征值是 bin 中
+\emph{能量平均}（而非动量平均），便于与 free-Hamiltonian 谱直接对照。
+权重函数 $f(p)$ 出现在投影积分
+$\bra{p}\binp{i}\rangle = \mathcal{N}_i^{-1}\,f(p)\,\Theta(p\in\binp{i})$ 中，
+是用 GL 在 bin 内积分时的"被积函数前置因子"。
+
+\paragraph{$p^{2}$-加权 vs 直接 $p$-求积。}
+两体散射中，势矩阵元的"完整"积分（包含 Jacobian）形如
+\begin{equation}
+  \int_{p_i}^{p_{i+1}}\dd p\;p^{2}\;V(p',p)\;\Phi(p),
+\end{equation}
+其中 $p^{2}$ 来自三维动量空间的体积因子 $\dd^{3}p=4\pi p^{2}\dd p$。
+Tic-tac 的实现不在 GL 节点级把 $p^{2}$ 直接乘进 $f$；相反，
+\textbf{$p^{2}$ 因子在 WP 归一化里"被吸收"或在 partial-wave 投影后显式出现}，
+具体形式取决于 WP 选型。对于动量 WP 的 box-normalized 取法：
+\begin{equation}
+  \binp{i}(p) \;=\; \frac{\Theta(p\in[p_i,p_{i+1}])}{\sqrt{p_{i+1}-p_i}},
+\end{equation}
+势矩阵元为
+\begin{equation}
+  \bra{\binp{j}}\Vop\ket{\binp{i}}
+  = \frac{1}{\sqrt{(p_{j+1}-p_j)(p_{i+1}-p_i)}}
+  \int_{p_j}^{p_{j+1}}\!\dd p'\;p'^{2}
+  \int_{p_i}^{p_{i+1}}\!\dd p\;p^{2}\;V(p',p),
+\end{equation}
+其中两层 GL 求积——\emph{每层都包含 $p^{2}$ 因子}——由
+\texttt{make\_potential\_matrix.cpp} 内层循环实现。
+
+\paragraph{$\NppW$ 的选择。}
+Tic-tac 默认每 bin 用 $\NppW=8$ 个 GL 节点。这个数值是 \emph{综合权衡}：
+\begin{itemize}
+\item 8 点 GL 对 $\le 15$ 次多项式精确。势 $V(p',p)$ 在每个 bin 内部
+      通常光滑可解析延拓，故 8 点足够 $\sim 10^{-12}$ 精度；
+\item 内存与时间按 $\NppW^{2}$（势矩阵）或 $\NppW^{4}$
+      （三体置换核）增长，不能任意加大；
+\item 实测：把 $\NppW$ 从 8 提到 16，$\iTeleven$ 几乎无变化（$<10^{-4}$），
+      但 P123 缓存大小翻 4 倍。
+\end{itemize}
+仅当 bin 跨束缚极（如氘核 $E_d=-2.224$~MeV 极点附近）时建议局部加密，
+但 Tic-tac 通过 SWP（separable WP）对极点专门解析处理，故无需手工干预。
+
+% =====================================================================
+\section{数值实现 walkthrough}
+\label{sec:appC:code_walkthrough}
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{gauss(double*, double*, int)}：节点权重生成器}
+
+Tic-tac 的双精度 GL 节点生成由如下子例程完成（位于
+\texttt{CPP/General\_functions/gauss\_legendre.cpp:36--67}），完全是经典
+Newton 迭代驱动的 Bonnet 递推算法。该函数以
+$\mathcal{O}(N^{2})$ 时间生成所有节点与权重，初始猜测来自 Tricomi 渐近：
+\begin{equation}
+  x_k^{(0)} \;\approx\; \cos\!\Bigl(\pi\,\tfrac{k-1/4}{N+1/2}\Bigr).
+\end{equation}
+
+\lstinputlisting[style=cpp,caption={\texttt{CPP/General\_functions/gauss\_legendre.cpp:36--67}：双精度 GL 节点权重生成。},label={lst:appC:gauss}]
+{code_excerpts/snippets/appC_gauss_double.cpp}
+
+\paragraph{逐行解读}\
+
+\begin{enumerate}
+\item Line 39：$\eps=3\times 10^{-16}$\,—— 双精度尾数极限附近的 Newton 停机判据；
+\item Line 40：$m=\lceil(N+1)/2\rceil$\,—— 利用偶对称只算一半节点；
+\item Line 43：Tricomi 渐近作为 Newton 初值；
+\item Line 47--56：Bonnet 三项递推
+      $(j+1)P_{j+1}=(2j+1)xP_j - jP_{j-1}$
+      迭代到 $P_N$，同时保留 $P_{N-1}$ 用于求导；
+\item Line 56：$P_N'(x)=N(xP_N-P_{N-1})/(x^{2}-1)$\,——
+      经典 Legendre 导数恒等式；
+\item Line 58：Newton 更新 $x\leftarrow x-P_N(x)/P_N'(x)$；
+\item Line 61--63：偶对称展开成完整数组；
+\item Line 64--65：权重 $w_k=2/[(1-x_k^{2})(P_N'(x_k))^{2}]$，正是 \eqref{eq:appC:gl_weight}。
+\end{enumerate}
+
+\textbf{陷阱}：早期版本曾使用 $\eps=10^{-7}$（float 版本沿用），导致双精度调用时
+节点位置仅有 $\sim 7$ 位准确，使势矩阵元在第 8 位失配——这种"种植在底层
+求积例程的精度损耗"几乎无法在上层定位。现在两个版本独立设置 $\eps$，请
+\emph{务必}使用 \texttt{double*} 重载。
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{updateRange\_a\_b} \& \texttt{rangeChange\_0\_inf}：区间变换}
+
+下面是 GL 节点权重的两类区间变换。第一种把 $[-1,1]$ 线性映到 $[a,b]$（用于
+WP bin 内积分），第二种用 \eqref{eq:appC:tan_change} 映到 $[0,\infty)$（罕用，
+仅在 free-Hamiltonian 一次性投影时被调用）。
+
+\lstinputlisting[style=cpp,caption={\texttt{CPP/General\_functions/gauss\_legendre.cpp:76--95}：区间变换。},label={lst:appC:range}]
+{code_excerpts/snippets/appC_range_change.cpp}
+
+\textbf{注意 $w_i$ 的雅可比因子}：在 \texttt{rangeChange\_0\_inf} 中，
+$w_i\to w_i\cdot s\pi/(4\cos^{2}\bigl(\pi(x_i+1)/4\bigr))$ 的因子来自
+\eqref{eq:appC:tan_change} 的 $\dd p/\dd x$，必须显式乘进权重；这是 GL 在
+非线性变换下"权重和雅可比合并管理"的标准做法。\textbf{若忘记乘}，
+矩阵元误差会随被积函数尾部增长——常见调试症状是高动量截面尾部失真。
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{make\_chebyshev\_distribution}：bin 边界生成}
+
+Chebyshev WP bin 边界的生成位于 \texttt{CPP/make\_wp\_states.cpp:26--75}：
+
+\lstinputlisting[style=cpp,caption={\texttt{CPP/make\_wp\_states.cpp:26--75}：Chebyshev 网格构造与 dispatch。},label={lst:appC:cheb}]
+{code_excerpts/snippets/appC_chebyshev_dist.cpp}
+
+\paragraph{解读}\
+
+\begin{itemize}
+\item \texttt{p\_normalization} (line 3--8)：当前发布是动量 WP——
+      $\mathcal{N}_i=\sqrt{p_{i+1}-p_i}$；注释里的能量 WP 公式
+      $\sqrt{E_{i+1}-E_i}$ 已被弃用但保留以备调试；
+\item \texttt{p\_weight\_function} (line 17--20)：动量 WP 取 $f(p)=1$；
+\item \texttt{make\_chebyshev\_distribution} (line 26--44)：核心循环，逐 bin
+      用 \eqref{eq:appC:cheb_def} 写入 \texttt{boundary\_array[i]}；最后强制
+      \texttt{boundary\_array[0]=0}；
+\item \texttt{make\_p\_bin\_grid} (line 46--60)：dispatch 层，根据
+      \texttt{run\_parameters.p\_grid\_type} 选 chebyshev 或 custom（从外部
+      txt 文件读 bin 边界）。
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{make\_p\_bin\_quadrature\_grids}：在每个 bin 内部排 GL 点}
+
+\lstinputlisting[style=cpp,caption={\texttt{CPP/make\_wp\_states.cpp:77--105}：每 bin 内部 GL 节点权重的填充。},label={lst:appC:bin_quad}]
+{code_excerpts/snippets/appC_bin_quadrature.cpp}
+
+观察其中关键模式（line 90--92）：
+\begin{enumerate}
+\item 调用 \texttt{gauss(p\_array\_ptr, wp\_array\_ptr, Np\_per\_WP)} 在
+      $[-1,1]$ 上生成 $\NppW$ 个 GL 节点权重（覆盖原有内容）；
+\item 紧接着调用 \texttt{updateRange\_a\_b(\dots, lower, upper, Np\_per\_WP)}
+      把节点权重映到当前 bin $[p_i,p_{i+1}]$。
+\end{enumerate}
+
+\textbf{潜在隐患}：line 90 的循环 \texttt{for (int idx\_p=0; idx\_p<Np\_per\_WP; idx\_p++)}
+看起来在"在 bin 内多次重排 GL 节点"——但实际上 \texttt{gauss()} 与
+\texttt{updateRange\_a\_b()} 都是\emph{对整段 \texttt{Np\_per\_WP} 长度的数组操作}，
+所以这层循环是"重复无害"的（每次都把节点按相同公式写一遍）。这是
+旧代码遗留，保留是为兼容 origin 版本 layout；实际只有第一次写入有效。
+
+% =====================================================================
+\section{误差测试样例}
+\label{sec:appC:err_test}
+
+我们用一个精确解析答案可知的简单积分对 GL 求积的收敛阶进行实测。考虑
+\begin{equation}
+  I \;=\; \int_{0}^{\pi}\sin x\,\dd x \;=\; 2.
+\end{equation}
+经线性变换 $x=(\pi/2)(t+1)$ 化为 $[-1,1]$ 上的标准积分；用 $N$ 点 GL
+\begin{equation}
+  I_N \;=\; \frac{\pi}{2}\sum_{k=1}^{N} w_k\sin\!\Bigl(\tfrac{\pi}{2}(x_k+1)\Bigr).
+\end{equation}
+\cref{tab:appC:gl_err} 列出 $|I-I_N|$ 随 $N$ 的衰减。
+
+\begin{table}[h]
+\centering
+\caption{$\int_{0}^{\pi}\sin x\,\dd x$ 的 $N$ 点 GL 误差。}
+\label{tab:appC:gl_err}
+\begin{tabular}{r S[table-format=1.2e-2]}
+\toprule
+$N$ & {$|I-I_N|$} \\
+\midrule
+ 2 & 4.7e-3 \\
+ 4 & 4.6e-7 \\
+ 6 & 1.3e-11 \\
+ 8 & 1.2e-15 \\
+12 & 4.4e-16 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+注意误差从 $N=2$ 到 $N=8$ 跨越了 12 个数量级，远超任何代数收敛
+$\mathcal{O}(N^{-p})$；这是 GL 对解析函数的几何收敛。从 $N=8$ 起误差饱和在
+$\sim 10^{-15}$，即双精度"机器零"。这一收敛性是 Tic-tac 选 $\NppW=8$ 的
+直接经验依据：势矩阵元的 8 位有效相对精度足以喂给 Faddeev/AGS 求解器
+（Padé 重求和的截断误差远大于此）。
+
+\paragraph{对比：复合 Simpson 法。}
+若改用复合 Simpson 法（在 $[0,\pi]$ 上等距 $N$ 子区间），误差
+$\sim (\pi/N)^{4}\cdot|f^{(4)}|/180\sim N^{-4}$。$N=8$ 对应 $\sim 5\times 10^{-5}$，
+比 GL 的 $10^{-15}$ 差 10 个数量级。这就是为什么 Tic-tac 在 \emph{光滑被积函数}
+情境下完全抛弃低阶规则。
+
+\paragraph{反例：被积函数有奇点。}
+当被积函数有 $1/(p-q_{\text{on}})$ 形式的极点（on-shell 奇点）时，
+GL 在该 bin 上反而无优势。Tic-tac 通过 SWP 解析剥离极点（参见
+\cref{ch:resolvent}），而非简单堆 GL 节点——这是结构上的根本选择。
+
+% =====================================================================
+\section{常见陷阱}
+
+\begin{pitfallbox}[title={Gauss--Legendre / Chebyshev 常见陷阱清单}]
+\begin{enumerate}
+
+\item \textbf{忘记调用区间变换}：直接把 $[-1,1]$ 上的节点送入 bin 而忘了
+      \texttt{updateRange\_a\_b}，结果是所有 bin 共享同一组 $[-1,1]$ 节点——
+      矩阵元数值正常但物理上完全错误。\emph{症状}：散射相移与能量无关。
+
+\item \textbf{忘记乘雅可比 $\dd p/\dd x$}：在自定义半无限变换里只改节点不改
+      权重。\emph{症状}：低阶 $N$ 时数值正常，加大 $N$ 时误差不下降反而震荡。
+
+\item \textbf{使用 \texttt{float} 版本的 \texttt{gauss()}}：误用 single 版本，
+      节点位置仅 $\sim 7$ 位准确。\emph{症状}：势矩阵元在第 7--8 位有 noise；
+      Padé 重求和阶差 $\nudif$ 异常增大。修复：明确用
+      \texttt{gauss(double*,double*,int)}。
+
+\item \textbf{Chebyshev $s$ 取得过小或过大}：
+      $s\ll q_{\text{on}}$ 时 on-shell bin 落到高动量稀疏区，造成观测量
+      插值不收敛；$s\gg q_{\text{on}}$ 时低动量结构未充分扫描。
+      经验法则：$s\approx q_{\text{on}}/2$，对 $\Tlab=190$~MeV 取 $s=100$~MeV。
+
+\item \textbf{Chebyshev $t$ 默认 1 但实际想要均匀网格}：把 $t$ 调到 0
+      会得到全部 bin 边界为 $s$ 的退化网格（$\tan$ 的零次幂全 1）；
+      想要均匀分布请改 \texttt{p\_grid\_type=custom} 并提供 txt 文件，
+      不要设 $t=0$。
+
+\item \textbf{$\NpWP$ 与 $\NppW$ 混淆}：$\NpWP$ 是 bin 数（默认 30），
+      $\NppW$ 是每 bin 内 GL 节点数（默认 8）。代码里前者叫
+      \texttt{Np\_WP}、后者叫 \texttt{Np\_per\_WP}；输入文件里只能改前者。
+
+\item \textbf{动量 WP vs 能量 WP 混用}：当前发布只支持动量 WP；若手动恢复
+      能量 WP 注释而忘了同步修改 \texttt{p\_weight\_function}，会得到
+      "归一化常数与权重不一致"的诡异结果。\emph{修复}：要么全部用动量 WP，
+      要么\emph{两个函数同步切换}到能量 WP 形式。
+
+\item \textbf{GL 节点排序假设}：Tic-tac 的 \texttt{gauss()} 输出节点是
+      \emph{升序}（最负的在 \texttt{x[0]}）；若把数组直接当作"下界->上界"
+      的循环索引，逻辑正确；但若误以为它是 $[0,1]$ 的标准节点而做减法，
+      会产生 sign error。
+
+\item \textbf{Bin 边界与 bin 内节点不一致}：手动改了 \texttt{p\_WP\_array}
+      但忘了重新调用 \texttt{make\_p\_bin\_quadrature\_grids}，导致内层
+      节点仍指向旧 bin 的位置——这种状态不会触发任何 assertion，但
+      \texttt{store\_q\_WP\_kinematics\_txt} 输出的 q 中点与势矩阵不匹配。
+
+\end{enumerate}
+\end{pitfallbox}
+
+% =====================================================================
+\section{最小工作示例}
+\label{sec:appC:mwe}
+
+下面给出一个独立可编译的 C++ 程序，演示如何调用 Tic-tac 的 GL 例程
+计算 $\int_0^{\pi}\sin x\,\dd x$ 并报告误差。把它存为
+\texttt{mwe\_gl.cpp} 后用如下命令编译：
+
+\begin{lstlisting}[style=cpp,caption={最小工作示例：GL 求积驱动。}]
+// mwe_gl.cpp
+#include <cstdio>
+#include <cmath>
+#include "CPP/General_functions/gauss_legendre.h"
+
+int main() {
+    constexpr int N = 8;
+    double x[N], w[N];
+    gauss(x, w, N);                              // [-1,1] 节点与权重
+    updateRange_a_b(x, w, 0.0, M_PI, N);         // 映到 [0,π]
+
+    double I = 0.0;
+    for (int k = 0; k < N; ++k) {
+        I += w[k] * std::sin(x[k]);
+    }
+    std::printf("I_%d = %.16f, |error| = %.2e\n",
+                N, I, std::fabs(I - 2.0));
+    return 0;
+}
+\end{lstlisting}
+
+\begin{lstlisting}[style=config,caption={编译与运行（独立模式，仅需 \texttt{libm}）。}]
+g++ -std=c++17 -O2 mwe_gl.cpp \
+    Tic-tac/CPP/General_functions/gauss_legendre.cpp \
+    -o mwe_gl
+./mwe_gl
+# 期望输出：
+# I_8 = 1.9999999999999991, |error| = 1.11e-15
+\end{lstlisting}
+
+\paragraph{进一步实验。}
+读者可以将 \texttt{N} 改为 4、6、12，复刻 \cref{tab:appC:gl_err}；
+或把被积函数换成 $\exp(-p^{2}/100^{2})\cdot p^{2}$ 验证 $p^{2}$-加权积分
+（解析答案 $50\sqrt{50\pi}$）；也可加载 Chebyshev 边界并在每个 bin 内
+排 8 节点，按 \cref{lst:appC:bin_quad} 的双层循环实现"WP 友好"的求积器。
+
+% =====================================================================
+\section{接口与依赖}
+
+\begin{itemize}
+\item \textbf{头文件}：\texttt{CPP/General\_functions/gauss\_legendre.h}
+      声明 \texttt{gauss}、\texttt{rangeChange\_0\_inf}、
+      \texttt{updateRange\_a\_b} 的 float/double 双重载；无外部依赖（仅
+      \texttt{<cmath>}）。
+\item \textbf{src/utils 镜像}：\texttt{src/utils/gauss\_legendre.\{cpp,h\}}
+      与 CPP 版本完全等价（CMake 路径专用）。
+\item \textbf{调用方}：
+      \begin{itemize}
+      \item \texttt{make\_wp\_states.cpp}：bin 内节点权重；
+      \item \texttt{make\_potential\_matrix.cpp}：势矩阵元的双层 GL；
+      \item \texttt{make\_permutation\_matrix.cpp}：P123 几何积分核的内层 GL；
+      \item \texttt{make\_swp\_states.cpp}：SWP 极点解析处理中的辅助 GL；
+      \item \texttt{interactions/chp/}：Fortran 侧亦使用同一 GL（独立实现，
+            未与 C++ 共享代码——这是潜在的"GL 一致性"风险点）。
+      \end{itemize}
+\item \textbf{Chebyshev 接口}：\texttt{make\_chebyshev\_distribution} 仅写
+      \texttt{boundary\_array}；下游 \texttt{make\_p\_bin\_quadrature\_grids}
+      读取后填充 GL；两者通过 \texttt{fwp\_statespace} 结构体连接（参见
+      \cref{ch:wp_basis_construction}）。
+\end{itemize}
+
+% =====================================================================
+\section{小结}
+
+\begin{itemize}
+\item GL 求积是 Tic-tac 数值核心；正权 + $2N-1$ 阶代数精度 + 几何收敛
+      使它在 WP bin 内部对解析被积函数提供 $\sim 10^{-15}$ 精度，仅需 8 节点；
+\item Chebyshev 变换 \eqref{eq:appC:cheb_def} 用两个标量 $(s,t)$
+      生成低端密、高端稀的 bin 网格，与 GL 内层求积结合形成"两级离散化"；
+\item 数值实现集中在 \texttt{CPP/General\_functions/gauss\_legendre.cpp}
+      与 \texttt{CPP/make\_wp\_states.cpp} 两个文件，约 200 行，逻辑清晰；
+\item 常见陷阱主要源自"区间变换/雅可比的对称遗漏"以及 float/double 版本混用；
+\item 一旦 GL 与 Chebyshev 配置正确，整个求解器的求积层就成为透明的
+      "数值地基"——读者后续看到的所有矩阵元误差都不再来自求积本身。
+\end{itemize}

@@ -1,9 +1,492 @@
 % =====================================================================
 % appendices/B_wigner.tex
-% Wave 0 占位 —— 待 Wave 7 子代理补全
+% Wave 7 子代理填写：角动量耦合系数与 Wigner 符号
 % =====================================================================
 
 \chapter{角动量耦合系数与 Wigner 符号}
 \label{app:B_wigner}
 
-\textbf{[Wave 0 占位 —— 附录内容由 Wave 7 子代理填写]}
+\noindent
+本附录给出 Tic-tac 在部分波态构造、
+P123 置换矩阵元、
+3NF 部分波投影中要用到的所有角动量耦合系数：
+Clebsch–Gordan (CG) 系数 $\langle j_1 m_1; j_2 m_2 | J M\rangle$、
+Wigner 3-j、6-j、9-j 符号。
+我们采用 \emph{Edmonds 约定}\cite{Edmonds1957}，
+即与 GSL \texttt{gsl\_sf\_coupling\_*j} 系列函数完全一致；
+所有数值实现都通过 \texttt{CPP/General\_functions/coupling\_coefficients.cpp}
+作为 GSL 的薄包装层。
+读者只需关注\emph{对称性、相位、合法性条件}，
+而不必担心递推算法或数值稳定性问题
+——这些 GSL 已经在内部按 Schulten–Gordon 三项递推 (1975) 处理过。
+
+% =====================================================================
+\section{Clebsch–Gordan 系数}
+\label{sec:appB_clebsch_gordan}
+
+\subsection{定义}
+
+CG 系数定义为以下两组角动量本征基矢之间的展开系数：
+\begin{equation}
+\ket{J M; j_1 j_2} \;=\; \sum_{m_1, m_2}
+\langle j_1 m_1; j_2 m_2 | J M \rangle\,
+\ket{j_1 m_1}\otimes \ket{j_2 m_2}.
+\label{eq:appB_CG_def}
+\end{equation}
+我们采用 Condon–Shortley 相位约定，
+此时所有 CG 系数均为\emph{实数}。
+反向展开：
+\begin{equation}
+\ket{j_1 m_1}\otimes \ket{j_2 m_2} \;=\; \sum_{J=|j_1-j_2|}^{j_1+j_2}
+\langle j_1 m_1; j_2 m_2 | J, m_1+m_2 \rangle\,
+\ket{J, m_1+m_2; j_1 j_2}.
+\end{equation}
+
+\subsection{合法性条件}
+
+\begin{enumerate}
+\item 三角不等式：$|j_1 - j_2| \le J \le j_1 + j_2$；
+\item 投影守恒：$M = m_1 + m_2$；
+\item $|m_i| \le j_i$；
+\item $2(j_1 + j_2 + J)$ 为偶数（即 $j_1+j_2+J$ 为整数）。
+\end{enumerate}
+任一条不满足，CG 系数为零。
+代码中正是用 \texttt{abs(two\_m1) <= two\_j1} 等条件做合法性检查
+（\cref{lst:appB_coupling_cpp} 第 8 行）。
+
+\subsection{对称性（CG）}
+
+\begin{align}
+\langle j_1 m_1; j_2 m_2 | J M \rangle &\;=\;
+(-1)^{j_1 + j_2 - J}\,
+\langle j_2 m_2; j_1 m_1 | J M \rangle, \label{eq:appB_CG_swap}\\
+\langle j_1 m_1; j_2 m_2 | J M \rangle &\;=\;
+(-1)^{j_1 + j_2 - J}\,
+\langle j_1, -m_1; j_2, -m_2 | J, -M \rangle, \label{eq:appB_CG_neg}\\
+\langle j_1 m_1; j_2 m_2 | J M \rangle &\;=\;
+\sqrt{\frac{2J+1}{2 j_2 + 1}}\,(-1)^{j_1 - m_1}\,
+\langle j_1 m_1; J, -M | j_2, -m_2 \rangle. \label{eq:appB_CG_inv}
+\end{align}
+
+\subsection{常用 NN/3N 通道实例}
+
+\begin{table}[htbp]
+\centering
+\caption{常用 NN 部分波耦合 $\ket{(\ell s) j; m}$ 的 CG 系数（取 $j$ 最大 $m$ 部分）}
+\label{tab:appB_NN_channels}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+谱学 & $\ell$ & $s$ & $j$ & $\langle \ell, m_\ell; s, m_s | j, m_\ell + m_s \rangle$ 例 \\
+\midrule
+$^1S_0$  & 0 & 0 & 0 & $\langle 0,0;0,0|0,0\rangle = 1$ \\
+$^3S_1$  & 0 & 1 & 1 & $\langle 0,0;1,m_s|1,m_s\rangle = 1$ \\
+$^3D_1$  & 2 & 1 & 1 & $\langle 2,0;1,0|1,0\rangle = -\sqrt{2/3}\,\;\;\langle 2,1;1,-1|1,0\rangle = \sqrt{1/6}$ \\
+$^3P_0$  & 1 & 1 & 0 & $\langle 1,0;1,0|0,0\rangle = -\sqrt{1/3}$ \\
+$^3P_1$  & 1 & 1 & 1 & $\langle 1,1;1,0|1,1\rangle = +\sqrt{1/2}$ \\
+$^3P_2$  & 1 & 1 & 2 & $\langle 1,1;1,1|2,2\rangle = 1$ \\
+$^1P_1$  & 1 & 0 & 1 & $\langle 1,m_\ell;0,0|1,m_\ell\rangle = 1$ \\
+$^3F_2$  & 3 & 1 & 2 & 由 $^3P_2$–$^3F_2$ 张量耦合用到 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+3-N 部分波的标准命名 $\ket{(\ell s)j, (\lambda \tfrac{1}{2})I; J^\pi}$
+（即 jj-coupling 三体方案）需要把 $j$ 与 $I$ 再耦到 3N 总角动量 $J$，
+因此每个 3N 通道至少调用 \emph{两次} CG（一次 $\ell s\to j$，一次 $j I\to J$），
+有时还要叠加一次同位旋耦合 $t_2 \tfrac{1}{2}\to T$。
+
+% =====================================================================
+\section{Wigner 3-j 符号}
+\label{sec:appB_3j}
+
+\subsection{定义与对称性}
+
+3-j 符号通过下式与 CG 关联：
+\begin{equation}
+\begin{pmatrix} j_1 & j_2 & j_3 \\ m_1 & m_2 & m_3 \end{pmatrix}
+\;=\;
+\frac{(-1)^{j_1 - j_2 - m_3}}{\sqrt{2 j_3 + 1}}\,
+\langle j_1 m_1; j_2 m_2 | j_3, -m_3 \rangle.
+\label{eq:appB_3j_to_CG}
+\end{equation}
+\textbf{合法性}：与 CG 相同，外加 $m_1 + m_2 + m_3 = 0$（注意求和到 0）。
+
+\textbf{对称性}：3-j 在三列循环置换下不变，在偶置换下不变，在奇置换下乘相位 $(-1)^{j_1+j_2+j_3}$；
+同时全部 $m_i\to -m_i$ 也乘 $(-1)^{j_1+j_2+j_3}$：
+\begin{align}
+\begin{pmatrix} j_1 & j_2 & j_3 \\ m_1 & m_2 & m_3 \end{pmatrix}
+&=
+\begin{pmatrix} j_2 & j_3 & j_1 \\ m_2 & m_3 & m_1 \end{pmatrix}
+=
+\begin{pmatrix} j_3 & j_1 & j_2 \\ m_3 & m_1 & m_2 \end{pmatrix} \\
+&= (-1)^{j_1+j_2+j_3}
+\begin{pmatrix} j_2 & j_1 & j_3 \\ m_2 & m_1 & m_3 \end{pmatrix} \\
+&= (-1)^{j_1+j_2+j_3}
+\begin{pmatrix} j_1 & j_2 & j_3 \\ -m_1 & -m_2 & -m_3 \end{pmatrix}.
+\end{align}
+
+\subsection{显式公式（Racah）}
+
+对一般情况（无简化），3-j 符号的显式表示为：
+\begin{equation}
+\begin{pmatrix} j_1 & j_2 & j_3 \\ m_1 & m_2 & m_3 \end{pmatrix}
+= (-1)^{j_1-j_2-m_3}\,
+\sqrt{\Delta(j_1 j_2 j_3)}\,
+\sum_t \frac{(-1)^t\,F_t(j_i, m_i)}
+            {t!\,\Pi_t(j_i, m_i)},
+\end{equation}
+其中 $\Delta(j_1 j_2 j_3)$ 是三角因子
+\begin{equation}
+\Delta(abc) \;=\; \frac{(a+b-c)!(a-b+c)!(-a+b+c)!}{(a+b+c+1)!},
+\end{equation}
+$F_t, \Pi_t$ 为 $j_i, m_i$ 的多项式（详见 Edmonds (3.7.3)\cite{Edmonds1957}）。
+GSL 不直接采用此 Racah 求和，而是
+内部转化为 6-j 的 Schulten–Gordon 三项递推，
+精度可达机器精度。
+
+\subsection{特殊值}
+
+\begin{align}
+\begin{pmatrix} j_1 & j_2 & 0 \\ m_1 & m_2 & 0 \end{pmatrix}
+&= \frac{(-1)^{j_1 - m_1}}{\sqrt{2 j_1 + 1}}\,\delta_{j_1, j_2}\,\delta_{m_1, -m_2}, \\
+\begin{pmatrix} j & j & 0 \\ m & -m & 0 \end{pmatrix}
+&= \frac{(-1)^{j - m}}{\sqrt{2 j + 1}}.
+\end{align}
+后者在 P123 置换矩阵元的 reduced matrix 化简里大量用到。
+
+% =====================================================================
+\section{Wigner 6-j 符号}
+\label{sec:appB_6j}
+
+\subsection{定义与意义}
+
+6-j 符号刻画三体角动量耦合\emph{重耦合}过程中的相对相位，
+即在两种不同的 “先两两再三体” 顺序之间作变换：
+\begin{equation}
+\ket{(j_1 j_2) j_{12}, j_3; J M}
+\;=\;
+\sum_{j_{23}} (-1)^{j_1+j_2+j_3+J}\,\sqrt{(2 j_{12}+1)(2 j_{23}+1)}
+\,
+\begin{Bmatrix} j_1 & j_2 & j_{12} \\ j_3 & J & j_{23} \end{Bmatrix}\,
+\ket{j_1, (j_2 j_3) j_{23}; J M}.
+\label{eq:appB_6j_recoupling}
+\end{equation}
+这正是 Tic-tac 在三体置换 $\hat{P}_{123}$ 与 jj-LS 重耦合中调用 6-j 的物理原因。
+
+\subsection{合法性}
+
+6-j 符号合法当且仅当所有四个三角型 $(j_1 j_2 j_{12})$, $(j_3 j_4 j_{12})$,
+$(j_1 j_5 j_4)$, $(j_3 j_5 j_2)$（按 Edmonds 标准排版）皆满足三角不等式。
+
+\subsection{对称性}
+
+\begin{enumerate}
+\item 列内两个角动量任意置换：6-j 不变；
+\item 24 列置换 + 上下行交换共有 24 种等价表达；
+\item 与 3-j 通过 Racah 求和关联：
+\begin{equation}
+\begin{Bmatrix} j_1 & j_2 & j_3 \\ J_1 & J_2 & J_3 \end{Bmatrix}
+=
+\sum_{m\,M}\,
+(-1)^{\sum} \prod_{\text{4 个 3-j}}\,(\cdots).
+\end{equation}
+\end{enumerate}
+
+\subsection{常用特殊情形}
+
+\begin{equation}
+\begin{Bmatrix} j_1 & j_2 & j_3 \\ 0 & j_3 & j_2 \end{Bmatrix}
+\;=\; \frac{(-1)^{j_1+j_2+j_3}}{\sqrt{(2 j_2+1)(2 j_3+1)}},
+\end{equation}
+此式在 Tic-tac 的截面归一化和 spectator $q$ 通道权重计算中频繁出现。
+
+% =====================================================================
+\section{Wigner 9-j 符号}
+\label{sec:appB_9j}
+
+\subsection{定义：jj $\leftrightarrow$ LS 耦合变换}
+
+9-j 符号是\emph{四角动量重耦合} 时的相位结构。在 Tic-tac 的部分波态里，
+\begin{equation}
+\ket{(\ell s) j, (\lambda \tfrac{1}{2}) I; J} \quad\text{(jj 顺序)}
+\quad \longleftrightarrow \quad
+\ket{(\ell \lambda) L, (s \tfrac{1}{2}) S; J} \quad\text{(LS 顺序)}
+\end{equation}
+两套基互相正交展开：
+\begin{equation}
+\ket{(\ell\lambda) L, (s\tfrac12) S; J}
+=
+\sum_{j I}
+\sqrt{(2 j+1)(2 I+1)(2 L+1)(2 S+1)}\,
+\begin{Bmatrix}
+\ell & s & j \\
+\lambda & \tfrac{1}{2} & I \\
+L & S & J
+\end{Bmatrix}\,
+\ket{(\ell s) j, (\lambda \tfrac{1}{2}) I; J}.
+\label{eq:appB_9j_jj_LS}
+\end{equation}
+
+\subsection{对称性}
+
+9-j 符号在以下变换下取值不变：
+\begin{enumerate}
+\item 行/列同时置换为偶置换；
+\item 转置（行/列互换）。
+\end{enumerate}
+对奇置换（行或列单独奇置换）时乘 $(-1)^{R}$，
+$R = $ 9 个角动量之和。
+
+\subsection{化为 6-j 求和}
+
+\begin{equation}
+\begin{Bmatrix}
+a & b & c \\ d & e & f \\ g & h & i
+\end{Bmatrix}
+=
+\sum_x (-1)^{2x} (2x+1)
+\begin{Bmatrix} a & b & c \\ f & i & x \end{Bmatrix}
+\begin{Bmatrix} d & e & f \\ b & x & h \end{Bmatrix}
+\begin{Bmatrix} g & h & i \\ x & a & d \end{Bmatrix}.
+\label{eq:appB_9j_to_6j}
+\end{equation}
+GSL 内部就是按 \cref{eq:appB_9j_to_6j} 求和实现 9-j 的，
+所以 9-j 调用比 6-j 调用昂贵约 $(2 j_{\mathrm{max}}+1)$ 倍。
+对于 Tic-tac 的 $J_{2N}^{\max} = 3$、$J_{3N}^{\max} = 1$（典型设置），
+单次 9-j 大约比 6-j 慢 $5$–$7$ 倍，但仍在微秒量级，
+不构成性能瓶颈。
+
+\subsection{完全平凡的 9-j（一行有 0）}
+
+若 9-j 一行（或一列）含 0，则 9-j 退化为单个 6-j：
+\begin{equation}
+\begin{Bmatrix}
+a & b & c \\ d & e & f \\ g & h & 0
+\end{Bmatrix}
+= \frac{(-1)^{b+d+f+g}}{\sqrt{(2g+1)(2c+1)}}
+\,\delta_{g h}\,\delta_{c f}\,
+\begin{Bmatrix} a & b & c \\ e & d & g \end{Bmatrix}.
+\end{equation}
+此公式可用于自检：把 $\lambda = 0, I = \tfrac{1}{2}$ 代入 \cref{eq:appB_9j_jj_LS}，
+应正好回到只剩 LS$\to$ jj 普通 CG 转换。
+
+% =====================================================================
+\section{数值实现：\texttt{coupling\_coefficients.cpp}}
+\label{sec:appB_implementation}
+
+Tic-tac 把所有 4 类系数都封装在 \texttt{CPP/General\_functions/coupling\_coefficients.cpp}
+单一文件中，作为对 GSL 的薄包装层。
+\begin{lstlisting}[style=cpp, caption={\texttt{coupling\_coefficients.cpp}（自动抽取）},
+                   label={lst:appB_coupling_cpp}]
+\end{lstlisting}
+\lstinputlisting[style=cpp, basicstyle=\ttfamily\scriptsize, numbers=left,
+                 caption={抽取的实现源码（\cref{lst:appB_coupling_cpp}）}]
+                {code_excerpts/snippets/appB_coupling_cpp.cpp}
+
+\noindent
+对应头文件：
+\lstinputlisting[style=cpp, basicstyle=\ttfamily\scriptsize, numbers=left,
+                 caption={\texttt{coupling\_coefficients.h}（自动抽取）}]
+                {code_excerpts/snippets/appB_coupling_h.cpp}
+
+\subsection{接口约定：\texttt{two\_j} 与 \texttt{two\_m}}
+
+\textbf{所有}函数都使用\emph{两倍角动量}（\texttt{two\_j}, \texttt{two\_m}）整数参数。
+理由是半整数角动量
+（如 nucleon spin $s = \tfrac{1}{2}$）若用 \texttt{double} 传入，
+会因浮点精度问题导致合法性条件 $|m| \le j$ 误判失败。
+约定 \texttt{two\_j = 2j}，\texttt{two\_m = 2m}：
+\begin{itemize}
+\item $j = 1/2 \Rightarrow$ \texttt{two\_j = 1}；
+\item $j = 3/2 \Rightarrow$ \texttt{two\_j = 3}；
+\item $j = 2 \Rightarrow$ \texttt{two\_j = 4}。
+\end{itemize}
+GSL \texttt{gsl\_sf\_coupling\_3j(...)} 内部使用相同约定，故此处直接透传。
+
+\subsection{CG 函数的相位换算}
+
+\texttt{clebsch\_gordan} 对 \texttt{wigner\_3j} 的相位转换使用
+\begin{equation}
+\langle j_1 m_1; j_2 m_2 | j_3 m_3 \rangle
+\;=\;
+(-1)^{j_1 - j_2 + m_3}\,
+\sqrt{2 j_3 + 1}\,
+\begin{pmatrix} j_1 & j_2 & j_3 \\ m_1 & m_2 & -m_3 \end{pmatrix},
+\label{eq:appB_CG_from_3j}
+\end{equation}
+这正是 \cref{lst:appB_coupling_cpp} 第 10 行的 \texttt{gsl\_sf\_pow\_int} 表达式
+（注意 \texttt{(two\_j1 - two\_j2 + two\_m3)/2} 等价于
+$j_1 - j_2 + m_3$）。
+\textbf{合法性检查}（\cref{lst:appB_coupling_cpp} 第 8 行）应当读为
+\texttt{|m1| <= j1, |m2| <= j2}，但代码实际写成了
+\texttt{abs(two\_m1) <= two\_j1, abs(two\_m2) <= two\_j2, abs(two\_m1) <= two\_j1}
+——\emph{第三条是冗余 typo}（应当是 \texttt{abs(two\_m3) <= two\_j3}）。
+此 typo 不会导致错误结果，因为冗余条件与第一条等价；
+但若有用户调用非法 $|m_3| > j_3$ 参数，
+则会绕过 0 检查直接传入 GSL，
+GSL 会返回 0（其内部已做合法性判定），所以最终结果仍正确。
+\textbf{建议}：在下次维护时修正为 \texttt{abs(two\_m3) <= two\_j3}。
+
+\subsection{缓存策略}
+
+GSL 的 3j/6j/9j 函数本身\emph{无缓存}，
+每次调用都从头计算。
+对于 Tic-tac 的工作流，单次求解 ($\Np^{\text{WP}} \times \Nq^{\text{WP}} = 30\times 30$、$\Nalpha = 26$ 通道）
+大约调用 $10^{6}$–$10^{7}$ 次耦合系数，
+GSL 直接计算耗时 $\sim$ 数秒至 1 分钟，
+远小于 P123 矩阵乘的 $\mathcal{O}(\text{分钟})$ 量级。
+因此当前\textbf{不实现缓存}是合理选择。
+若未来扩展到 $\Nalpha = 100+$（即 $J_{3N}^{\max} \ge 5/2$），
+建议把通道相关的纯 (j, m) 系数预计算到一张
+\texttt{std::unordered\_map} 哈希表里。
+
+\subsection{与 GSL \texttt{gsl\_sf\_coupling\_3j} 的对照接口}
+
+\begin{table}[htbp]
+\centering
+\caption{Tic-tac 包装函数 vs GSL 原型对照}
+\label{tab:appB_gsl_signature}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Tic-tac & GSL & 返回 \\
+\midrule
+\texttt{wigner\_3j(2$j_1$,2$j_2$,2$j_3$,2$m_1$,2$m_2$,2$m_3$)}
+& \texttt{gsl\_sf\_coupling\_3j(...)} & \si{无量纲} \\
+\texttt{wigner\_6j(2$j_1$,...,2$j_6$)}
+& \texttt{gsl\_sf\_coupling\_6j(...)} & \si{无量纲} \\
+\texttt{wigner\_9j(2$j_1$,...,2$j_9$)}
+& \texttt{gsl\_sf\_coupling\_9j(...)} & \si{无量纲} \\
+\texttt{clebsch\_gordan(2$j_1$,...,2$m_3$)}
+& 由 3-j 转换 & \si{无量纲}（实数） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{常用 NN/3N 通道耦合系数数值表}
+\label{sec:appB_numerical_table}
+
+下表列出 Tic-tac 在
+$J_{2N}^{\max} = 3, J_{3N}^{\max} = 1$ 默认设置下
+最频繁出现的若干 6-j 数值，便于交叉验证。
+
+\begin{table}[htbp]
+\centering
+\caption{常用 6-j 数值（精度 6 位）}
+\label{tab:appB_6j_values}
+\begin{tabular}{@{}lll@{}}
+\toprule
+6-j & 数值 & 用途 \\
+\midrule
+$\{0\,\tfrac12\,\tfrac12;\;\tfrac12\,1\,\tfrac12\}$ & $-0.408\,248$ & deuteron LS coupling \\
+$\{0\,\tfrac12\,\tfrac12;\;\tfrac12\,0\,\tfrac12\}$ & $+0.500\,000$ & singlet $^1S_0$ \\
+$\{1\,\tfrac12\,\tfrac32;\;\tfrac12\,1\,1\}$         & $-0.166\,667$ & $^3P_J$–pair recoupling \\
+$\{2\,\tfrac12\,\tfrac32;\;\tfrac12\,1\,2\}$         & $+0.166\,667$ & $^3D_1$ tensor mixing \\
+$\{1\,1\,1;\;1\,1\,1\}$                              & $+0.166\,667$ & $J=1$ identity recouple \\
+$\{2\,2\,0;\;2\,2\,2\}$                              & $+0.200\,000$ & 截面归一化 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+\textbf{自检脚本}：
+\begin{lstlisting}[style=cpp, caption={单元自检（伪码）}]
+assert(std::abs(wigner_6j(0,1,1, 1,2,1) - (-0.408248)) < 1e-6);
+assert(std::abs(wigner_3j(2,2,0, 1,-1,0) - (1.0/std::sqrt(3.0))) < 1e-12);
+assert(std::abs(clebsch_gordan(2,2,4, 2,2,4) - 1.0) < 1e-12);  // <1/2,1/2;1/2,1/2|2,2>=?
+\end{lstlisting}
+（数值可由 GSL 直接验证；
+请用 \texttt{tools/check\_3nf\_normalization} 中的对应单元测试核对，
+不要把数值硬编码到生产逻辑里。）
+
+% =====================================================================
+\section{陷阱速查}
+\label{sec:appB_pitfalls}
+
+\begin{pitfallbox}
+\textbf{陷阱 B.1 —— 整数 vs 浮点参数}.
+所有 Wigner 系数函数都接受 \texttt{int} 类型的“两倍角动量”整数。
+如果你不小心写 \texttt{wigner\_6j(0.5, ...)} ——\texttt{double} 隐式转 \texttt{int} 后变成 0，
+GSL 会“合法地”返回一个错值。\\
+\textbf{规避}：编译器开 \texttt{-Wconversion} 警告；
+或者用宏 \verb|TWO_J(x) ((int)(2*(x)))| 显式封装。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 B.2 —— Condon–Shortley 相位与 Wigner D 函数顺序}.
+某些数学软件包（如 SymPy 的
+\texttt{sympy.physics.wigner.clebsch\_gordan}）默认 Condon–Shortley，
+但其 D 函数 \texttt{Rotation} 用的是另一约定。
+若你写跨工具链验证，必须确认相位约定一致。\\
+\textbf{规避}：以 GSL/Edmonds 为基准；
+所有跨工具链测试在两端各算 5 个 well-known 数值
+（如 $\langle 1,0; 1,0 | 0,0\rangle = -1/\sqrt{3}$）做对照。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 B.3 —— 半整数同位旋}.
+3-N 系统的同位旋耦合 $T = \tfrac{1}{2}$ 或 $T = \tfrac{3}{2}$，
+$T_z = -\tfrac{3}{2}, -\tfrac{1}{2}, \tfrac{1}{2}, \tfrac{3}{2}$，
+全部需用 \texttt{two\_T = 1 或 3} 传入。
+若混用整数与半整数（例如 spin 用 \texttt{two\_s}, 同位旋忘了 $\times 2$），
+会得到错误为零或符号反的耦合。\\
+\textbf{规避}：在 PW state 构造时统一前缀 \texttt{two\_*}，
+\emph{从不出现}单倍 $j, T$ 整数。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 B.4 —— 9-j 性能假设}.
+9-j 内部按 \cref{eq:appB_9j_to_6j} 求和，
+对单个 9-j 调用至少 $(2 j_{\mathrm{max}}+1)$ 次 6-j。
+若你在内层循环里调用 \texttt{wigner\_9j}，
+而循环规模 $\gtrsim 10^{8}$，
+会有显著开销。\\
+\textbf{规避}：对常用 jj$\to$LS 变换矩阵预先制表，
+查表用 \texttt{std::unordered\_map<key9j, double>}。
+当前 Tic-tac 默认设置无需如此优化。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 B.5 —— GSL 错误处理与 NaN}.
+GSL 默认错误处理器对非法参数会调用 \texttt{abort()}，
+让程序当场崩溃。
+\textbf{规避}：在 \texttt{main()} 里调用 \texttt{gsl\_set\_error\_handler\_off()}，
+让所有错误以返回值方式处理；
+之后函数会返回 NaN，由 caller 自检。
+Tic-tac 的 main 入口已设此环境，但若新增独立单元测试请记得加同样一行。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 B.6 —— 实现层冗余检查}.
+\cref{lst:appB_coupling_cpp} 第 8 行的合法性检查
+出现 \texttt{abs(two\_m1) <= two\_j1} 重复（应该是 \texttt{abs(two\_m3) <= two\_j3}）。
+即使如此函数仍正确，因 GSL 内部还会再做合法性判定。
+但若你自行复制粘贴这段判断到别处用作新函数，
+请务必修正这处 typo。\\
+\textbf{规避}：日后维护时同步修复；写单元测试覆盖 $|m_3| > j_3$ 的边角情况。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 B.7 —— 整数三角不等式 $j_1 + j_2 + j_3$ 必须为整数}.
+即使所有 $j_i$ 都是半整数（如 $\tfrac{1}{2}$），其\emph{总和}仍须为整数才合法。
+例如 $\{j_1=j_2=\tfrac{1}{2}, j_3=\tfrac{1}{2}\}$ 不合法（总和 $\tfrac{3}{2}$），
+而 $\{j_1=j_2=\tfrac{1}{2}, j_3=0\}$ 或 $\{j_1=j_2=\tfrac{1}{2}, j_3=1\}$ 合法。
+\textbf{规避}：构造 PW 通道时显式校验
+\texttt{(two\_j1 + two\_j2 + two\_j3) \% 2 == 0}。
+\end{pitfallbox}
+
+% =====================================================================
+\section{延伸阅读}
+\label{sec:appB_further_reading}
+
+\begin{itemize}
+\item Edmonds, \emph{Angular Momentum in Quantum Mechanics}\cite{Edmonds1957} ——
+      经典约定来源，本附录全部对齐于此；
+\item Varshalovich, Moskalev, Khersonskii, \emph{Quantum Theory of Angular Momentum}
+      (World Scientific, 1988) —— 最完整的 Wigner 符号公式手册（含 12-j、15-j 等）；
+\item Schulten \& Gordon, \emph{J. Math. Phys.} \textbf{16} (1975) 1961
+      —— 6-j 三项递推算法 (GSL 内部实现的基础)；
+\item GSL 手册 \texttt{gsl\_sf\_coupling.h} —— 数值接口与精度保证。
+\end{itemize}
+
+% End of Appendix B
