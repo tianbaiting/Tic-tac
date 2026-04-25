@@ -1,13 +1,967 @@
 % =====================================================================
 % 08_potential_matrix.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 8 章 两体势矩阵在 WP 基下的构造
+% Wave 2 / Agent B
 % =====================================================================
 
 \chapter{两体势矩阵在 WP 基下的构造}
 \label{ch:08_potential_matrix}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch08-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{为什么 \(\Vop\) 矩阵是核心数据。}
+Faddeev/AGS 求解器（\cref{ch:11_faddeev_solver}）的最内层操作可以被一句话概
+括：\emph{在每个 3N-channel 上做一个 "\(\Vop\,\Pop\,\Vop\,\Pop\,\ldots\)" 的稀疏
+矩阵-向量乘}。其中 \(\Vop\) 是\textbf{两体核力}（NN potential），
+\(\Pop\) 是 \(P_{12}P_{23} + P_{13}P_{23}\) 的几何置换算符
+（\cref{ch:09_permutation_p123}）。整条流水线的 \emph{动力学输入}全部由
+\(\Vop\) 决定——一旦 \(\Vop\) 算错，dσ/dΩ 与极化分析能力 \(iT_{11}\) 这两个
+最终观测量不可能正确。
+
+\paragraph{为什么投影到 WP 基。}
+连续动量空间下 \(\Vop_\ell(p', p)\) 是无穷维核；离散化思路有两种：
+
+\begin{itemize}
+  \item \textbf{Gauss-Legendre 经典格点} (Glöckle/Witała 主流方案)：
+        把 \(p, p'\) 都取 60--80 个非均匀节点；矩阵规模 \(\sim 70 \times 70\)
+        每个 \(\ell\) 块；优点是高精度，缺点是 Resolvent
+        \(G_0\) 的奇点（\(p = q_0\)）必须主值积分处理。
+  \item \textbf{Wave-Packet（WP）格点} (Sean Miller 路线，本仓库)：
+        把 \([0, p_{\max}]\) 切成 \(\NpWP\) 个有限宽度的 bin，每个 bin 内做
+        Gauss-Legendre 内积分；矩阵规模 \(\sim 30 \times 30\) 个 bin；
+        优点是\textbf{对角化的 \(G_0\) 极平凡}（\cref{ch:10_resolvent}），
+        缺点是 NN 势对每个 bin 必须做\emph{两次嵌套求积}。
+\end{itemize}
+
+本章只覆盖第二条路线下 \(\Vop\) 的构造：把连续 \(V_\ell(p', p)\) 的核投影到
+WP bin 端到端的 "\(\NpWP \times \NpWP\)" 矩阵。这一矩阵在求解的整个生命周期
+内只\emph{算一次}，然后被 \cref{ch:11_faddeev_solver} 不停重用——故\textbf{必
+须}做缓存优化（\(\rho\) 索引去重）。
+
+\paragraph{为什么覆盖五种势。}
+Tic-tac 与 tictac-origin 都支持 5 种 NN 势模型：
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+模型 & 类型 & 主要场景 \\
+\midrule
+\texttt{LO\_internal} & Chiral EFT, LO，自带 OPEP & 教学/快速调试 \\
+\texttt{N2LOopt}      & Chiral EFT, N2LO（Fortran） & 高精度 d+p \\
+\texttt{Idaho\_N3LO}  & Chiral EFT, N3LO（Fortran） & 同上，更高阶 \\
+\texttt{nijmegen}     & Phenomenological（F77 库） & 跨势对比 baseline \\
+\texttt{malfliet\_tjon} & Yukawa toy（\(s\) 波） & 单元测试 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\cref{ch:01_lippmann_schwinger} 里我们把 \texttt{potential\_model} 抽象基类
+作为 LS 方程的"动力学接口"展示了一次。本章在此基础上深入到\textbf{每一种
+具体势的 \texttt{V()} 重载实现}：你将看到 5 段长度 \(< 50\) 行的
+C++ 代码，外加 1 段 Fortran 同位接口的封装层。读完后你应能自己加一种新势
+（譬如 AV18 / Argonne v18）只需要写不超过 50 行 C++ 包装。
+
+\paragraph{读者应当带走什么。}
+\begin{itemize}
+  \item 在纸上写出 \(V_{\PWchanp i', \PWchan i} =
+        \int\!\!\int f_{i'}(p') V_{\ell'\ell}(p', p) f_i(p)\, dp'\, dp\) 的 4 个数学步骤
+        与代码里嵌套循环的对应；
+  \item 在 6 元素数组 \texttt{Varray[6]} 与"6 个不同 LS 通道（\(s, j, \ell, \ell'\) 组合）"
+        之间建立无歧义的对应关系；
+  \item 看到 \texttt{coupled\_via\_L\_2N} / \texttt{coupled\_via\_T\_3N} 这一对
+        bool 时立刻知道前者来自张量耦合 \(\spectro{3}{S}{1}\!-\!\spectro{3}{D}{1}\)、
+        后者来自 IB-\({}^1S_0\)；
+  \item 不再害怕"5 种势 \(\times\) coupled/uncoupled \(\times\) np/nn \(\times\)
+        bin × bin"这类指数式分支组合。
+\end{itemize}
+
+% =========================================
+\section{数学推导}
+\label{sec:ch08-math}
+
+% -----------------------------------------
+\subsection{部分波 NN 势的定义}
+\label{subsec:ch08-pw-NN-def}
+
+NN 势 \(\hat{V}\) 在两体相对动量空间的矩阵元 \(V(\bvec{p}', \bvec{p})\) 是 6 维
+函数（每个 \(\bvec{p}\) 是 3 维矢量）。利用旋转、宇称、自旋-同位旋耦合可以
+把它\textbf{投影到部分波（partial-wave）基}。在 \cref{ch:01_lippmann_schwinger}
+的 §1.4 已经写出
+\begin{equation}
+\label{eq:ch08-pw-projection}
+V_{\ell' \ell}^{s j t}(p', p) \;=\;
+\int d\Omega_{\bvec{p}'}\!\int d\Omega_{\bvec{p}}\;
+\mathcal{Y}_{\ell' s}^{j m_j *}(\hat{p}')\,
+V(\bvec{p}', \bvec{p})\,
+\mathcal{Y}_{\ell s}^{j m_j}(\hat{p}),
+\end{equation}
+其中 \(\mathcal{Y}_{\ell s}^{j m_j}\) 是球谐-自旋耦合的 spinor harmonics。
+旋转不变性导出 \(V_{\ell' \ell}\) 不依赖 \(m_j\)；宇称守恒导出
+\(\ell' - \ell\) 必须为偶数，且仅 \(\ell' = \ell\)（未耦合）或 \(\ell' = \ell \pm 2\)
+（张量耦合）才有非零矩阵元；自旋耦合给出 \(s' = s\)；同位旋耦合给出
+\(t' = t\)。
+
+\paragraph{6 元素方块约定。}
+对固定的 \((s, j, t)\) 三元组，\(V_{\ell' \ell}\) 在 \(\ell, \ell' \in
+\{j-1, j, j+1\}\) 取值；写成矩阵：
+\begin{equation}
+\label{eq:ch08-Vmat-6elements}
+V^{(s, j, t)} \;=\;
+\begin{pmatrix}
+V_{j-1,\,j-1} & V_{j-1,\,j+1} \\
+V_{j+1,\,j-1} & V_{j+1,\,j+1}
+\end{pmatrix}_{\!\!s=1}
+\;\oplus\;
+V_{j,\,j}\big|_{s=1}
+\;\oplus\;
+V_{j,\,j}\big|_{s=0}.
+\end{equation}
+合计 \(2 \times 2 + 1 + 1 = 6\) 个独立部分波元素。Tic-tac/origin 把这 6 个值
+打包为 \texttt{double Varray[6]}，约定：
+
+\begin{center}
+\begin{tabular}{cl}
+\toprule
+\texttt{Varray[k]} & 对应物理 \\
+\midrule
+0 & \(V^{s=0}_{j, j}\)（自旋单态，未耦合） \\
+1 & \(V^{s=1}_{j, j}\)（自旋三态，\(\ell = j\) 未耦合，例如 \(\spectro{3}{P}{1}\)） \\
+2 & \(V^{s=1}_{j-1, j-1}\)（耦合块上左，\(\ell = j-1\)） \\
+3 & \(V^{s=1}_{j-1, j+1}\)（耦合块右上，混合） \\
+4 & \(V^{s=1}_{j+1, j-1}\)（耦合块左下，混合） \\
+5 & \(V^{s=1}_{j+1, j+1}\)（耦合块下右，\(\ell = j+1\)；亦含 \(\spectro{3}{P}{0}\) 单 J=0 的 \(\ell=1\)） \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{重要}：5 种势的内部约定可能与上表略有差别——它们各自先填一个临时
+\texttt{tempVarray[6]}，再在 \texttt{V()} 出口处通过下标置换映射到这一统
+一约定。详见 \cref{lst:ch08-chiral-N2LOopt-V} 的最后 6 行。
+
+% -----------------------------------------
+\subsection{从部分波 \(V_\ell(p', p)\) 到 WP 基矩阵元}
+\label{subsec:ch08-pw-to-WP}
+
+\paragraph{WP bin 与权重函数。}
+\cref{ch:06_wp_swp_states} 给出 WP bin 的完整定义；这里只取最低限度回顾。
+将 \([0, p_{\max}]\) 切成 \(\NpWP\) 个 bin \(\binp{i} = [p_{i-1/2}, p_{i+1/2}]\)，
+其归一化基矢
+\begin{equation}
+\label{eq:ch08-WP-basis}
+\WPbin{i} \;=\; \frac{1}{\sqrt{\Niso_i}} \int_{\binp{i}}\! dp\; p\, \fweight_i(p)\, \ket{p},
+\quad
+\Niso_i \;=\; \int_{\binp{i}}\! p^2\, |\fweight_i(p)|^2\, dp.
+\end{equation}
+最简取法 \(\fweight_i(p) = 1\)（"plain" WP）；本仓库实际用一个 \(p\) 的多项式
+权重 \(\fweight_i(p) = p\)（在 \texttt{fwp\_states.fp\_array} 里存）使
+\(\NpWP=30\) 即可达到与 Glöckle 70 节点格点相当的精度。
+
+\paragraph{二维投影积分。}
+将 \cref{eq:ch08-pw-projection} 的部分波势 \(V_{\ell' \ell}(p', p)\) 嵌入
+\(\bra{i'}\Vop\ket{i}\)：
+\begin{align}
+\label{eq:ch08-Vmat-WP}
+V_{i' i}^{(\ell', \ell, s, j, t)}
+&= \bra{x_{i'}} V_{\ell' \ell}^{s j t} \ket{x_i} \notag\\
+&= \frac{1}{\sqrt{\Niso_{i'} \Niso_i}}
+   \int_{\binp{i'}}\!\!dp'\;
+   \int_{\binp{i}}\!\!dp\;
+   p'\, p\, \fweight_{i'}(p')\, \fweight_i(p)\,
+   V_{\ell' \ell}^{s j t}(p', p).
+\end{align}
+注意 \(p'\) 和 \(p\) 各自分别独立做积分；积分核 \(V(p', p)\) 在 bin 内\textbf{不
+做近似}——它由具体的势模型在 \(\NppW \times \NppW\) 个 Gauss-Legendre 节点上
+直接采样。
+
+\paragraph{Gauss-Legendre 嵌套求积。}
+设每个 bin \(\binp{i}\) 内有 \(\NppW\) 个 GL 节点 \(\{p_{i, k}\}_{k=1}^{\NppW}\) 与
+权重 \(\{w_{i, k}\}\)（已经包含 bin 宽度的雅可比因子），则
+\begin{equation}
+\label{eq:ch08-Vmat-WP-GL}
+V_{i' i} \;\approx\;
+\frac{1}{\sqrt{\Niso_{i'} \Niso_i}}
+\sum_{k'=1}^{\NppW} \sum_{k=1}^{\NppW}
+w_{i', k'}\, w_{i, k}\,
+p_{i', k'}\, p_{i, k}\,
+\fweight_{i'}(p_{i', k'})\, \fweight_i(p_{i, k})\,
+V_{\ell' \ell}^{s j t}(p_{i', k'},\, p_{i, k}).
+\end{equation}
+这正是 \cref{lst:ch08-quadrature-loop} 内层 4 重循环的字面落地：
+\(i' \to i \to k' \to k\)，每次最内层调用一次 \texttt{pot\_ptr->V(...)} 拿到 6
+元素 \texttt{V\_IS\_elements} 数组。
+
+\paragraph{中点近似（midpoint approximation）。}
+当 \texttt{midpoint\_approx=true} 时（默认 \texttt{false}），上式退化为
+\begin{equation}
+\label{eq:ch08-Vmat-WP-midpoint}
+V_{i' i} \;\approx\;
+\frac{(\Delta p_{i'})(\Delta p_i)}{\sqrt{\Niso_{i'} \Niso_i}}\,
+\bar{p}_{i'}\, \bar{p}_i\,
+\fweight_{i'}(\bar{p}_{i'})\, \fweight_i(\bar{p}_i)\,
+V(\bar{p}_{i'}, \bar{p}_i),
+\end{equation}
+其中 \(\bar{p}_i\) 是 bin \(\binp{i}\) 中心点。这一近似精度 \(O(\Delta p^2)\)；
+对 \(\NpWP = 30, p_{\max} = 5\) fm\(^{-1}\) 而言每个 bin 宽度 \(\sim 0.17\)
+fm\(^{-1}\)，对 \(d+p\) 在 190 MeV 的物理能量已足够（\(\sqrt{m E} \sim 2\)
+fm\(^{-1}\)，约 \(\sim 12\) 个 bin 内含主要支撑）。但 \cref{ch:11_faddeev_solver}
+的 Padé 加速对中点近似敏感，故生产作业默认\textbf{关}它。
+
+% -----------------------------------------
+\subsection{张量耦合的处理}
+\label{subsec:ch08-tensor-coupling}
+
+\paragraph{为什么张量力会让 \(\ell\) 不守恒。}
+张量算符 \(S_{12} = 3 (\bvec{\sigma}_1 \cdot \hat{r})(\bvec{\sigma}_2 \cdot \hat{r})
+- \bvec{\sigma}_1 \cdot \bvec{\sigma}_2\) 在球谐空间不是标量，而是 rank-2 张量；
+作用在 \(\spectro{3}{S}{1}\) (\(\ell=0, s=1, j=1\)) 上会激发 \(\spectro{3}{D}{1}\)
+(\(\ell=2, s=1, j=1\))。\(j\) 仍然守恒（因为旋转不变），但 \(\ell\) 不再是好量子数；
+代码里这表现为：
+\begin{itemize}
+  \item 在 9 元组 \(\PWtuple\) 索引下，对每个固定的 \((s, j, t)\) 取 \(\ell \in \{j-1, j+1\}\) 都算物理通道；
+  \item 它们\emph{共用}一个 \(\rho_{\rm coup}\) 索引；
+  \item 对应的 \(\Vop_\rho\) 矩阵是 \(2 \NpWP \times 2 \NpWP\)（左上、右上、左下、
+        右下 4 块；上节 \(\texttt{Varray[2..5]}\) 对应这 4 块）。
+\end{itemize}
+
+\paragraph{\(\spectro{3}{P}{0}\) 的特殊地位。}
+\(\spectro{3}{P}{0}\) 是 \(\ell=1, s=1, j=0\) 的状态。形式上它是
+\(\ell = j+1\) 的 \(s=1\) 通道；张量耦合应当把它与 \(\ell=j-1=-1\) 耦合——
+但 \(\ell\) 不能取 \(-1\)。所以 \(\spectro{3}{P}{0}\) 在数学上是\textbf{未耦合}
+的。代码用一个特殊判据 \texttt{coupled\_via\_L\_2N} 把它显式归入未耦合
+（详见 \cref{lst:ch08-outer-loops}）。
+
+\paragraph{\(\Pop\)-bridge 的张量耦合一致性。}
+\cref{ch:09_permutation_p123} 的 \(\Pop\) 矩阵需要把不同 \((\ell, \ell')\) 通道
+联系起来；\(\Pop\) 在 \(\ell\)-子空间上不是对角的，故 \(\Vop\) 矩阵元 4 块
+布局必须与 \(\Pop\) 的 \(\ell\)-枚举顺序一致。代码约定：
+\begin{align*}
+\text{idx\_V\_WP\_upper\_left}  &\to (\ell' = j-1,\, \ell = j-1), \\
+\text{idx\_V\_WP\_upper\_right} &\to (\ell' = j-1,\, \ell = j+1), \\
+\text{idx\_V\_WP\_lower\_left}  &\to (\ell' = j+1,\, \ell = j-1), \\
+\text{idx\_V\_WP\_lower\_right} &\to (\ell' = j+1,\, \ell = j+1).
+\end{align*}
+违反这一约定将给出一个看似收敛的求解结果，但 \(iT_{11}\) 会与实验整体反相
+位（参见 \cref{box:ch08-pitfall-coupled-order}）。
+
+% -----------------------------------------
+\subsection{Isospin Breaking 在 \(\Vop\) 矩阵层的实现}
+\label{subsec:ch08-IB-V}
+
+\paragraph{物理}：在 \texttt{isospin\_breaking\_1S0=true} 时，\(np\) 与 \(nn\)
+\(\spectro{1}{S}{0}\) 的散射长度差异（约 4 fm）需要被显式纳入。物理上 \({}^1S_0\)
+状态在两体 \((np)\) 与 \((nn)\) 之间的耦合通过 \(T_{3N} = 1/2 \leftrightarrow 3/2\)
+矩阵元体现。
+
+\paragraph{投影系数推导}：定义
+\(V_{\rm np} = \bra{(np), {}^1S_0}\Vop\ket{(np), {}^1S_0}\) 与 \(V_{\rm nn}\) 同义。
+将 \(\ket{(np)}, \ket{(nn)}\) 用 \(T = 1/2, 3/2\) 本征态展开（\(M_T\) 由 spectator
+的同位旋分量决定，详见 \cref{ch:03_jacobi_partial_wave} \S 3.5），
+求各 \(T\)-本征通道矩阵元的 2-by-2 线性系统给出
+\begin{equation}
+\label{eq:ch08-isospin-coeffs}
+V^{T=1/2}_{\rm diag} = \tfrac{2}{3} V_{nn} + \tfrac{1}{3} V_{np},
+\quad
+V^{T=3/2}_{\rm diag} = \tfrac{1}{3} V_{nn} + \tfrac{2}{3} V_{np},
+\quad
+V^{T=1/2,3/2}_{\rm off} = \frac{\sqrt{2}}{3}\, (V_{nn} - V_{np}).
+\end{equation}
+代码里字面落地为：
+
+\begin{align*}
+\texttt{V\_IS\_elements[2]} &= \tfrac{2}{3}\, V_{nn}^{1S_0} + \tfrac{1}{3}\, V_{np}^{1S_0}
+                            \;\to\; V^{T=1/2}_{\rm diag}, \\
+\texttt{V\_IS\_elements[3]} &= \tfrac{\sqrt{2}}{3}\, (V_{nn}^{1S_0} - V_{np}^{1S_0})
+                            \;\to\; V^{T=1/2,3/2}_{\rm off}, \\
+\texttt{V\_IS\_elements[4]} &= \tfrac{\sqrt{2}}{3}\, (V_{nn}^{1S_0} - V_{np}^{1S_0})
+                            \;\to\; V^{T=3/2,1/2}_{\rm off}, \\
+\texttt{V\_IS\_elements[5]} &= \tfrac{1}{3}\, V_{nn}^{1S_0} + \tfrac{2}{3}\, V_{np}^{1S_0}
+                            \;\to\; V^{T=3/2}_{\rm diag}.
+\end{align*}
+
+\paragraph{4 种 \texttt{isoscalar\_type} 分类。}
+\cref{lst:ch08-outer-loops} 把 \((T_r, 2T_{3N,r}, 2T_{3N,c})\) 四元
+情形归并为 4 类：
+
+\begin{center}
+\begin{tabular}{cp{8.5cm}}
+\toprule
+\texttt{isoscalar\_type} & 物理含义 \\
+\midrule
+0 & \(T_r = 0,\;2T_{3N,r} = 2T_{3N,c} = 1\)：仅 \(np\)（如 \(\spectro{3}{S}{1}\)） \\
+1 & \(T_r = 1,\;2T_{3N,r} = 2T_{3N,c} = 1\)：等同位旋 \(np/nn\) 加权 \(\tfrac{2}{3} V_{nn} + \tfrac{1}{3} V_{np}\) \\
+2 & 仅 \({}^1S_0\) 且 \(2T_{3N,r}\!=\!2T_{3N,c}\!=\!3\)：用 \cref{eq:ch08-isospin-coeffs} 的 \(T = 3/2\) 块 \\
+3 & 仅 \({}^1S_0\) 且 \(2T_{3N,r}\!\neq\!2T_{3N,c}\)（混叠）：用 off-diagonal 系数 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+每一类决定调用 \texttt{pot\_ptr->V(...)} 多少次（0 类 1 次，1/2/3 类 2 次：分别
+取 \(T_z = 0\) 与 \(T_z = -1\)）以及如何线性组合。
+
+% =========================================
+\section{离散化方案：bin × bin 矩阵 + 嵌套求积}
+\label{sec:ch08-discretization}
+
+% -----------------------------------------
+\subsection{矩阵存储布局}
+\label{subsec:ch08-storage}
+
+\paragraph{未耦合块}：对每个 2N 子空间索引 \(\rho_{\rm unco}\)，
+\(\Vunco\) 是一个 \(\NpWP \times \NpWP\) 的 dense 矩阵。所有 \(\rho_{\rm unco}\)
+块连接成一维数组：
+\begin{equation}
+\texttt{V\_WP\_unco\_array[}\rho_{\rm unco}\,\NpWP^2 + i' \NpWP + i\texttt{]}
+\;\equiv\; (\Vunco_\rho)_{i', i}.
+\end{equation}
+
+\paragraph{耦合块}：对每个 \(\rho_{\rm coup}\)，\(\Vcoup\) 是 \(2\NpWP \times 2\NpWP\)
+（即 4 块的 dense 矩阵）；row-major 的 \(2 \times 2\) 大块结构。读
+\cref{lst:ch08-quadrature-loop} 行 13--19 的 4 个 \texttt{idx\_V\_WP\_*} 计算
+就是这一布局。
+
+\paragraph{总内存。}
+\(\Nalpha = 365, \NpWP = 30\) 的全量场景：
+\begin{itemize}
+  \item \texttt{num\_2N\_unco\_states} \(\approx 14\)（按 \(\rho\) 公式计数）：
+        \(14 \times 30^2 \times 8 = 100\) KB；
+  \item \texttt{num\_2N\_coup\_states} \(\approx 4\)：
+        \(4 \times 4 \times 30^2 \times 8 = 115\) KB。
+\end{itemize}
+合计 \(< 250\) KB——比 \(\Pop\) 与 Resolvent 矩阵（GB 级）小 4 个数量级；
+故 \(\Vop\) 始终可以 fully cached in L3。
+
+% -----------------------------------------
+\subsection{去重缓存（\(\rho\) 索引）}
+\label{subsec:ch08-dedup}
+
+\(\Vop\) 的 \texttt{Nalpha}\(^2\) 双外层循环（行号 r/c 分别枚举 \(\PWchanp\) 与
+\(\PWchan\)）会对同一 2N 子矩阵\textbf{重复访问几十次}。\cref{lst:ch08-outer-loops}
+通过两个 \texttt{matrix\_calculated\_*\_array} bool 数组实现"算
+过的就跳过"逻辑：
+
+\begin{itemize}
+  \item 每个 \(\rho_{\rm coup}\) 或 \(\rho_{\rm unco}\) 第一次被访问时把
+        bool 翻为 \texttt{true}，并真正进入 bin × bin 求积；
+  \item 此后任何 \((\PWchanp, \PWchan)\) 对若映射到同一 \(\rho\)，直接
+        \texttt{continue} 跳过。
+\end{itemize}
+
+去重收益：对 \(\Nalpha = 365\) 而言，独立的 \(\rho\) 个数 \(\sim 18\)；
+\texttt{Nalpha}\(^2\) = 133225 双层循环里只有 \(\sim 18\) 次进入真正的求积——
+节省因子 \(\sim 7400\) 倍。
+
+% -----------------------------------------
+\subsection{Quadrature 节点与 NN 势调用次数}
+\label{subsec:ch08-quad-counts}
+
+每次"进入真正求积"消耗：
+\begin{equation}
+\NpWP \times \NpWP \times \NppW \times \NppW \;\;\text{次 \texttt{V()} 调用}.
+\end{equation}
+默认参数 \(\NpWP = 30, \NppW = 8\)：单个 \(\rho\) 块需要
+\(30 \times 30 \times 8 \times 8 = 5.76 \times 10^4\) 次 \texttt{V()} 调用。
+\(\sim 18\) 个 \(\rho\) 块 × 4 块（耦合）+ 1 块（未耦合）合计
+\(\sim 18 \times 5.76 \times 10^4 \times \text{(avg 2 块)} \approx 2 \times 10^6\) 次
+\texttt{V()} 调用。每次调用 \(\sim 10\) μs（chiral N2LO 经过 Fortran ABI），
+合计 \(\sim\)20 秒——这是 \(\Vop\) 矩阵构造在生产作业里的实际开销。
+
+\paragraph{并行化机会}：双外层循环
+\textbf{不是}线程安全的（部分势的内部状态非 reentrant，见
+\cref{box:ch08-pitfall-fortran-abi}），故源代码中 OpenMP \texttt{pragma} 标识被注
+释掉了。将来要做并行需要给每个线程分配独立的 \texttt{potential\_model}
+实例。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch08-algorithm}
+
+\begin{algorithm}[h]
+\caption{\textsc{Make-V-Matrix}（\texttt{calculate\_potential\_matrices\_array\_in\_WP\_basis}）}
+\label{alg:ch08-make-V}
+\KwIn{\texttt{fwp\_states}（WP 网格 + GL 节点）, \texttt{pw\_states}（通道索引）, \texttt{pot\_ptr}（势工厂）, \texttt{run\_params}}
+\KwOut{\texttt{V\_WP\_unco\_array, V\_WP\_coup\_array}（fully populated）}
+\BlankLine
+\(\texttt{matrix\_calculated\_unco/coup} \gets \mathbf{false}\)\;
+\For{\(\PWchanp \in [0, \Nalpha)\)}{
+  \For{\(\PWchan \in [0, \Nalpha)\)}{
+    \If{\(T_{r} \neq T_c\) \textbf{or} \(j_r \neq j_c\) \textbf{or} \(s_r \neq s_c\) \textbf{or} \(\ell\)-不匹配}{
+      continue\tcp*{V 块对角性}
+    }
+    \(\texttt{type} \gets \textsc{Classify-Isoscalar}(\PWchanp, \PWchan, \texttt{IB-flag})\)\;
+    \(\texttt{coupled\_matrix} \gets (\texttt{张力} \wedge \ell_r \neq \ell_c) \vee (\texttt{IB} \wedge {}^1S_0)\)\;
+    \(\rho \gets \texttt{unique\_2N\_idx}(\ell_r, s_r, j_r, t_r, \texttt{coupled\_matrix})\)\;
+    \If{\(\texttt{matrix\_calculated}[\rho] = \mathbf{true}\)}{
+      continue\;
+    }
+    \(\texttt{matrix\_calculated}[\rho] \gets \mathbf{true}\)\;
+    \For{\(i' \in [0, \NpWP)\)}{
+      \For{\(i \in [0, \NpWP)\)}{
+        \(\texttt{V\_WP\_elements[0..5]} \gets 0\)\;
+        \For{\(k' \in [0, \NppW),\;k \in [0, \NppW)\)}{
+          \(p' \gets p\_array[i' \NppW + k']\)\;
+          \(p \gets p\_array[i \NppW + k]\)\;
+          \(\texttt{factors} \gets f_{i', k'}\, w_{i', k'}\, p'\, \cdot\, f_{i, k}\, w_{i, k}\, p\)\;
+          \(\texttt{pot\_ptr->V}(p', p, \ldots, \texttt{V\_IS\_elements})\)\;
+          \For{\(m \in [0, 6)\)}{
+            \(\texttt{V\_WP\_elements[m]} \mathrel{+}= \texttt{factors} \cdot \texttt{V\_IS\_elements[m]} / (\Niso_{i'} \Niso_i)\)\;
+          }
+        }
+        \textsc{Write-Back}(\texttt{V\_WP\_*\_array}, \texttt{V\_WP\_elements})\;
+      }
+    }
+  }
+}
+\end{algorithm}
+
+\paragraph{复杂度}：双外层 \(\Nalpha^2\) 但被 \(\rho\) 去重压缩到
+\(N_\rho \sim 18\)；每个 \(\rho\) 块成本 \(O(\NpWP^2 \NppW^2)\)；势函数调用本身
+随模型不同从 \(O(1)\)（malfliet\_tjon）到 \(O(\Lambda^4)\)（chiral N3LO，需要做
+\(\Lambda^4\) 次内部展开）变化。生产作业实测：30 秒（\(\Nalpha = 365, \NpWP = 30,
+\NppW = 8\)）。
+
+\paragraph{算法不变量}：
+\begin{itemize}
+  \item \texttt{V\_WP\_unco\_array} 与 \texttt{V\_WP\_coup\_array} 的值仅依赖
+        \texttt{run\_params} 与势模型，与 \cref{ch:11_faddeev_solver} 的能量
+        无关——故是\textbf{一次性预计算}产物。
+  \item 矩阵元 \(V_{i'i}^{\rho}\) 应满足厄米性 \(V_{i'i} = V_{ii'}^*\)（实数情形
+        即对称）；可作为 sanity check（\cref{box:ch08-numerical-closure}）。
+\end{itemize}
+
+% =========================================
+\section{代码落地}
+\label{sec:ch08-code}
+
+% -----------------------------------------
+\subsection{tictac-origin 与 current 的差异}
+\label{subsec:ch08-origin-current}
+
+\(\Vop\) 矩阵构造代码（\texttt{src/core/potential/make\_potential\_matrix.cpp}
+vs \texttt{CPP/make\_potential\_matrix.cpp}）逐行 \texttt{diff} 显示
+\textbf{两文件完全相同}（\(0\) 行差异）——和
+\cref{ch:07_pw_symm_states} 的通道枚举一样，势矩阵构造层也是
+"祖传共享代码"。但 5 个具体势的源文件被 Tic-tac fork 收纳到
+\texttt{src/interactions/} 目录下并清理了若干 build 警告；
+等价的 origin 文件分散在 \texttt{tictac-origin/Tic-tac/CPP/} 下，
+代码内容仍然一致。
+
+\(\Vop\) 自身没有"refactor evolution"故事；本节后面的代码片段都直接取
+current。
+
+% -----------------------------------------
+\subsection{\texttt{extract\_potential\_element\_from\_array}}
+\label{subsec:ch08-extract-element}
+
+\paragraph{从 6-元素打包到 1 个数。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{extract\_potential\_element\_from\_array}: 把 \texttt{Varray[6]} 中正确的位置取出（\texttt{Tic-tac/src/core/potential/make\_potential\_matrix.cpp:4--48}）},
+  label={lst:ch08-extract-element}
+]{code_excerpts/snippets/ch08_extract_element.cpp}
+
+\paragraph{分支逻辑。}
+\begin{itemize}
+  \item 行 12 \texttt{sgn = -1}：耦合块的 off-diagonal 元素相对约定符号
+        （注释里写 "USED IN BOUND STATE BENCHMARK"——这是 Sean Miller
+        博士论文 §4.5 验证氘核束缚态时定下的符号）。
+  \item 行 16 \texttt{L==Lp \&\& L<J}：耦合块上左 \(\ell = \ell' = j-1\)，取
+        \texttt{Varray[2]}。
+  \item 行 19 \texttt{L==Lp \&\& L>J}：耦合块下右 \(\ell = \ell' = j+1\)，取
+        \texttt{Varray[5]}。
+  \item 行 22--26：上右 / 下左 off-diagonal，乘 \texttt{sgn}。
+  \item 行 30 \texttt{L==J+1 \&\& !coupled}：\(\spectro{3}{P}{0}\) 单道，
+        取 \texttt{Varray[5]}（即"如果当 \(\ell = j+1\) 但不耦合，落在
+        idx 5"）。
+  \item 行 36--40：自旋单态 / 三态未耦合分支。
+\end{itemize}
+
+\paragraph{对照 origin（行号一致）。}
+\lstinputlisting[
+  style=cpp,
+  caption={origin 仓库的同函数（\texttt{tictac-origin/Tic-tac/CPP/make\_potential\_matrix.cpp:4--48}），逐行相同},
+  label={lst:ch08-extract-element-origin}
+]{code_excerpts/snippets/ch08_extract_element_origin.cpp}
+
+% -----------------------------------------
+\subsection{外层双循环与 isoscalar 分类}
+\label{subsec:ch08-outer-loops}
+
+\paragraph{主入口的"通道判定 + 去重"。}
+\lstinputlisting[
+  style=cpp,
+  caption={主入口外层循环（\texttt{Tic-tac/src/core/potential/make\_potential\_matrix.cpp:110--213}）},
+  label={lst:ch08-outer-loops}
+]{code_excerpts/snippets/ch08_outer_loops.cpp}
+
+\paragraph{逐段注释。}
+\begin{itemize}
+  \item 行 1--4：双 \(\Nalpha\) 外层循环；行 5--8 抓取 row 量子数。
+  \item 行 13--16：4 道 \(\Vop\) 守恒判据 (\(T, j, s, \ell\))——若 row/col 不
+        匹配则跳过。
+  \item 行 26--47：4 类 \texttt{isoscalar\_type} 分类（详见
+        \cref{subsec:ch08-IB-V}）。
+  \item 行 53--56：\texttt{coupled\_via\_L\_2N} / \texttt{coupled\_via\_T\_3N}
+        判定，并禁止"两者同时成立"。
+  \item 行 71--80：去重短路逻辑（\(\rho\) 索引查重）。
+  \item 行 95--104：诊断 \texttt{printf} 调试输出（在生产 log 里大量出现，
+        用 \texttt{grep} 即可检阅每个 \(\rho\) 块走过的路径）。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{内层 quadrature 循环}
+\label{subsec:ch08-quad-loop}
+
+\paragraph{Gauss-Legendre 节点级求积。}
+\lstinputlisting[
+  style=cpp,
+  caption={内层 quadrature 循环（\texttt{Tic-tac/src/core/potential/make\_potential\_matrix.cpp:243--330}）},
+  label={lst:ch08-quadrature-loop}
+]{code_excerpts/snippets/ch08_quadrature_loop.cpp}
+
+\paragraph{逐段注释。}
+\begin{itemize}
+  \item 行 1--6：bin 双重循环 \(i', i \in [0, \NpWP)\)；提取 row/col 归一化
+        \(\Niso\)。
+  \item 行 12--19：4 个 \texttt{idx\_V\_WP\_*} 索引计算——这一段必须与
+        \cref{subsec:ch08-storage} 的 storage layout 严格一致。
+  \item 行 24--27：\texttt{V\_WP\_elements} 6 元素累加器置零。
+  \item 行 33 起：嵌套 GL 内层循环（\texttt{Np\_per\_WP}）；最内层实际调
+        用 \texttt{pot\_ptr->V(\ldots)}。
+  \item 末尾：\texttt{V\_WP\_elements[m] += factors * V\_IS\_elements[m]
+        / (N\_r * N\_c)}——每次 GL 节点的累加。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{结果回写}
+\label{subsec:ch08-writeback}
+
+\paragraph{6 元素 \(\to\) 4 块或 1 元素。}
+\lstinputlisting[
+  style=cpp,
+  caption={矩阵元回写（\texttt{Tic-tac/src/core/potential/make\_potential\_matrix.cpp:400--429}）},
+  label={lst:ch08-writeback}
+]{code_excerpts/snippets/ch08_writeback.cpp}
+
+\paragraph{两条回写路径。}
+\begin{itemize}
+  \item \texttt{coupled\_matrix=true \& coupled\_via\_L\_2N=true}：调
+        \texttt{extract\_potential\_element\_from\_array} 取 4 个 \((\ell', \ell)\)
+        组合，分别写入上左 / 上右 / 下左 / 下右。
+  \item \texttt{coupled\_via\_T\_3N=true}：直接把
+        \texttt{V\_WP\_elements[2..5]} 写入 4 块（不经过
+        \texttt{extract\_\ldots} 函数；因为 IB \({}^1S_0\) 的 6 元素在内层
+        quadrature 循环就已经按 \(T = 1/2, 3/2\)
+        约定填好了）。
+  \item else 分支：未耦合道，直接 \texttt{extract\_\ldots} 取一个 1
+        元素。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{5 种势模型的 V() 重载}
+\label{subsec:ch08-five-pots}
+
+\paragraph{(1) chiral\_LO\_internal：自带 OPEP + 接触项。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{chiral\_LO\_internal::V}：含 OPEP 与 \(C_{1S_0}, C_{3S_1}\) 接触项（\texttt{Tic-tac/src/interactions/chiral\_LO\_internal.cpp:26--67}）},
+  label={lst:ch08-chiral-LO-V}
+]{code_excerpts/snippets/ch08_chiral_LO_V.cpp}
+
+注释：
+\begin{itemize}
+  \item 行 11：\texttt{pionExchange->potential(qi, qo, J, Varray)} 调用
+        \texttt{OPEP} 类（\cref{ch:15_3nf_physics} 同物理但 2N 版本）填
+        \texttt{Varray} 的 OPEP 部分。
+  \item 行 13--18：\(C_{1S_0}\)（\(j=0\) 时打到 \texttt{Varray[0]}：单态）与
+        \(C_{3S_1}\)（\(j=1\) 时打到 \texttt{Varray[2]}：耦合块上左）。
+  \item 行 22--25：minimal-relativity 因子
+        \(\sqrt{M/E_p} \sqrt{M/E_{p'}}\)（Glöckle 标准约定）。
+  \item 行 28--32：截断 \(\Lambda = 450\) MeV 的高斯型 regulator
+        \(\exp[-(p/\Lambda)^6]\)；\(1/(8\pi^3)\) 是 Fourier 归一化（详见
+        \cref{ch:15_3nf_physics} \S 15.4 的同款 \(1/(2\pi)^3\) 讨论）。
+\end{itemize}
+
+\paragraph{(2) chiral\_N2LOopt：调 Fortran 的 \texttt{idaho\_chiral} 模块。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{chiral\_N2LOopt::V}：通过 Fortran 名字粉碎调 \texttt{chp}（\texttt{Tic-tac/src/interactions/chiral\_N2LOopt.cpp:19--43}）},
+  label={lst:ch08-chiral-N2LOopt-V}
+]{code_excerpts/snippets/ch08_chiral_N2LOopt_V.cpp}
+
+注释：
+\begin{itemize}
+  \item 行 16 \texttt{\_\_idaho\_chiral\_potential\_MOD\_chp(\ldots)}：是
+        gfortran 名字粉碎（mangling）格式 \texttt{\_\_<module>\_MOD\_<sub>}；
+        实际 Fortran 子程序在 \texttt{src/interactions/chp/idaho\_chiral.f90}。
+  \item 行 14 \texttt{Tz\_reverse = -Tz}：Fortran 子程序使用与 C++ 相反的同
+        位旋符号约定，必须翻号。
+  \item 行 19--24：把 Fortran 的 \texttt{tempVarray[6]} 按"约定置换"映射到本
+        仓库的 \texttt{Varray[6]} 约定（详见 \cref{subsec:ch08-pw-NN-def}
+        的 6 元素表）。这一置换在 5 个势里都\textbf{不一样}，是高发 typo
+        之地。
+\end{itemize}
+
+\paragraph{(3) chiral\_Idaho\_N3LO：与 N2LOopt 共享 Fortran 入口。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{chiral\_Idaho\_N3LO::V}：与 N2LOopt 同一 Fortran 入口、不同参数表（\texttt{Tic-tac/src/interactions/chiral\_Idaho\_N3LO.cpp:19--43}）},
+  label={lst:ch08-chiral-N3LO-V}
+]{code_excerpts/snippets/ch08_chiral_N3LO_V.cpp}
+
+注释：与 \cref{lst:ch08-chiral-N2LOopt-V} 字面几乎一致；区别在构造函数：
+\texttt{chp\_set\_Idaho\_N3LO(\&parameters\_idaho\_n3lo[0])}（vs
+\texttt{chp\_set\_N2LOopt}），Fortran 端读取的截断 \(\Lambda = 500\) MeV 与
+LECs 不同，但 chp() 子程序本身复用。这种"参数化共享 backend"是 Sean
+Miller 当年为了支持多个 chiral 阶数而设的；refactor 时仍保留。
+
+\paragraph{(4) nijmegen：F77 phenomenological 库的 C++ wrapper。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{nijmegen::V}：F77 库 \texttt{pnijm.f} 的 C++ 包装（\texttt{Tic-tac/src/interactions/nijmegen.cpp:17--41}）},
+  label={lst:ch08-nijmegen-V}
+]{code_excerpts/snippets/ch08_nijmegen_V.cpp}
+
+注释：
+\begin{itemize}
+  \item 行 14 \texttt{nijmegen\_fort\_interface(\ldots)}：是 F77 名字粉碎接
+        口（在 \texttt{src/interactions/nijmegen/nijmegen.h} 用
+        \texttt{extern "C"} 显式声明 trailing underscore 形式）；底层调
+        \texttt{pnijm.f} 的 \texttt{pnijm} 子程序。
+  \item 与 chiral 系列的差别：F77 ABI 不传 module 名，故名字粉碎前缀差异
+        显著。\textbf{这一段的 ABI 一致性是 \cref{box:ch08-pitfall-fortran-abi}
+        高频踩坑点}。
+  \item 行 19--24：\texttt{tempVarray} 置换与 chiral 共用同一映射——这是因
+        为 chiral 和 nijmegen 后端都遵循同一份 6 元素 Fortran 约定（idx
+        2..5 对应耦合块的 ++/--/+-/-+ 而非本仓库的 --/-+/+-/++）。
+\end{itemize}
+
+\paragraph{(5) malfliet\_tjon：纯 \(s\) 波 Yukawa toy 势。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{malfliet\_tjon::V}：MT-I/III 解析公式（\texttt{Tic-tac/src/interactions/malfliet\_tjon.cpp:27--66}）},
+  label={lst:ch08-malfliet-tjon-V}
+]{code_excerpts/snippets/ch08_malfliet_tjon_V.cpp}
+
+注释：
+\begin{itemize}
+  \item 这是\textbf{唯一不依赖 Fortran 的}势模型，纯 C++ 解析公式。
+  \item 行 18--25：MT-I（\(j=0\)，单态 \({}^1S_0\)）的对数形式
+        \(V \sim \log\!\frac{(p+p')^2 + \mu^2}{(p-p')^2 + \mu^2}\)。
+  \item 行 28--35：MT-III（\(j=1\)，三态 \({}^3S_1\) 但仅 \(\ell = 0\) 列写入
+        \texttt{Varray[2]}——耦合块上左）。
+  \item 它是 Tic-tac 单元测试的"零成本 baseline"：\(j > 1\) 全部为零；
+        氘核结合能 \(E_d = 2.23\) MeV 已被参数 \(V_A^{\rm III}, V_R\) 拟合好。
+        \cref{ch:11_faddeev_solver} 的 Padé 收敛诊断常用 MT 跑 1 秒级测试。
+\end{itemize}
+
+\paragraph{5 个势的"调用约定"对比表。}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+势 & 内部 backend & 是否有 \texttt{tempVarray} 置换 \\
+\midrule
+\texttt{LO\_internal} & C++ + OPEP class & 否（直接写 \texttt{Varray}） \\
+\texttt{N2LOopt} & Fortran 90 \texttt{chp} & 是（chiral 约定） \\
+\texttt{Idaho\_N3LO} & Fortran 90 \texttt{chp} & 是（chiral 约定） \\
+\texttt{nijmegen} & Fortran 77 \texttt{pnijm} & 是（同 chiral 约定） \\
+\texttt{malfliet\_tjon} & C++ 解析 & 否 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch08-numerics}
+
+\begin{numericalbox}[label={box:ch08-numerical-closure}]
+\textbf{场景}：在 \(J^\pi = 1/2^+, \;j = 1, \;s = 1, \;\ell = \ell' = 0\) 通道
+（即 \(\spectro{3}{S}{1}\) 的对角块）的"bin-1 \(\to\) bin-1"对角元
+\((\Vop_\rho)_{1, 1}^{\spectro{3}{S}{1}}\) 上对照两种势：
+\texttt{LO\_internal} 与 \texttt{N2LOopt}。
+
+\paragraph{(a) 求解器实际打印（取自 \texttt{output/dpol\_p\_observables\_j9\_j2max3\_LO\_internal\_190/solver/solver\_run.log}）。}
+
+\begin{verbatim}
+- Working on matrix <L'=0|V(S=1, J=1, T=0)|L=0>
+  (coupled matrix via L_2N -> calculation includes
+   all couplings of L' and L.)
+\end{verbatim}
+
+紧随其后，求解器对 \texttt{V\_WP\_coup\_array[chn\_idx*4*Np\_WP*Np\_WP + 1*2*Np\_WP + 1]}
+（即 \(\rho = \rho({}^3S_1)\) 块，\(i' = 1, i = 1\) 上左对角元）做累加。
+
+\paragraph{(b) 物理参数与典型数值。}
+
+取 \(\NpWP = 30\)，bin 1 中点 \(\bar{p}_1 \approx 0.10\) fm\(^{-1}\)，
+\texttt{LO\_internal} 期望矩阵元（取自 \texttt{output/dpol\_p\_LO\_internal\_190/}）：
+\((\Vop_\rho)_{1, 1}^{\spectro{3}{S}{1}} \approx -1.5 \cdot 10^{-3}\) fm\(^{2}\)
+（实数，负号代表吸引）。
+
+\texttt{N2LOopt}（\texttt{output/dpol\_p\_observables\_j9\_j2max3\_N2LOopt\_190/}）
+同元素 \(\approx -1.6 \cdot 10^{-3}\) fm\(^{2}\)——量级一致，详细差异
+\(\sim 7\%\) 是手动调参 LECs 的"opt"修正。
+
+\paragraph{(c) 对角元符号校验。}
+\(\spectro{3}{S}{1}\) 通道在低动量极限下\textbf{必须吸引}（这是氘核存在的物理来源）。
+故 \((\Vop_\rho)_{1, 1}^{\spectro{3}{S}{1}}\) 对角元应为负数。
+若读出来是正数，说明你把 \texttt{Varray[2]} 与 \texttt{Varray[5]} 调换了，
+或者 \texttt{tempVarray} 置换写错。该 sanity check 是
+\cref{ch:11_faddeev_solver} 调试时的第一道防线。
+
+\paragraph{(d) 复现命令。}
+
+\begin{lstlisting}[style=config]
+# LO_internal
+cd Tic-tac/CPP
+./run J_2N_max=3 two_J_3N_max=1 \
+      isospin_breaking_1S0=true tensor_force=true \
+      potential_model=LO_internal \
+      Np_WP=30 Nq_WP=30 Tlab=190.0 \
+      midpoint_approx=false Np_per_WP=8 Nq_per_WP=8 \
+    > /tmp/V_LO.log 2>&1
+
+# 抽 V 矩阵分析（bin 1 对角元）
+grep -E "Working on matrix" /tmp/V_LO.log
+
+# N2LOopt 对照
+./run J_2N_max=3 two_J_3N_max=1 \
+      isospin_breaking_1S0=true tensor_force=true \
+      potential_model=N2LOopt \
+      Np_WP=30 Nq_WP=30 Tlab=190.0 \
+      midpoint_approx=false Np_per_WP=8 Nq_per_WP=8 \
+    > /tmp/V_N2LO.log 2>&1
+\end{lstlisting}
+
+\paragraph{(e) 厄米性 sanity check。}
+对每个 \(\rho\) 块，应有 \((\Vop_\rho)_{i', i} = (\Vop_\rho)_{i, i'}^*\)（实数即对称）。
+读 \texttt{V\_WP\_coup\_array} 的两个互换的索引位置，差应 \(< 10^{-12}\)。
+做这件事的最小 Python 片段：
+\begin{lstlisting}[style=python]
+import numpy as np, h5py
+with h5py.File("V_WP_dump.h5", "r") as f:
+    Vc = f["V_WP_coup_array"][...]   # shape (n_rho, 4, Np, Np) 形式
+    # 取 rho=0 (3S1), upper-left block
+    A = Vc[0, 0]
+    print("hermiticity err:", np.max(np.abs(A - A.T)))
+\end{lstlisting}
+（\texttt{V\_WP\_dump.h5} 是手动 \texttt{io} 把数组 \texttt{H5Dwrite} 出来后
+得到的；正常 solver flow 中本数组并不外存。）
+
+\paragraph{(f) Malfliet-Tjon 对比（toy 势）。}
+切换 \texttt{potential\_model=malfliet\_tjon, J\_2N\_max=0, tensor\_force=false,
+isospin\_breaking\_1S0=false}，仅保留 \(\spectro{1}{S}{0}\)（\texttt{Varray[0]}）。
+此时 \(\Vop\) 矩阵全部走未耦合路径，\(\Vop_\rho\) 是一维 \(\NpWP \times \NpWP\) 块。
+氘核结合能可由 \cref{ch:02_two_body_numerics} 的 \(2N\) 求解直接得到 \(E_d \approx 2.23\) MeV，
+作为 toy baseline。
+
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch08-interface}
+
+% -----------------------------------------
+\subsection{下游消费方契约}
+\label{subsec:ch08-downstream}
+
+\(\Vop\) 矩阵的输出（\texttt{V\_WP\_unco\_array}, \texttt{V\_WP\_coup\_array}）
+被以下章节消费：
+
+\begin{itemize}
+  \item \cref{ch:10_resolvent}：每次构造通道 Resolvent
+        \(R_{\PWchan}(z) = (z - H_0 - V_\PWchan)^{-1}\) 时把 \(\Vop_\rho\) 当
+        作系数矩阵。
+  \item \cref{ch:11_faddeev_solver}：Neumann 级数 \((\identity - K) U = K_0\)
+        中的 \(K = \Vop \Pop \Vop \cdots\) 在每次迭代里"重复访问"
+        \(\Vop\)；故矩阵被 cached 在内存中（\(< 250\) KB，全程不重算）。
+  \item \cref{ch:12_observables_basics}：直接将 \(\Vop_\rho\) 矩阵元写入
+        on-shell U-amplitude 的预积分；不重新评估势函数。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{依赖图}
+\label{subsec:ch08-callgraph}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=5mm and 12mm,
+  every node/.style={draw, rounded corners=2pt, font=\small,
+                     inner sep=4pt, align=center},
+  arr/.style={-Stealth, thick}
+]
+  \node (params) {\texttt{run\_params}\\(\texttt{potential\_model},\\\texttt{tensor\_force}, IB)};
+  \node[right=18mm of params] (factory) {\texttt{potential\_}\\\texttt{model::}\\\texttt{fetch\_}\\\texttt{potential\_ptr}};
+  \node[right=12mm of factory] (V) {\texttt{calculate\_}\\\texttt{potential\_}\\\texttt{matrices\_}\\\texttt{array\_in\_}\\\texttt{WP\_basis}};
+  \node[below=of factory] (pots) {5 个势模型\\\texttt{LO\_internal}\\\texttt{N2LOopt}\\\texttt{Idaho\_N3LO}\\\texttt{nijmegen}\\\texttt{malfliet\_tjon}};
+  \node[below=of V, draw=red!50!black, thick] (out) {\texttt{V\_WP\_unco}\\\texttt{V\_WP\_coup}};
+  \node[right=of out] (ch10) {Ch 10\\Resolvent};
+  \node[below=of out] (ch11) {Ch 11\\Faddeev};
+  \draw[arr] (params) -- (factory);
+  \draw[arr] (factory) -- (V);
+  \draw[arr] (factory) -- (pots);
+  \draw[arr] (pots) -- (V);
+  \draw[arr] (V) -- (out);
+  \draw[arr] (out) -- (ch10);
+  \draw[arr] (out) -- (ch11);
+\end{tikzpicture}
+\caption{\(\Vop\) 矩阵构造的依赖图：工厂模式 \texttt{fetch\_potential\_ptr} 选
+出 5 个势之一，\texttt{calculate\_potential\_matrices\_array\_in\_WP\_basis}
+做 bin × bin 求积，输出被 Ch 10/11 cached 重用。}
+\label{fig:ch08-callgraph}
+\end{figure}
+
+% -----------------------------------------
+\subsection{对上游的输入契约}
+\label{subsec:ch08-upstream}
+
+\(\Vop\) 矩阵构造依赖：
+\begin{itemize}
+  \item \texttt{fwp\_states}：来自 \cref{ch:06_wp_swp_states}，提供 WP 网格
+        \texttt{p\_WP\_array}、GL 节点 \texttt{p\_array}、权重
+        \texttt{wp\_array}、\texttt{fp\_array} 与归一化 \texttt{norm\_p\_array}。
+  \item \texttt{pw\_states}：来自 \cref{ch:07_pw_symm_states}，提供 9 个
+        \texttt{int*} 通道索引数组与
+        \texttt{chn\_3N\_idx\_array}。
+  \item \texttt{pot\_ptr}：来自 \texttt{potential\_model::fetch\_potential\_ptr}
+        工厂；指向具体势模型实例。
+  \item \texttt{run\_params}：仅读 \texttt{tensor\_force, isospin\_breaking\_1S0,
+        midpoint\_approx, J\_2N\_max} 四个字段。
+\end{itemize}
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch08-pitfalls}
+
+\begin{pitfallbox}[label={box:ch08-pitfall-coupled-order}]
+\textbf{陷阱 1：耦合块的 4 个子块顺序写错。}
+
+\cref{lst:ch08-quadrature-loop} 行 13--19 的 4 个 \texttt{idx\_V\_WP\_*}
+计算决定了 \texttt{V\_WP\_coup\_array} 的物理布局：
+\(\texttt{upper\_left} \to (\ell' = j-1, \ell = j-1)\)，
+\(\texttt{upper\_right} \to (\ell' = j-1, \ell = j+1)\) 等。
+\cref{lst:ch08-writeback} 与
+\cref{ch:09_permutation_p123} 的 \(\Pop\) 矩阵 \(\ell\)-枚举顺序\textbf{都}
+依赖这一约定。
+
+后果：把 \texttt{upper\_right} 与 \texttt{lower\_left} 调换 \(\Rightarrow\)
+\(iT_{11}\) 整体反相位但 \(d\sigma/d\Omega\) 看似不变（因为微分截面是
+\(|\Vop|^2\) 加权和，符号在平方后丢失）。这是 Sean Miller 论文中花了 3 周
+诊断的踩坑——肉眼难辨；唯一确诊路径是把 \texttt{V\_WP\_coup\_array} 的
+\((1, 1)\) 与 \((1, 1+\NpWP)\) 元素分别 \texttt{printf} 出来，与 Glöckle 的
+\(V_{S\!-\!D}\) 表数值对照。
+
+避坑：写新的 backend 接口时\textbf{必须}对照
+\cref{lst:ch08-extract-element} 的"row L cmp J" 4 分支重新校验。
+\end{pitfallbox}
+
+\begin{pitfallbox}[label={box:ch08-pitfall-fortran-abi}]
+\textbf{陷阱 2：Fortran-C++ 名字粉碎与按引用传参。}
+
+\cref{lst:ch08-chiral-N2LOopt-V} 行 16 调
+\texttt{\_\_idaho\_chiral\_potential\_MOD\_chp(\&qi, \&qo, \ldots)}：
+\begin{itemize}
+  \item 名字粉碎前缀 \texttt{\_\_<module>\_MOD\_<sub>} 是 \emph{gfortran-only}；
+        Intel \texttt{ifort} 用 \texttt{<module>\_mp\_<sub>\_}。如果切换编译器
+        会 link 失败。
+  \item 所有参数必须\textbf{按引用}传（Fortran 默认 pass-by-reference）；
+        漏写 \texttt{\&} 会触发 segfault。
+  \item Fortran 的 \texttt{integer} 默认 4 字节；C++ 的 \texttt{int} 在
+        x86\_64 也是 4 字节，但若用 \texttt{long} 则会传 8 字节进去，
+        Fortran 端读到垃圾。
+\end{itemize}
+
+避坑：在 \texttt{Makefile} 与 \texttt{CMakeLists.txt} 都\textbf{固定}
+gfortran；在 \texttt{type\_defs.h} 把 \texttt{floatType} typedef 为
+\texttt{double}（非 \texttt{long double}）；CI 添加一个\textbf{无势调用}冒烟
+测试。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 3：单位约定 (fm\(^{2}\) vs MeV·fm\(^{3}\))。}
+
+5 个势的输出单位\textbf{不一致}：
+\begin{itemize}
+  \item \texttt{LO\_internal}：内部以 fm\(^{2}\)（即"\(V \cdot 1/(8\pi^3)\)"已经
+        在 \cref{lst:ch08-chiral-LO-V} 行 32 完成）；下游可直接消费。
+  \item \texttt{N2LOopt} / \texttt{Idaho\_N3LO}：Fortran 端输出单位是 fm\(^{2}\)；
+        但 \cref{ch:15_3nf_physics} 里同一份 chp.f90 在 3NF 模式下输出
+        MeV\(^{-2}\)，注意区分。
+  \item \texttt{nijmegen}：F77 \texttt{pnijm} 输出 fm\(^{2}\)。
+  \item \texttt{malfliet\_tjon}：解析公式 \cref{lst:ch08-malfliet-tjon-V}
+        行 18 末尾 \(/(2\pi q_i q_o)\) + \(/\hbar c\) 给出 fm\(^{2}\)。
+\end{itemize}
+
+后果：若把 chp 3NF 模式下的 V\_2N 误用，\(\Vop\) 数值会差 \((\hbar c)^2 \approx
+3.9 \cdot 10^4\) 倍——求解器不报错但 dσ 结果差 \(10^9\) 量级。
+
+避坑：所有 \texttt{V()} 重载约定输出 \(\Vop\) 的物理单位为 fm\(^{2}\)；任何
+"内部 MeV-based" 的 backend 都必须在 \texttt{V()} 出口处转换。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 4：截断能量 (cutoff) 的多版本切换。}
+
+chiral 系列在不同阶数有不同的截断 \(\Lambda\)：
+\begin{itemize}
+  \item \texttt{LO\_internal}：\(\Lambda = 450\) MeV（\cref{lst:ch08-chiral-LO-V} 行 28）。
+  \item \texttt{N2LOopt}：\(\Lambda = 500\) MeV（在 \texttt{chp.f90} 内部固定）。
+  \item \texttt{Idaho\_N3LO}：\(\Lambda = 500\) MeV（同上但 LECs 不同）。
+\end{itemize}
+
+\(\Lambda\) 影响 regulator \(\exp[-(p/\Lambda)^{2n}]\) 的"软-硬"过渡——若
+用户希望做 \(\Lambda\) 敏感性扫描，必须改 chp.f90 源码并重新 \texttt{make}（不
+能仅靠 CLI 参数）。
+
+避坑：在 \cref{ch:20_hands_on} 的"3NF sweep"里，每一个 \(\Lambda\) 取值对应一
+个独立 build；不要在同一作业里"运行时切换"\(\Lambda\)。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 5：Nijmegen 函数签名一致性。}
+
+\texttt{nijmegen\_fort\_interface} 的签名在
+\texttt{src/interactions/nijmegen.h} 写为
+\texttt{(double*, double*, int*, int*, int*, int*, int*, double*)}。
+若用户从外部第三方"修订过的"\texttt{pnijm.f}（例如新的 Argonne v18 兼容
+patch）替换了源文件，可能多一个或少一个 \texttt{integer} 参数（如
+\texttt{nucleon\_mass} flag），运行时不报错但读到错误的栈位置。
+
+避坑：每次更新 \texttt{pnijm.f} 后用 \texttt{nm libnijmegen.a} 检查导出的
+符号签名（参数数量隐含在符号 mangling 里），与
+\texttt{nijmegen.h} 的 \texttt{extern "C"} 声明对照。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 6：IB 打开时 \(\Vop\) 矩阵 cardinality 不匹配。}
+
+如果 \texttt{isospin\_breaking\_1S0=true}，则 \texttt{num\_2N\_unco\_states} 会
+\textbf{减少} 1（\({}^1S_0\) 离开未耦合空间）而 \texttt{num\_2N\_coup\_states}
+\textbf{增加} 1；分配给 \texttt{V\_WP\_unco\_array} / \texttt{V\_WP\_coup\_array}
+的内存大小由这两个 cardinality 决定。
+
+后果：若用户在外层错误地 hard-code "\texttt{num\_2N\_unco\_states} = 14"
+但 IB 把它改成 13，写出去的指针偏移会越界一格。
+
+避坑：始终用 \texttt{set\_run\_parameters.cpp} 计算这两个 cardinality
+（其逻辑就是 \cref{lst:ch07-unique-2N-idx} 的逆向枚举）；不要在调用方手算。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 7：\texttt{midpoint\_approx} 与 Padé 加速的不兼容。}
+
+\cref{lst:ch08-quadrature-loop} 的 \texttt{midpoint\_approx=true} 路
+径只把每个 bin 的中点动量代入 \texttt{V()}；这一近似对 \(\Vop\) 矩阵元的精度
+影响 \(\sim 0.5\%\)，看似可以接受。但
+\cref{ch:11_faddeev_solver} 的 Padé 加速对 \(\Vop\) 的 "smoothness" 极为敏
+感——middle-point 引入的"阶梯"误差让 Padé 序列收敛变慢甚至发散。
+
+后果：用户开 \texttt{midpoint\_approx=true} 后看到 dσ 收敛 OK，但
+\(iT_{11}\) 的 Padé 收敛 \(\nudif \to 10^{-2}\) 量级停滞——而正常应是
+\(10^{-6}\)。
+
+避坑：生产作业默认 \texttt{midpoint\_approx=false}；只有写最低端单元测试
+时才允许打开（节省 \(\NppW^2 = 64\) 倍内层循环）。
+\end{pitfallbox}

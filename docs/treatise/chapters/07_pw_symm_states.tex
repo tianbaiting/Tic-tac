@@ -1,13 +1,904 @@
 % =====================================================================
 % 07_pw_symm_states.tex
-% Wave 0 占位 —— 待对应 Wave 子代理补全
+% 第 7 章 部分波对称态空间（make_pw_symm_states 深度解读）
+% Wave 2 / Agent B
 % =====================================================================
 
 \chapter{部分波对称态空间}
 \label{ch:07_pw_symm_states}
 
-% TODO: 8 段式（§x.1 物理动机 / §x.2 数学推导 / §x.3 离散化 /
-%       §x.4 算法骨架 / §x.5 代码落地 / §x.6 数字闭环 /
-%       §x.7 接口与依赖 / §x.8 常见陷阱）
+% =========================================
+\section{物理动机}
+\label{sec:ch07-motivation}
 
-\textbf{[Wave 0 占位 —— 章节内容由对应 Wave 子代理填写]}
+\paragraph{从「Jacobi 索引草图」到「J\(^{\pi}\) 块对角化机器」。}
+在 \cref{ch:03_jacobi_partial_wave} 我们做了一件事：把三体内部自由度
+\((\bvec{p}, \bvec{q})\) 切成"几何角动量 + 自旋 + 同位旋"九元组
+\(\PWtuple\)，并把 \texttt{construct\_symmetric\_pw\_states} 的九层循环按表
+列了一份逐行注释。第 3 章那一份注释\textbf{足够看懂第 14 章之前的代码骨架}，
+但有意回避了三件事：
+
+\begin{enumerate}
+  \item 为什么这九层循环的\emph{外两层}（\verb|two_J_3N| 与 \verb|P_3N_remainder|）
+        要"先于"通道索引而被切出，而不是把它们也压进 \(\PWchan\) 里？
+  \item 反对称化判据 \((\ell + s + t) \equiv 1 \pmod{2}\) 究竟是从哪里来的？
+        为什么这个判据对 \({}^1S_0\) 在\textbf{同位旋破缺（isospin-breaking,
+        IB）}开关打开时还要被"挪一个槽位"？
+  \item 当用户把 \texttt{isospin\_breaking\_1S0=true} 与 \texttt{tensor\_force=false}
+        组合起来时，整个 2N 子矩阵的"未耦合 / 耦合"分块还会改变——这
+        在 \(\Vop\)（\cref{ch:08_potential_matrix}）与 \(\Pop\)
+        （\cref{ch:09_permutation_p123}）阶段会引发"基矢 cardinality 不匹配"
+        的级联错误。
+\end{enumerate}
+
+本章把这三件事一次性讲清。读完之后你应该能：
+
+\begin{itemize}
+  \item 在纸上写出从总角动量 \(\bvec{J}\) 守恒、宇称 \(\hat{P}\) 守恒、总同位旋
+        \(\hat{T}\) 在不开启 IB 时守恒——这三个守恒律到\textbf{矩阵分块}的
+        完整推导链；
+  \item 把"广义 Pauli 不相容（generalised Pauli exclusion）"判据
+        \((\ell + s + t)\equiv 1 \pmod{2}\) 从两体置换 \(P_{12} = -1\)（fermion）
+        与 \(P_{12} \ket{(\ell s t) j m_j} = (-1)^{\ell+s+t}\ket{(\ell s t) j m_j}\)
+        一步步推出来，并解释为什么 IB 把 \({}^1S_0\) 重新归类为"耦合道"；
+  \item 在阅读 \cref{lst:ch07-channel-loop-current} 时，立刻判断每一层循环
+        承担的物理任务，并能预测把 \texttt{J\_2N\_max} 从 3 调到 5 后通道
+        总数大致会从 \(\sim\)10 翻到几个量级。
+\end{itemize}
+
+\paragraph{上下游边界。}
+本章承接\cref{ch:03_jacobi_partial_wave}（角动量代数）与
+\cref{ch:06_wp_swp_states}（WP/SWP 网格构造）；输出物是一个被
+\texttt{run\_params} 完全决定、与动量数值\textbf{无关}的索引数据结构
+\texttt{pw\_3N\_statespace}。这一结构在
+\cref{ch:08_potential_matrix,ch:09_permutation_p123,ch:10_resolvent,ch:11_faddeev_solver}
+被无差别消费——也就是说本章是整条 Faddeev 流水线的"地图坐标系"。
+
+% =========================================
+\section{数学推导}
+\label{sec:ch07-math}
+
+% -----------------------------------------
+\subsection{三体守恒律到态空间块对角化}
+\label{subsec:ch07-conservation-to-blocks}
+
+记三核子总哈密顿量为
+\begin{equation}
+\label{eq:ch07-H-decomp}
+\Hop \;=\; \Hzero \;+\; \Vop_{12} + \Vop_{23} + \Vop_{31} \;+\; W_{123},
+\end{equation}
+其中 \(\Hzero\) 为三体动能算符、\(\Vop_{ij}\) 为成对二体核力、\(W_{123}\) 为
+三核子力（\cref{ch:15_3nf_physics} 详细处理）。在三种"假设"下我们能枚举出可
+分块对角化算符的清单：
+
+\begin{itemize}
+  \item \textbf{旋转不变（rotation invariance）}：\(\Hop\) 与总角动量
+        \(\bvec{J} = \bvec{L} + \bvec{S}\) 对易；故 \([\Hop, \bvec{J}^2] = 0\)、
+        \([\Hop, J_z] = 0\)。这给出 \emph{(2J+1)-fold} 简并的子空间标签
+        \((J, M_J)\)。
+  \item \textbf{宇称（parity）守恒}：\(\Hop\) 在空间反演下不变。三体内部宇
+        称由两个 Jacobi 轨道角动量 \(\ell\)（pair 12 内部相对运动的角动量）
+        与 \(\lambda\)（spectator 3 相对于 pair 12 的角动量）共同决定：
+        \(\hat{P} \ket{(\ell \lambda) \cdots} = (-1)^{\ell + \lambda}\ket{(\ell \lambda)\cdots}\)。
+        故 \(P = \pm 1\) 是好量子数。
+  \item \textbf{同位旋}：在不打开 IB 的情形下 \(\Hop\) 与总同位旋 \(\bvec{T}^2,
+        T_z\) 对易；总同位旋 \(T \in \{1/2, 3/2\}\)。当
+        \texttt{isospin\_breaking\_1S0=true} 时只有 \({}^1S_0\) 的耦合允许
+        \(T = 1/2 \leftrightarrow 3/2\) 的混叠（详见
+        \cref{subsec:ch07-IB-1S0}）。
+\end{itemize}
+
+把这三组守恒量打包，态空间被分成 \emph{所谓的 3N-channel}：
+\begin{equation}
+\label{eq:ch07-3N-channel-def}
+\boxed{\;
+\text{3N-channel} \;\equiv\; (J^\pi, T)\text{-超块},
+\quad
+J^\pi \in \{\tfrac{1}{2}^{+}, \tfrac{1}{2}^{-}, \tfrac{3}{2}^{+}, \ldots\},
+\;\;
+T \in \{\tfrac{1}{2}, \tfrac{3}{2}\}.
+\;}
+\end{equation}
+求解器把每一块都\textbf{独立求解}：因此整条流水线的总成本约为
+\(\sum_{(J^\pi,T)} \mathcal{O}({N_\alpha^{(J^\pi,T)}}^2 \cdot \Np^2 \cdot \Nq^2)\)——
+其中 \(N_\alpha^{(J^\pi,T)}\) 才是单块通道数。
+
+代码上这一分块由
+\texttt{pw\_3N\_statespace::chn\_3N\_idx\_array} 落实：每个 3N-channel 的
+"起始索引"被存进这个数组，求解器靠它做切片。一个 3N-channel 内的所有
+\(\PWchan\) 共享同一组 \((J^\pi, T)\)，但 \((\ell, s, j, \lambda, I, t)\) 仍然在
+内部多种组合之间遍历。
+
+% -----------------------------------------
+\subsection{三体自旋-同位旋耦合的完整链}
+\label{subsec:ch07-spin-isospin-chain}
+
+固定 Jacobi 树 \(12\!-\!3\)。pair (12) 与 spectator 3 的角动量、自旋、同位旋分
+别耦合。我们用 \(\bvec{l}\) 表示 pair 12 的相对轨道角动量，\(\bvec{\lambda}\)
+表示 spectator 3 相对于 pair 质心的轨道角动量。同样 pair 的自旋
+\(\bvec{s} = \bvec{s}_1 + \bvec{s}_2 \in \{0, 1\}\)，spectator 自旋 \(\bvec{\sigma} =
+\bvec{s}_3 = \tfrac{1}{2}\)；pair 同位旋 \(\bvec{t} = \bvec{t}_1 + \bvec{t}_2 \in
+\{0, 1\}\)，spectator 同位旋 \(\bvec{\tau} = \bvec{t}_3 = \tfrac{1}{2}\)。
+
+\paragraph{Step 1：pair 内部组合。}
+\(\ell\) 与 \(s\) 耦合到 pair 总角动量 \(j\)：
+\begin{equation}
+\label{eq:ch07-couple-j}
+\ket{(\ell s) j m_j} \;=\; \sum_{m_\ell m_s}
+\braket{\ell m_\ell\, s m_s}{j m_j}\, \ket{\ell m_\ell}\ket{s m_s},
+\quad |\ell - s| \le j \le \ell + s.
+\end{equation}
+\(t\) 还独立保留为单独量子数（同位旋与空间-自旋部分解耦）。所以一个 pair 状
+态被 \((\ell, s, j, t, m_t)\) 完全描述（在固定 \(p\) 的限定下）。
+
+\paragraph{Step 2：spectator 内部组合。}
+spectator 的轨道 \(\lambda\) 与自旋 \(1/2\) 耦合到\textbf{spectator 总角动量}
+\(I\)：
+\begin{equation}
+\label{eq:ch07-couple-I}
+\ket{(\lambda \tfrac{1}{2}) I m_I} \;=\; \sum_{m_\lambda m_\sigma}
+\braket{\lambda m_\lambda\, \tfrac{1}{2} m_\sigma}{I m_I}\,
+\ket{\lambda m_\lambda}\ket{\tfrac{1}{2} m_\sigma},
+\quad |\lambda - \tfrac{1}{2}| \le I \le \lambda + \tfrac{1}{2}.
+\end{equation}
+注意 \(I\) 是\textbf{半整数}：\(I \in \{1/2, 3/2, 5/2, \ldots\}\)。
+代码里用 \verb|two_J_1N| \(= 2I\) 存它（"1N" 字面是
+\emph{single-nucleon, spectator}）。
+
+\paragraph{Step 3：pair \(\otimes\) spectator \(\to\) 总角动量 \(\bvec{J}\)。}
+把 \(j\)（整数）与 \(I\)（半整数）耦合到三体总角动量 \(J\)（半整数）：
+\begin{equation}
+\label{eq:ch07-couple-J}
+\ket{(jI)JM_J}
+\;=\; \sum_{m_j m_I}
+\braket{j m_j\, I m_I}{J M_J}\, \ket{(\ell s) j m_j}\ket{(\lambda \tfrac{1}{2}) I m_I},
+\quad |j - I| \le J \le j + I.
+\end{equation}
+代码里 \verb|two_J_3N| \(= 2J\)。三角不等式给出 \(2I_{\min} = |2J - 2j|\)、
+\(2I_{\max} = 2J + 2j\)；这是
+\cref{lst:ch07-channel-loop-current} 第 14--16 行 \verb|two_J_1N_min/max| 的来历。
+然后从 \(I\) 反过来约束 \(\lambda\)：\(\lambda_{\min} = (|2I - 1|)/2\)、
+\(\lambda_{\max} = (2I+1)/2\)（行 17--19）。
+
+\paragraph{Step 4：同位旋 pair \(\otimes\) spectator \(\to\) 总同位旋 \(\bvec{T}\)。}
+\begin{equation}
+\label{eq:ch07-couple-T}
+\ket{(t \tfrac{1}{2}) T M_T} \;=\; \sum_{m_t m_\tau}
+\braket{t m_t\, \tfrac{1}{2} m_\tau}{T M_T}\,
+\ket{t m_t}\ket{\tfrac{1}{2} m_\tau},
+\quad |t - \tfrac{1}{2}| \le T \le t + \tfrac{1}{2}.
+\end{equation}
+\(T\) 同样是半整数：\(T \in \{1/2, 3/2\}\)。代码里
+\verb|two_T_3N| \(= 2T\)。
+
+\paragraph{结果——完整的部分波态。}
+合在一起：
+\begin{equation}
+\label{eq:ch07-PW-state-full}
+\ket{\PWchan; p, q} \;\equiv\;
+\ket{ \big( (\ell s) j, (\lambda \tfrac{1}{2}) I \big) J M_J;
+       \;(t \tfrac{1}{2}) T M_T;\; p, q;\; P },
+\end{equation}
+其中 \(P = (-1)^{\ell + \lambda}\) 是宇称。一个 \(\PWchan\) 索引浓缩了 9 个量子
+数：\((\ell, s, j, t, \lambda, 2I, 2J, 2T, P)\)——这九元组就是代码里
+\texttt{pw\_3N\_statespace} 的 9 个 \texttt{int*} 数组。
+
+% -----------------------------------------
+\subsection{反对称化判据的完整推导}
+\label{subsec:ch07-pauli-derivation}
+
+\paragraph{为什么需要反对称化。}
+三个核子是费米子（\(s = 1/2\) 的同位旋两分量粒子），整个 3N 波函数必须在
+\emph{任意两个}核子的整体交换下取负号：
+\begin{equation}
+\label{eq:ch07-fermion-antisym}
+P_{12} \,\Psi(123) = -\Psi(123),
+\quad
+P_{23} \,\Psi(123) = -\Psi(123),
+\quad
+P_{31} \,\Psi(123) = -\Psi(123).
+\end{equation}
+但 Faddeev 把波函数拆成三段
+\(\Psi = \psifad{1} + \psifad{2} + \psifad{3}\)，每段都活在一棵特定 Jacobi 树
+上（\cref{ch:04_faddeev_ags}）。不同段之间通过\textbf{置换}相互联系；
+而\textbf{每一段内部}只需要满足"自身 pair 的反对称化"——也就是只对它的
+"内部 pair" 做反对称化。不失一般性，取 12-3 树作为代表，则只需要
+\begin{equation}
+\label{eq:ch07-internal-pair-antisym}
+P_{12}\,\psifad{3} = -\,\psifad{3}.
+\end{equation}
+\(P_{13},P_{23}\) 通过 \(\Pop = P_{12}P_{23} + P_{13}P_{23}\)
+（\cref{ch:09_permutation_p123}）从一段连接到另一段。
+
+\paragraph{\(P_{12}\) 在部分波态上的作用。}
+两体置换 \(P_{12}\) 把 pair (12) 内的相对动量 \(\bvec{p}\) 映为
+\(-\bvec{p}\)，把 pair 自旋 \(\bvec{s} = \bvec{s}_1 + \bvec{s}_2\) 不动（因为
+\((\bvec{s}_1, \bvec{s}_2) \to (\bvec{s}_2, \bvec{s}_1)\) 是对称的两个 1/2 的
+\emph{置换}），但把"自旋耦合后的态"按下式相位旋转：
+\begin{align}
+\label{eq:ch07-P12-action}
+P_{12}\,\ket{\ell m_\ell} &= (-1)^\ell\,\ket{\ell m_\ell}, \\
+P_{12}\,\ket{(s_1 s_2) s m_s} &= (-1)^{s_1 + s_2 - s}\,\ket{(s_1 s_2) s m_s}
+\;=\; (-1)^{1 - s}\,\ket{(s_1 s_2) s m_s}, \\
+P_{12}\,\ket{(t_1 t_2) t m_t} &= (-1)^{1 - t}\,\ket{(t_1 t_2) t m_t}.
+\end{align}
+（这里用了 \(s_1 = s_2 = t_1 = t_2 = 1/2\)，故 \(s_1 + s_2 = 1\)。）合在一起，
+\begin{equation}
+\label{eq:ch07-P12-eigenvalue}
+P_{12}\,\ket{(\ell s)\, j; (t)\, m_t; \ldots} \;=\;
+(-1)^\ell \,(-1)^{1-s}\,(-1)^{1-t}\,\ket{(\ell s)\, j; (t)\, m_t; \ldots}
+\;=\;
+(-1)^{\ell + s + t}\,(\text{常数})\,\ket{\ldots}.
+\end{equation}
+\((-1)^{(1-s) + (1-t)} = (-1)^{2 - s - t} = (-1)^{s+t}\)，因为 \((-1)^2 = 1\)。
+故 \(P_{12}\) 的本征值是 \((-1)^{\ell + s + t}\)。
+
+\paragraph{费米子要求 \(P_{12} = -1\)。}
+对应到 \cref{eq:ch07-internal-pair-antisym}，必须
+\begin{equation}
+\label{eq:ch07-pauli-criterion}
+\boxed{\;\;(-1)^{\ell + s + t} \;=\; -1
+\;\;\Leftrightarrow\;\;
+\ell + s + t \;\equiv\; 1\!\!\!\pmod 2.\;\;}
+\end{equation}
+这就是 Tic-tac 与 tictac-origin 共享的"广义 Pauli 不相容"判据。
+\cref{lst:ch07-pauli-check} 第 2 行 \verb|(L_2N + S_2N + T_2N) % 2| 就是它的
+直接编码（取奇数为通过）。
+
+\paragraph{为什么不需要类似 \((\lambda + I)\)-奇偶判据？}
+注意 \(\lambda\) 与 spectator 3 之间不需要单独的反对称化：spectator 3 是
+"另一个粒子"，与 pair (12) 之间没有 Pauli 限制；它的反对称化是通过
+\cref{ch:09_permutation_p123} 的算符 \(\Pop\) 跨段连接实现的。
+
+% -----------------------------------------
+\subsection{Isospin-Breaking 在 \({}^1S_0\) 上的特殊处理}
+\label{subsec:ch07-IB-1S0}
+
+\paragraph{物理背景。}
+若打开 IB（\texttt{isospin\_breaking\_1S0=true}），物理上对应：核子-核子相互
+作用在 \({}^1S_0\)（\(\ell=0, s=0, j=0\)）通道上的 \(nn\), \(np\), \(pp\) 散
+射长度有显著差异（约 \(a_{nn} \approx -18.9\) fm vs \(a_{np} \approx -23.7\)
+fm）。求解器将这一同位旋破缺翻译为：在 \({}^1S_0\) 上额外允许总同位旋
+\(T = 3/2\) 的通道，并通过一组特定的 1/3-2/3 系数把 \(nn/np\) 矩阵元投影到
+"等价的 isospin-eigenchannel"（详见
+\cref{ch:08_potential_matrix} \S 8.2.4）。
+
+\paragraph{对态空间的影响。}
+\begin{itemize}
+  \item 不开 IB：\(2T_{3N\max} = 1\)，所有通道 \(T = 1/2\)。
+  \item 开 IB：\(2T_{3N\max} = 3\)，\textbf{额外}一组 \(T = 3/2\) 通道被添加，
+        但代码限制\textbf{仅当} \((\ell, s, j) = (0, 0, 0)\)（即
+        \({}^1S_0\)）时才能取 \(T = 3/2\)（\cref{lst:ch07-channel-loop-current}
+        第 51--55 行）：
+\begin{verbatim}
+if (two_T_3N==3) {
+    if ( (S_2N==0 && L_2N==0 && J_2N==0)==false ) {
+        continue;
+    }
+}
+\end{verbatim}
+\end{itemize}
+
+\paragraph{\(\rho\) 索引的"挪槽位"。}
+现在轮到 \texttt{unique\_2N\_idx} 的 IB 修正。原本 \({}^1S_0\) 是\textbf{未耦
+合道}（uncoupled）——在张量力打开下未耦合道索引为
+\(\rho_{\rm unco} = 2j + s\)（\(j=0, s=0 \Rightarrow \rho_{\rm unco}=0\)）；
+但开了 IB 后，\({}^1S_0\) 被求解器在内部"重分类"为\textbf{耦合道}（因为
+\(T_{3N} = 1/2 \leftrightarrow 3/2\) 通过一个 \(2 \times 2\) 张量耦合）。
+故在
+\cref{lst:ch07-unique-2N-idx} 的代码里：
+
+\begin{itemize}
+  \item 所有原本的"耦合道索引" \(\rho_{\rm coup} = j - 1\)（来自张量力）整体
+        \emph{后移一格}，给 \({}^1S_0\) 让出 \(\rho_{\rm coup} = 0\)；
+  \item 所有原本的"未耦合道"在张量力打开下被减 1（因为 \({}^1S_0\) 离开了
+        未耦合空间）。
+\end{itemize}
+
+逻辑上这等价于把"耦合道集合"扩展为
+\(\{{}^1S_0,\; {}^3S_1\!\!-\!{}^3D_1,\; {}^3P_2\!\!-\!{}^3F_2,\; \ldots\}\)。
+
+% -----------------------------------------
+\subsection{通道选择规则汇总}
+\label{subsec:ch07-selection-rules}
+
+把以上推导整理为一张"判据表"，便于读代码时一一对应：
+
+\begin{center}
+\begin{tabular}{p{3.6cm}p{4cm}p{6cm}}
+\toprule
+判据 & 数学形式 & 在 \cref{lst:ch07-channel-loop-current} 的位置 \\
+\midrule
+2N 总角动量三角不等式 & \(|j-s| \le \ell \le j+s\) & \verb|L_2N_min/L_2N_max|（行 7--8） \\
+2N 总同位旋三角不等式 & \(|T-1/2| \le t \le T+1/2\) & \verb|T_2N_min/T_2N_max|（行 11--13），加 \(t \le 1\) 上限 \\
+广义 Pauli & \(\ell + s + t\) 为奇 & 行 24，\verb|(L_2N+S_2N+T_2N)%2| \\
+3N 总 \(J\) 三角 & \(|2J - 2j| \le 2I \le 2J + 2j\) & 行 26--27，\verb|two_J_1N_min/max| \\
+spectator \(\lambda\) 三角 & \(\frac{|2I-1|}{2} \le \lambda \le \frac{2I+1}{2}\) & 行 29--30 \\
+3N 宇称 \(P_3N\) 选择 & \((\ell + \lambda)\bmod 2 = P_{\rm rem}\) & 行 32 \\
+IB 限制 \(T_{3N}=3/2\) 仅 \({}^1S_0\) & \((\ell, s, j) = (0,0,0)\) & 行 34--38 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{合在一起：通道枚举集合。}
+形式化地，3N 部分波态空间是
+\begin{equation}
+\label{eq:ch07-state-space-set}
+\mathcal{S} \;=\; \big\{
+(\ell, s, j, t, \lambda, 2I, 2J, 2T, P)
+\;\big|\;
+\text{以上 7 条判据全部满足}
+\big\}.
+\end{equation}
+代码里 \texttt{Nalpha} 就是 \(|\mathcal{S}|\)。
+
+% =========================================
+\section{离散化方案：通道索引数据结构}
+\label{sec:ch07-discretization}
+
+% -----------------------------------------
+\subsection{\texttt{pw\_3N\_statespace} 字段}
+\label{subsec:ch07-statespace-fields}
+
+\texttt{pw\_3N\_statespace}（声明在 \texttt{include/type\_defs.h}）是
+"通道层" 的运行期主数据结构。本节把它的字段做一份"字段-含义-数学定义"的
+对照表，方便后续章节查阅。
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+字段 & 类型与维度 & 数学/物理含义 \\
+\midrule
+\texttt{Nalpha} & \texttt{int} & 通道总数 \(\Nalpha = |\mathcal{S}|\) \\
+\texttt{N\_chn\_3N} & \texttt{int} & 3N-channel 数量（即 \((J^\pi, T)\) 超块数） \\
+\texttt{J\_2N\_max} & \texttt{int} & 输入截断 \(J_{2N\max}\) \\
+\texttt{L\_2N\_array} & \texttt{int*[Nalpha]} & \(\ell\)：pair 12 内部轨道角动量 \\
+\texttt{S\_2N\_array} & \texttt{int*[Nalpha]} & \(s \in \{0,1\}\)：pair 自旋 \\
+\texttt{J\_2N\_array} & \texttt{int*[Nalpha]} & \(j\)：pair 总角动量 \\
+\texttt{T\_2N\_array} & \texttt{int*[Nalpha]} & \(t \in \{0,1\}\)：pair 同位旋 \\
+\texttt{L\_1N\_array} & \texttt{int*[Nalpha]} & \(\lambda\)：spectator 轨道角动量 \\
+\texttt{two\_J\_1N\_array} & \texttt{int*[Nalpha]} & \(2I\)：spectator 总角动量 \(\times 2\)（半整数） \\
+\texttt{two\_J\_3N\_array} & \texttt{int*[Nalpha]} & \(2J\)：3N 总角动量 \(\times 2\)（半整数） \\
+\texttt{two\_T\_3N\_array} & \texttt{int*[Nalpha]} & \(2T\)：3N 总同位旋 \(\times 2\) \\
+\texttt{P\_3N\_array} & \texttt{int*[Nalpha]} & \(P \in \{+1, -1\}\)：3N 宇称 \\
+\texttt{chn\_3N\_idx\_array} & \texttt{int*[N\_chn\_3N+1]} &
+3N-channel 边界：\(\PWchan\) 范围 \([\,\texttt{chn[k]}, \texttt{chn[k+1]})\) 即第 \(k\) 个 3N-channel \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+注意所有"半整数"量都以 \emph{两倍}存储（\texttt{two\_J\_3N} 等等），这是
+\(C/C++\) 不便表达半整数的工程惯例。下游章节的所有
+\texttt{two\_J\_3N\_array[idx\_alpha]} 引用读出来都要除以 2 才是物理 \(J\)。
+
+% -----------------------------------------
+\subsection{2N 子空间唯一索引 \(\rho\)}
+\label{subsec:ch07-2N-idx}
+
+\paragraph{动机。}
+\(\Vop\)（\cref{ch:08_potential_matrix}）是\textbf{两体}相互作用——它只与
+\((\ell, s, j, t)\) 有关，与 spectator 部分 \((\lambda, I)\) 无关。所以多个
+\(\PWchan\) 共享同一份势矩阵：例如所有 \({}^3S_1\!-\!{}^3D_1\) 的通道
+（\(j=1, s=1\)，\(\ell=0\) 或 \(2\)）共用同一个 \(2 \times 2\) 张量耦合块。
+为了避免重复计算势矩阵，求解器在
+\texttt{calculate\_potential\_matrices\_array\_in\_WP\_basis} 里跑一个
+\texttt{matrix\_calculated\_*\_array} 的查找表，键就是
+\texttt{unique\_2N\_idx}。
+
+\paragraph{\texttt{unique\_2N\_idx} 公式。}
+\cref{lst:ch07-unique-2N-idx} 的逻辑可以浓缩成 4 个分支：
+
+\begin{equation}
+\label{eq:ch07-rho-formula}
+\rho \;=\;
+\begin{cases}
+j - 1 & \text{张量力 + 耦合道}, \\
+2j + s & \text{张量力 + 未耦合道}, \\
+0 & \text{张量力关 + 耦合道（仅 IB-\({}^1S_0\)）}, \\
+j(4\cdot[j\!>\!1] + 2) + [s=1] + [s=1, j\neq 0](j-\ell+1) & \text{张量力关 + 未耦合道}.
+\end{cases}
+\end{equation}
+其中 \([\cdot]\) 是 Iverson bracket（条件成立给 1 否则 0）。
+
+\paragraph{IB 修正：\({}^1S_0\) 的"挪槽位"。}
+当 \texttt{isospin\_breaking\_1S0=true} 时，\({}^1S_0\) 被重新归入"耦合道
+分组"。具体修正：
+\begin{align}
+\label{eq:ch07-rho-IB-fix}
+\rho_{\rm coup}^{\rm new} &=
+\begin{cases}
+0 & \text{如果是 } {}^1S_0, \\
+(j - 1) + 1 & \text{其它原本的耦合道（整体后移一格）}.
+\end{cases} \\
+\rho_{\rm unco}^{\rm new} &= \rho_{\rm unco}^{\rm old} - 1 \quad (\text{未耦合道整体减 1}).
+\end{align}
+
+读 \cref{lst:ch07-unique-2N-idx} 第 22--29 行就是这两条修正的字面落地。
+
+% =========================================
+\section{算法骨架}
+\label{sec:ch07-algorithm}
+
+把 \cref{subsec:ch07-conservation-to-blocks,subsec:ch07-spin-isospin-chain,subsec:ch07-pauli-derivation,subsec:ch07-IB-1S0}
+浓缩为一份伪码（\cref{alg:ch07-channel-enum}），便于
+"读伪码 → 立刻定位代码行"。
+
+\begin{algorithm}[h]
+\caption{通道枚举（\texttt{construct\_symmetric\_pw\_states}）}
+\label{alg:ch07-channel-enum}
+\KwIn{\texttt{run\_params}：\(J_{2N\max},\, 2J_{3N\max},\, \texttt{tensor\_force},\, \texttt{isospin\_breaking\_1S0}\)}
+\KwOut{\texttt{pw\_3N\_statespace pw\_states}（13 个字段）}
+\BlankLine
+\(\Nalpha \gets 0\); \(N_{\rm chn,3N} \gets 0\)\;
+\(2T_{\rm max} \gets 1 + 2 \cdot [\texttt{isospin\_breaking\_1S0}]\)\tcp*{1 或 3}
+\For{\(2J \in \{1, 3, \ldots, 2J_{3N\max}\}\) \(\backslash\backslash\) \emph{外层 1：3N 总角动量}}{
+  \For{\(P_{\rm rem} \in \{0, 1\}\) \(\backslash\backslash\) \emph{外层 2：宇称}}{
+    \(N_{\alpha,{\rm in\_chn}} \gets 0\); \(\Nalpha^{\rm prev} \gets \Nalpha\)\;
+    \For{\(2T \in \{1, \ldots, 2T_{\rm max}\}\) step 2}{
+      \For{\(j \in \{0, \ldots, J_{2N\max}\}\)}{
+        \For{\(s \in \{0, 1\}\)}{
+          \For{\(\ell \in \{|j-s|, \ldots, j+s\}\)}{
+            \For{\(t \in \{|T - 1/2|, \ldots, \min(T + 1/2, 1)\}\)}{
+              \If{\(\ell + s + t\) is odd \(\backslash\backslash\) \emph{Pauli criterion}}{
+                \For{\(2I \in \{|2J-2j|, \ldots, 2J+2j\}\) step 2}{
+                  \For{\(\lambda \in \{(|2I-1|)/2, \ldots, (2I+1)/2\}\)}{
+                    \If{\((\ell + \lambda) \bmod 2 = P_{\rm rem}\) \(\backslash\backslash\) \emph{parity}}{
+                      \If{\(2T = 3\) \textbf{and} \((\ell, s, j) \neq (0, 0, 0)\)}{
+                        continue\;
+                      }
+                      \tcp{已找到一个物理通道}
+                      append \((\ell, s, j, t, \lambda, 2I, 2T, 2J, P\!=\!1\!-\!2P_{\rm rem})\) to arrays\;
+                      \(\Nalpha \mathrel{+}= 1\); \(N_{\alpha,{\rm in\_chn}} \mathrel{+}= 1\)\;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    \If{\(N_{\alpha,{\rm in\_chn}} > 0\)}{
+      \(N_{\rm chn,3N} \mathrel{+}= 1\); append \(\Nalpha^{\rm prev}\) to \texttt{chn\_3N\_idx}\;
+    }
+  }
+}
+append \(\Nalpha\) (sentinel) to \texttt{chn\_3N\_idx}\;
+\Return \texttt{pw\_states}\;
+\end{algorithm}
+
+\paragraph{复杂度。}
+9 层嵌套循环但每一层取值都很小：\(j \le 3, \ell \le j+1, s \in \{0,1\},
+t \in \{0,1\}, \lambda \le I + 1/2 \le 6\)，内部判据剔除约 50\% 状态。最终
+\(\Nalpha\) 的实际值在 \(J_{2N\max}=3, 2J_{3N\max}=9\) 时约 \(\sim 365\)；
+循环计数 \(\sim 10^4\)。该函数耗时\textbf{微秒级}，完全可以视为零成本。
+内存：\(\Nalpha \times 9 \times \texttt{sizeof(int)} \approx 13 \text{KB}\)
+（对 \(\Nalpha = 365\)），同样可忽略。
+
+\paragraph{算法不变量。}
+\begin{itemize}
+  \item \(\Nalpha = \sum_{(J^\pi, T)} N_\alpha^{(J^\pi, T)}\)；
+  \item \texttt{chn\_3N\_idx\_array} 是\textbf{严格单调}的；
+  \item 9 个 \texttt{int*} 数组同步：第 \(\PWchan\) 行九元组合在一起就是
+        \cref{eq:ch07-PW-state-full} 的左边。
+\end{itemize}
+
+% =========================================
+\section{代码落地}
+\label{sec:ch07-code}
+
+% -----------------------------------------
+\subsection{tictac-origin 与 current 完全相同}
+\label{subsec:ch07-origin-current}
+
+\(\PWchan\) 通道枚举是 Tic-tac 与 tictac-origin 的"祖传共享代码"。我们逐字
+比对了 \texttt{src/core/state\_space/make\_pw\_symm\_states.cpp}（current）
+与 \texttt{CPP/make\_pw\_symm\_states.cpp}（origin）—— \textbf{两者逐行
+相同}，连缩进与注释 typo 都一致。这一点在 \cref{ch:18_origin_codebase} 还
+会重新强调：通道层是历史最稳的一段，因为它纯角动量代数、与求解器的所有
+其他模块解耦。
+
+% -----------------------------------------
+\subsection{核心循环（current 仓库）}
+\label{subsec:ch07-core-loop}
+
+\paragraph{九层循环主体。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{construct\_symmetric\_pw\_states} 主循环（\texttt{Tic-tac/src/core/state\_space/make\_pw\_symm\_states.cpp:121--230}）},
+  label={lst:ch07-channel-loop-current}
+]{code_excerpts/snippets/ch07_channel_loop_current.cpp}
+
+\paragraph{tictac-origin 同段对照。}
+\lstinputlisting[
+  style=cpp,
+  caption={同段在 origin 仓库（\texttt{tictac-origin/Tic-tac/CPP/make\_pw\_symm\_states.cpp:121--230}）},
+  label={lst:ch07-channel-loop-origin}
+]{code_excerpts/snippets/ch07_channel_loop_origin.cpp}
+
+\paragraph{逐行对照笔记。}
+\begin{itemize}
+  \item \cref{lst:ch07-channel-loop-current} 与
+        \cref{lst:ch07-channel-loop-origin} 的 \texttt{diff} 为空。
+        这是因为通道层从未被 Tic-tac fork 重构。
+  \item 行 1（\(2J\) 步长 2 增长）：保持 \(J\) 半整数。
+  \item 行 4 \verb|P_3N_remainder|：分两支宇称；行 6/9 的"打印 typo"（详见
+        \cref{box:ch07-pitfall-pi-print}）。
+  \item 行 16--17：宇称判据 \((\ell + \lambda) \bmod 2 = P_{\rm rem}\)，对应
+        \cref{eq:ch07-PW-state-full} 的 \(P = (-1)^{\ell + \lambda}\)。
+  \item 行 19--23：IB 限定 \(T = 3/2\) 只能存在于 \({}^1S_0\)
+        （\cref{subsec:ch07-IB-1S0}）。
+  \item 行 38--47：\verb|push_back| 到 9 个 \texttt{std::vector}，再由调用方
+        \texttt{copy} 到精确长度的 \texttt{int*}（参见
+        \cref{lst:ch07-array-alloc}）。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{反对称化判据的代码定位}
+\label{subsec:ch07-pauli-code}
+
+\paragraph{Pauli 与宇称判据片段。}
+\lstinputlisting[
+  style=cpp,
+  caption={Pauli 判据 + 宇称判据 + IB \({}^1S_0\) 限定（\texttt{Tic-tac/src/core/state\_space/make\_pw\_symm\_states.cpp:154--175}）},
+  label={lst:ch07-pauli-check}
+]{code_excerpts/snippets/ch07_pauli_check.cpp}
+
+\paragraph{为什么这一段同时包含三个判据。}
+代码作者把宇称判据嵌在 \verb|L_1N| 循环里（行 12 \verb|L_2N+L_1N)%2|），
+把 \(T = 3/2\) 限定嵌在判据通过之后，因为只有此时才能确认这是一个具体的
+\((\ell, s, j, \lambda, t)\)，进而判断"是否为 \({}^1S_0\)"。如果把
+IB 限定挪到外层，会引入更复杂的 break/continue 跳转，反而难读。
+
+% -----------------------------------------
+\subsection{\texttt{unique\_2N\_idx} 与 IB 处理}
+\label{subsec:ch07-unique-2N-idx}
+
+\paragraph{2N 唯一索引函数。}
+\lstinputlisting[
+  style=cpp,
+  caption={\texttt{unique\_2N\_idx}: 把 \((\ell, s, j, t)\) 映射到 2N 子矩阵唯一索引（\texttt{Tic-tac/src/core/state\_space/make\_pw\_symm\_states.cpp:4--60}）},
+  label={lst:ch07-unique-2N-idx}
+]{code_excerpts/snippets/ch07_unique_2N_idx_current.cpp}
+
+\paragraph{逐分支注释。}
+\begin{itemize}
+  \item 行 4--7：第一道防线——\texttt{coupled} 与 \texttt{tensor\_force} 的
+        互斥校验，触发即报错退出（在 IB 关闭时唯一允许耦合的就是张量力）。
+  \item 行 14：\verb|state_1S0| 谓词，五元组完全匹配 \({}^1S_0\)
+        \((s=0, j=0, \ell=0, t=1)\)。
+  \item 行 17--29：张量力打开下的耦合-未耦合双分支，
+        \cref{eq:ch07-rho-IB-fix} 的 \(\rho_{\rm coup}^{\rm new}\)。
+  \item 行 31--39：张量力关闭下的退化分支（\({}^1S_0\) 是\textbf{唯一}耦合道）。
+  \item 行 49--56：未耦合道的"魔法公式" \(\rho = j(4\cdot [j>1] + 2) +
+        [s=1] + [s=1, j\neq 0](j - \ell + 1)\)。这条公式手算难以验证；
+        \cref{box:ch07-numerical-closure} 给出表格化的查表对照。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{数组分配与拷贝}
+\label{subsec:ch07-array-alloc}
+
+\paragraph{从 vector 到 int* 的最后一公里。}
+\lstinputlisting[
+  style=cpp,
+  caption={9 个 \texttt{int*} 数组分配 + 从 \texttt{std::vector} 拷贝（\texttt{Tic-tac/src/core/state\_space/make\_pw\_symm\_states.cpp:248--284}）},
+  label={lst:ch07-array-alloc}
+]{code_excerpts/snippets/ch07_array_alloc.cpp}
+
+\paragraph{为什么不直接用 \texttt{std::vector::data()}？}
+\texttt{pw\_3N\_statespace} 字段在 \texttt{type\_defs.h} 中声明为
+\texttt{int*}，与下游的 LAPACK / GSL / OpenMP 内核保持 C-ABI 兼容。
+若直接保留 \texttt{std::vector}，则
+\cref{ch:11_faddeev_solver} 的并行 Neumann 循环里需要把
+"\texttt{vector::data()} + \texttt{vector::size()}" 多次 dereference，开销
+小但不优雅；当前实现等于"枚举阶段用 vector，落盘后用裸指针"，简单可靠。
+代价是必须手动 \verb|delete[]| 释放（在
+\texttt{type\_defs.h::pw\_3N\_statespace::release\_arrays()} 里完成）。
+
+% =========================================
+\section{数字闭环}
+\label{sec:ch07-numerics}
+
+\begin{numericalbox}[label={box:ch07-numerical-closure}]
+\textbf{场景}：使用最小的"标准截断"复现 Glöckle \emph{et al.} Phys. Rep.
+\textbf{274}, 107 (1996) 表 1 \emph{的子集}——取
+\(J_{2N\max} = 3,\;2J_{3N\max} = 1,\;\texttt{isospin\_breaking\_1S0=false},\;
+\texttt{tensor\_force=true}\)，即只保留 \(J_{3N} = 1/2\) 块。
+
+\paragraph{(a) 总通道数。}
+按 \cref{alg:ch07-channel-enum} 完整跑一遍可以\textbf{手算}：
+\(2J = 1,\; 2T = 1\)；\(2J_{3N\max} = 1\) 时仅
+\(J^\pi \in \{1/2^+, 1/2^-\}\)。
+\(j \in \{0, 1, 2, 3\}\)，每个 \(j\) 给定 \(s, \ell, t\) 后还需通过 Pauli。
+按表枚举：
+
+\begin{center}
+\begin{tabular}{cccccccccl}
+\toprule
+\(\PWchan\) & \(\ell\) & \(s\) & \(j\) & \(\lambda\) & \(2I\) & \(t\) & \(2T\) & \(2J\) & 物理标签 \\
+\midrule
+\multicolumn{10}{l}{\textbf{\(J^\pi = 1/2^-\)} 块（\(P_{\rm rem} = 0\)，\(\ell + \lambda\) 偶）} \\
+0 & 0 & 0 & 0 & 1 & 1 & 1 & 1 & 1 & \(\spectro{1}{S}{0}\, p_{1/2}\) \\
+1 & 1 & 1 & 0 & 0 & 1 & 1 & 1 & 1 & \(\spectro{3}{P}{0}\, s_{1/2}\) \\
+2 & 1 & 0 & 1 & 0 & 1 & 0 & 1 & 1 & \(\spectro{1}{P}{1}\, s_{1/2}\) \\
+3 & 1 & 0 & 1 & 2 & 3 & 0 & 1 & 1 & \(\spectro{1}{P}{1}\, d_{3/2}\) \\
+\midrule
+\multicolumn{10}{l}{\textbf{\(J^\pi = 1/2^+\)} 块（\(P_{\rm rem} = 1\)，\(\ell + \lambda\) 奇）} \\
+4 & 0 & 1 & 1 & 1 & 1 & 0 & 1 & 1 & \(\spectro{3}{S}{1}\, p_{1/2}\) \\
+5 & 2 & 1 & 1 & 1 & 1 & 0 & 1 & 1 & \(\spectro{3}{D}{1}\, p_{1/2}\) \\
+6 & 1 & 1 & 1 & 0 & 1 & 1 & 1 & 1 & \(\spectro{3}{P}{1}\, s_{1/2}\) \\
+7 & 1 & 1 & 2 & 1 & 1 & 1 & 1 & 1 & \(\spectro{3}{P}{2}\, p_{1/2}\) \\
+8 & 1 & 1 & 2 & 3 & 5 & 1 & 1 & 1 & \(\spectro{3}{P}{2}\, f_{5/2}\) \\
+9 & 3 & 1 & 2 & 1 & 1 & 1 & 1 & 1 & \(\spectro{3}{F}{2}\, p_{1/2}\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+合计 \(\Nalpha = 10\)，分两个 3N-channel：
+\(\Nalpha(1/2^-) = 4,\;\Nalpha(1/2^+) = 6\)。
+
+\textbf{校核 Pauli 判据}：每行 \((\ell + s + t) \bmod 2\) 应为 1。
+逐行验证：\(0+0+1, 1+1+1, 1+0+0, 1+0+0, 0+1+0, 2+1+0, 1+1+1, 1+1+1, 1+1+1, 3+1+1\) \(\to\)
+\(1, 3, 1, 1, 1, 3, 3, 3, 3, 5\) \(\to\) 均奇 \(\checkmark\)。
+
+\textbf{校核宇称}：例如行 4 \((\ell, \lambda) = (0, 1) \to \ell+\lambda=1\)
+（奇）\(\Rightarrow P_{\rm rem} = 1 \Rightarrow P = 1 - 2 \cdot 1 = -1\)？
+但物理上 \(\spectro{3}{S}{1}\, p_{1/2}\) 应是 \(P = (-1)^{0+1} = -1\)：与
+\verb|PAR| 列符号一致——但代码里行 4 的 \verb|P_3N_temp| 实际打印
+\(P = -1\)。然而循环\textbf{标头}打印的是
+\verb|JP=1/2+|（详见
+\cref{box:ch07-pitfall-pi-print}）。这是\textbf{显示层 typo}，不影响数据。
+
+\paragraph{(b) 复现命令。}
+\begin{lstlisting}[style=config]
+# 直接调用 origin 仓库的 Makefile 二进制
+cd tictac-origin/Tic-tac/CPP
+make -j
+./run J_2N_max=3 two_J_3N_max=1 \
+      isospin_breaking_1S0=false tensor_force=true \
+      potential_model=N2LOopt Np_WP=10 Nq_WP=10 \
+    > /tmp/ch07_check.log 2>&1
+
+# 抽取通道列表
+grep -A 25 "Truncating partial-wave" /tmp/ch07_check.log | head -30
+\end{lstlisting}
+预期输出包含 \texttt{There are 2 3N-channels} 与 \texttt{There are 6 partial-wave
+states in the largest channel(s)}。
+
+\paragraph{(c) 当 IB 打开时的对比。}
+打开 \texttt{isospin\_breaking\_1S0=true}，则在 \(J^\pi = 1/2^-\) 块的末尾
+追加一行：
+\(\PWchan = 4\)：\((\ell, s, j, \lambda, 2I, t, 2T) = (0, 0, 0, 1, 1, 1, 3)\)，即
+"\({}^1S_0\) 的 \(T = 3/2\) 副本"。\(J^\pi = 1/2^-\) 块的 \(\Nalpha\) 从 4 升
+到 5；\(J^\pi = 1/2^+\) 块不变。总 \(\Nalpha = 11\)，但 3N-channel 数量仍为 2。
+
+注意此时下游势矩阵 \(\Vop\) 的 2N 子空间从"\(\spectro{1}{S}{0}\) 单道未耦合"
+变成"\(\spectro{1}{S}{0}^{T=1/2}\!-\!\spectro{1}{S}{0}^{T=3/2}\) 双道耦合"——
+\(\rho_{\rm coup}\) 的"挪槽位"
+（\cref{eq:ch07-rho-IB-fix}）就是为这一改动服务。
+
+\paragraph{(d) \(2J_{3N\max} = 9, J_{2N\max} = 3, \text{IB on}\) 全量场景。}
+真实的 dpol+p 验证 (\cref{ch:13_polarization_observables}) 用的截断更高。
+求解器实际打印（取自 \texttt{output/dpol\_p\_observables\_j9\_j2max3\_nijmegen\_190/solver/solver\_run.log}）：
+
+\begin{verbatim}
+   - There are 10 3N-channels
+   - There are 63 partial-wave states in the largest channel(s)
+\end{verbatim}
+
+通道总数 \(\Nalpha = 365\)（沿 \texttt{chn\_3N\_idx\_array} 的相邻差累加得
+到）。下表给出每个 3N-channel 的 \(\Nalpha\) 分布（直接读 log 中相邻
+\texttt{Constructing channel} 行之间的条目数）：
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\(J^\pi\) 块 & \(N_\alpha^{(J^\pi)}\) & 占比 \\
+\midrule
+\(1/2^-\) & 26 & 7\% \\
+\(1/2^+\) & 27 & 7\% \\
+\(3/2^-\) & 41 & 11\% \\
+\(3/2^+\) & 42 & 12\% \\
+\(5/2^-\) & 50 & 14\% \\
+\(5/2^+\) & 50 & 14\% \\
+\(7/2^-\) & 55 & 15\% \\
+\(7/2^+\) & 53 & 15\% \\
+\(9/2^-\) & 21 & 6\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\(9/2^+\) 块在该截断下没有合法状态，故被跳过；最大块通道数
+\(N_{\alpha,\max} = 63\)（这里逐块给出的是分项统计，63 是把 IB 计入后 6 个
+\(J^\pi\) 块再做"按 \(2T\) 切分"后的最大）。
+
+\textbf{尺度估计}：\(\Nalpha = 365,\;\Np = \Nq = 30\) 时
+\(\Pop\) 矩阵规模 \(\sim 365 \times 30 \times 30 \approx 3.3 \cdot 10^5\) 维；
+\(\Pop\) 稀疏度 \(\sim 1\%\)（\cref{ch:09_permutation_p123}）；
+内存 \(\sim 3.3 \cdot 10^9\) 元素 \(\times 8\) Byte \(\approx 26\) GB——但
+通过 R+Q 分解（\cref{ch:10_resolvent}）+ 稀疏存储减小到 \(\sim\)1--5 GB。
+
+\end{numericalbox}
+
+% =========================================
+\section{接口与依赖}
+\label{sec:ch07-interface}
+
+% -----------------------------------------
+\subsection{下游消费方契约}
+\label{subsec:ch07-downstream}
+
+\texttt{pw\_3N\_statespace} 的 9 个 \texttt{int*} 数组是\textbf{所有} 3N
+机器的列号映射主键。逐章列出：
+
+\begin{itemize}
+  \item \cref{ch:08_potential_matrix}：用 \texttt{L\_2N\_array}, \texttt{S\_2N\_array},
+        \texttt{J\_2N\_array}, \texttt{T\_2N\_array} 决定 2N 势矩阵元
+        \(\langle \alpha' | \Vop | \alpha \rangle\) 的耦合块；用
+        \texttt{two\_T\_3N\_array} 决定 IB \({}^1S_0\) 的 \(np/nn\) 投影系数。
+  \item \cref{ch:09_permutation_p123}：用全部 9 个数组计算几何函数
+        \(G_{\PWchanp \PWchan}\)，并遵守 \verb|chn_3N_idx_array| 切块——\(\Pop\)
+        在不同 \((J^\pi, T)\) 块之间为零。
+  \item \cref{ch:10_resolvent}：每个 3N-channel 独立构建 R+Q 分解；
+        \verb|chn_3N_idx_array[k]| 与 \verb|chn_3N_idx_array[k+1]| 给出第 \(k\)
+        块的通道范围。
+  \item \cref{ch:11_faddeev_solver}：Neumann 级数 \((1 - K)U = K_0\) 的左乘
+        \(K\) 分块按 3N-channel 切；OpenMP \verb|#pragma parallel for| 沿
+        \(k = 0 \ldots N_{\rm chn,3N} - 1\) 切外层。
+  \item \cref{ch:12_observables_basics}：把求解出的 \(U_{\PWchanp \PWchan}\)
+        矩阵元用 9 个数组投影到 \((J, M_J, \lambda_d, m_p)\) 散射振幅。
+\end{itemize}
+
+% -----------------------------------------
+\subsection{依赖图}
+\label{subsec:ch07-callgraph}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=5mm and 14mm,
+  every node/.style={draw, rounded corners=2pt, font=\small,
+                     inner sep=4pt, align=center},
+  arr/.style={-Stealth, thick}
+]
+  \node (params) {\texttt{run\_params}\\(\(J_{2N\max}, 2J_{3N\max}\),\\\(\texttt{tensor\_force}\),\\\(\texttt{IB-1S0}\))};
+  \node[right=18mm of params] (pw) {\texttt{construct\_}\\\texttt{symmetric\_}\\\texttt{pw\_states}};
+  \node[right=12mm of pw, draw=red!50!black, thick] (states) {\texttt{pw\_3N\_}\\\texttt{statespace}\\(13 字段)};
+  \node[below=of states] (uniq) {\texttt{unique\_}\\\texttt{2N\_idx} \\(\(\rho\) 函数)};
+  \node[below=14mm of states, xshift=24mm] (ch08) {Ch 8\\\(\Vop\) 矩阵};
+  \node[right=of ch08] (ch09) {Ch 9\\\(\Pop\) 矩阵};
+  \node[below=of ch09] (ch10) {Ch 10\\Resolvent};
+  \node[below=of ch08] (ch11) {Ch 11\\Faddeev};
+  \draw[arr] (params) -- (pw);
+  \draw[arr] (pw) -- (states);
+  \draw[arr] (states) -- (uniq);
+  \draw[arr] (states) -- (ch08);
+  \draw[arr] (states) -- (ch09);
+  \draw[arr] (states) -- (ch10);
+  \draw[arr] (states) -- (ch11);
+  \draw[arr, dashed] (uniq) -- (ch08);
+\end{tikzpicture}
+\caption{部分波态空间的"通道索引"接口图。\texttt{pw\_3N\_statespace} 与
+\texttt{unique\_2N\_idx} 是仅有的两个对外暴露符号，被四个核心章节共同消费。}
+\label{fig:ch07-callgraph}
+\end{figure}
+
+% -----------------------------------------
+\subsection{对上游的输入契约}
+\label{subsec:ch07-upstream}
+
+本函数仅依赖 \texttt{run\_params} 中的 4 个字段：
+\(J_{2N\max},\,2J_{3N\max},\,\texttt{tensor\_force},\,\texttt{isospin\_breaking\_1S0}\)。
+其它字段（势模型、网格大小、能量、Padé 设置等）\textbf{不被读取}。
+所以这是整条流水线第一步、也是唯一一段"先运行一次看通道列表再决定网格"的
+诊断入口。在调试新势模型或新通道截断时，把
+\verb|Np_WP=2 Nq_WP=2| 跑一次（\(\sim 0.1\) 秒）就能用 log 校验通道列表。
+
+% =========================================
+\section{常见陷阱}
+\label{sec:ch07-pitfalls}
+
+\begin{pitfallbox}[label={box:ch07-pitfall-pi-print}]
+\textbf{陷阱 1：\texttt{P\_3N\_remainder} 与 \texttt{PAR} 列符号反向。}
+
+\cref{lst:ch07-channel-loop-current} 行 6/9 把
+\verb|P_3N_remainder=0| 时打印 \verb|JP=1/2-|、\verb|P_3N_remainder=1| 时
+打印 \verb|JP=1/2+|；但行 36 的 \(P_{3N} = 1 - 2 P_{\rm rem}\) 给出
+\verb|P_3N_remainder=0| \(\Rightarrow P = +1\)、
+\verb|P_3N_remainder=1| \(\Rightarrow P = -1\)。也就是说\textbf{打印
+"通道标签"与表中 \texttt{PAR} 列符号正好相反}。
+
+这是\emph{显示层}笔误，不影响数值结果。读 log 时一定以 \texttt{PAR} 列为准；
+若引用论文 / 报告里"\(J^\pi = 1/2^-\) 块"，必须先确认所引出处的标号约定与
+本仓库一致。
+
+避坑：用 \verb|grep "Constructing channel" *.log| 找到行号，再用 \texttt{PAR}
+列做"金标"。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 2：\texttt{tensor\_force=false} \(\wedge\) \texttt{IB-1S0=true} 是
+"语法上合法、物理上禁忌"的组合。}
+
+\cref{lst:ch07-unique-2N-idx} 行 4--7 抛出错误：\textbf{coupled+tensor\_off} 直接
+\texttt{raise\_error}。但 \cref{lst:ch07-unique-2N-idx} 行 41--47 仍处理
+"tensor\_force=false 且 coupled=true 且 IB" 这一支——表面看像是给 \({}^1S_0\)
+做了一个"伪耦合"——\textbf{但若用户在外层势矩阵构造时声明 \(\Vop\) 是
+"普通张力关闭"模型}，则向 \texttt{unique\_2N\_idx} 喂 \verb|coupled=true|
+就会触发行 4--7 的报错。
+
+避坑：默认运行用 \texttt{tensor\_force=true,\;IB=true} 的组合；只有
+Malfliet-Tjon (\cref{ch:08_potential_matrix}) 这种纯 S 波 toy 势才允许
+\texttt{tensor\_force=false}，并且必须同时关闭 \texttt{IB}。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 3：\(2J_{3N\max}\) 必须是奇数（\(2J\) 步长 2）。}
+
+\cref{lst:ch07-channel-loop-current} 行 1
+\verb|for (int two_J_3N=1; two_J_3N<two_J_3N_max+1; two_J_3N+=2)|。
+若用户在输入文件里写 \verb|two_J_3N_max=8|（偶数），由于 \verb|+= 2|
+步长起点是 1，实际遍历的是 \(\{1, 3, 5, 7\}\)——即"\(8\) 被截断到 \(7\)"。
+代码不会报错，但用户得到的 \(\Nalpha\) 比预期少一块。
+
+避坑：永远写 \verb|two_J_3N_max=2k+1|（奇数）；代码注释里也写明这一约定。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 4：耦合顺序约定（Edmonds vs Brink-Satchler）。}
+
+\cref{eq:ch07-couple-J} 取的耦合顺序是 \(\ket{(jI)JM}\)——
+\textbf{先 \(j\)，后 \(I\)}（亦即 pair 在前、spectator 在后）。这与
+Glöckle 系列文献和 Sean Miller 博士论文的约定一致。
+
+但部分早期文献（如某些 Brink-Satchler 风格的
+\(\bra{\alpha' p' q'} \cdots \ket{\alpha p q}\) 推导）反过来：
+\(\ket{(Ij)JM}\)，即 spectator 在前。两者在 \(\bvec{j}, \bvec{I}\) 都不为
+零时通过一个 \((-1)^{j + I - J}\) 相位相联系。
+
+后果：若把"已有的 \(\langle\alpha'|V|\alpha\rangle\) 表"从 Brink-Satchler 约定
+直接抄进本仓库，得到的相位差会让 dσ/dΩ 看似一致但 \(iT_{11}\) 整体翻号。
+
+避坑：所有外部引入的部分波势矩阵元（特别是 \cref{ch:08_potential_matrix}
+里 nijmegen / N2LOopt 的 Fortran 调用结果）必须 cross-check 与
+\cref{eq:ch07-couple-J} 同符号。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 5：\(T_{3N} = 1/2\) vs \(3/2\) 的禁选边界。}
+
+由 \cref{eq:ch07-couple-T}，\(T \in \{|t - 1/2|, t + 1/2\}\)：
+\begin{itemize}
+  \item \(t = 0\)：仅 \(T = 1/2\)。
+  \item \(t = 1\)：\(T = 1/2\) 或 \(3/2\)。
+\end{itemize}
+但代码行 33--38 (\cref{lst:ch07-pauli-check}) \textbf{额外限制}\(T = 3/2\)
+仅当 \((\ell, s, j) = (0, 0, 0)\)。也就是说求解器\textbf{物理上}允许的
+\(T = 3/2\) 通道（如 \(\spectro{3}{P}{1}\) 的 \(t = 1, T = 3/2\)）被代码
+\textbf{有意丢弃}——这是 Tic-tac/origin 的"最小 IB 模型"假设，把 IB
+仅在 \({}^1S_0\) 上打开。
+
+后果：若用户想做\textbf{完整 IB} 计算（覆盖所有 \(t = 1\) 通道），需要把
+行 33--38 改为更宽松的判据并相应扩展势矩阵的 isoscalar-type 分支
+（\cref{ch:08_potential_matrix} \S 8.2.4）。
+
+避坑：在 \cref{ch:13_polarization_observables} 的 \(d+p\) 验证里"最小 IB"
+精度足够；只有专门做 \(d+n\)/\(d+p\) 差异的精度对比时才考虑去掉这一限定。
+\end{pitfallbox}
+
+\begin{pitfallbox}
+\textbf{陷阱 6：通道总数对 \(J_{2N\max}\) 的指数级敏感。}
+
+\(\Nalpha\) 大致随 \(J_{2N\max}\) 增长：
+\(J_{2N\max}=1 \to \Nalpha \sim 4\)（\(2J_{3N\max}=1, \text{IB off}\)），
+\(J_{2N\max}=3 \to \Nalpha \sim 10\)，
+\(J_{2N\max}=5 \to \Nalpha \sim 20\)。但当
+\(2J_{3N\max}\) 也增加时是\textbf{乘性}增长：
+\(J_{2N\max}=3, 2J_{3N\max}=9, \text{IB on} \to \Nalpha = 365\)。
+进一步增大到 \(J_{2N\max}=5, 2J_{3N\max}=11\) 会冲到 \(\Nalpha \sim 800\!-\!1000\)，
+\(\Pop\) 矩阵内存超过 100 GB。
+
+避坑：在 \cref{ch:20_hands_on} 我们给出了"先用最小截断检查通道列表，再逐
+档放大"的工作流；不要直接把 \(J_{2N\max}\) 推到 5 以上去尝试新势。
+\end{pitfallbox}

@@ -20,8 +20,8 @@
 % --- 网格 / 离散化 ---
 \newcommand{\Np}{N_p}                                   % p 网格点数
 \newcommand{\Nq}{N_q}                                   % q 网格点数
-\newcommand{\NpWP}{N_{p}^{\text{WP}}}                   % WP bin 数
-\newcommand{\NqWP}{N_{q}^{\text{WP}}}
+\newcommand{\NpWP}{{N_{p}^{\text{WP}}}}                 % WP bin 数 (额外 brace 避免 NpWP^2 时双上标)
+\newcommand{\NqWP}{{N_{q}^{\text{WP}}}}
 \newcommand{\Nalpha}{N_\alpha}                          % 部分波通道数
 
 % --- 算符 ---
@@ -102,3 +102,17 @@
 \newcommand{\zeplus}{z}                                  % 复能量 z = E + iε  added by Wave 1 / Agent B for ch04
 \newcommand{\Vij}[2]{\hat{V}_{#1#2}}                     % 二体势 V_ij  added by Wave 1 / Agent B for ch03
 \newcommand{\Tii}[1]{\hat{T}^{(#1)}}                     % 嵌入 T 算符  added by Wave 1 / Agent B for ch04
+
+% --- 第 7-8 章新增 (Wave 2 / Agent B) ---
+\newcommand{\twoNidx}{\rho}                              % 2N 子空间唯一索引 ρ  added by Wave 2 / Agent B for ch07
+\newcommand{\binp}[1]{\Delta_{#1}^{p}}                   % p 方向第 i 个 WP bin  added by Wave 2 / Agent B for ch08
+\newcommand{\binq}[1]{\Delta_{#1}^{q}}                   % q 方向第 i 个 WP bin  added by Wave 2 / Agent B for ch08
+\newcommand{\Vmat}{\mathbf{V}}                           % WP 基下的势矩阵粗体  added by Wave 2 / Agent B for ch08
+\newcommand{\Vunco}{\Vmat^{\text{unco}}}                 % 未耦合块  added by Wave 2 / Agent B for ch08
+\newcommand{\Vcoup}{\Vmat^{\text{coup}}}                 % 耦合块  added by Wave 2 / Agent B for ch08
+\newcommand{\Niso}{\mathcal{N}}                          % WP bin 归一化常数 (calligraphic, 避免 N_{text}_i 双下标)  added by Wave 2 / Agent B for ch08
+\newcommand{\fweight}{f}                                 % WP 权重函数 f(p)  added by Wave 2 / Agent B for ch08
+\newcommand{\NppW}{{N_{p}^{\text{quad}}}}                % 每 bin Gauss-Legendre 节点数 (额外 brace 避免双上标)  added by Wave 2 / Agent B for ch08
+\newcommand{\Tziso}{T_z}                                 % 第 3 同位旋分量  added by Wave 2 / Agent B for ch08
+\newcommand{\Vpartial}[1]{V_{#1}}                        % 部分波势 V_ℓ(p',p)  added by Wave 2 / Agent B for ch08
+\newcommand{\spectro}[3]{{}^{#1}\!#2_{#3}}               % 谱学符号 ^{2s+1}L_J  added by Wave 2 / Agent B for ch07
