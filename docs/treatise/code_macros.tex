@@ -1,0 +1,65 @@
+% =====================================================================
+% code_macros.tex
+% listings 包风格定义：cpp / fortran / python
+%
+% 用法：subagents 通过 \lstinputlisting[style=cpp]{code_excerpts/snippets/foo.cpp}
+%       引用 extract.py 抽取的真实代码片段
+% =====================================================================
+
+\definecolor{lstbg}{RGB}{248,248,248}
+\definecolor{lstkw}{RGB}{0,0,180}
+\definecolor{lstcomment}{RGB}{60,120,60}
+\definecolor{lststring}{RGB}{160,80,0}
+\definecolor{lstnum}{RGB}{120,120,120}
+\definecolor{lstrule}{RGB}{200,200,200}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{lstbg},
+  keywordstyle=\color{lstkw}\bfseries,
+  commentstyle=\color{lstcomment}\itshape,
+  stringstyle=\color{lststring},
+  numbers=left,
+  numberstyle=\tiny\color{lstnum},
+  numbersep=8pt,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{lstrule},
+  breaklines=true,
+  breakatwhitespace=false,
+  tabsize=4,
+  showstringspaces=false,
+  captionpos=b,
+  keepspaces=true,
+  columns=fullflexible,
+}
+
+% C++ 风格
+\lstdefinestyle{cpp}{
+  language=C++,
+  morekeywords={uint64_t, int64_t, size_t, auto, constexpr, nullptr, override, final, noexcept},
+}
+
+% Fortran 90 风格
+\lstdefinestyle{f90}{
+  language=[90]Fortran,
+  morekeywords={module, contains, implicit, intent, allocatable, pure, elemental, subroutine, end},
+}
+
+% Fortran 77 风格
+\lstdefinestyle{f77}{
+  language=[77]Fortran,
+}
+
+% Python 风格
+\lstdefinestyle{python}{
+  language=Python,
+  morekeywords={async, await, match, case},
+}
+
+% YAML / 输入文件风格（plain，关键字按需）
+\lstdefinestyle{config}{
+  language=,
+  morekeywords={true, false},
+  showstringspaces=false,
+}

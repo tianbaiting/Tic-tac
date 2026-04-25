@@ -20,3 +20,10 @@ __pycache__/
 CPP/Output/
 CPP/Input/*_autogen.txt
 CPP/Input/energy_*_autogen.txt
+
+# treatise (LaTeX) build artifacts
+docs/treatise/_build/
+docs/treatise/code_excerpts/snippets/*
+!docs/treatise/code_excerpts/snippets/.gitkeep
+docs/treatise/figures/snapshots/*.tex
+docs/treatise/figures/plots/*.pdf

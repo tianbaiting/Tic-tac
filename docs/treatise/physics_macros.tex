@@ -1,0 +1,84 @@
+% =====================================================================
+% physics_macros.tex
+% 物理符号宏定义
+%
+% 维护规则：
+%   - 跨章节复用的符号必须在此定义，确保全书一致性
+%   - Wave 1+ subagents 只能 *添加* 新宏，不能修改/删除现有宏
+%   - 添加新宏时在 commit message 注明
+% =====================================================================
+
+% --- 基本物理量 ---
+\newcommand{\hbarc}{\hbar c}                            % ℏc
+\newcommand{\Tlab}{T_{\text{lab}}}                      % 实验室能量
+\newcommand{\Tcm}{T_{\text{cm}}}                        % 质心系能量
+\newcommand{\Mn}{M_n}                                   % 中子质量
+\newcommand{\Mp}{M_p}                                   % 质子质量
+\newcommand{\Md}{M_d}                                   % 氘核质量
+\newcommand{\Ed}{E_d}                                   % 氘核结合能
+
+% --- 网格 / 离散化 ---
+\newcommand{\Np}{N_p}                                   % p 网格点数
+\newcommand{\Nq}{N_q}                                   % q 网格点数
+\newcommand{\NpWP}{N_{p}^{\text{WP}}}                   % WP bin 数
+\newcommand{\NqWP}{N_{q}^{\text{WP}}}
+\newcommand{\Nalpha}{N_\alpha}                          % 部分波通道数
+
+% --- 算符 ---
+\newcommand{\Top}{\hat{T}}                              % T-算符
+\newcommand{\Vop}{\hat{V}}                              % 相互作用
+\newcommand{\Hop}{\hat{H}}                              % 哈密顿量
+\newcommand{\Hzero}{\hat{H}_0}                          % 自由哈密顿量
+\newcommand{\Gop}{\hat{G}}                              % Green 算符
+\newcommand{\Gzero}{\hat{G}_0}                          % 自由 Green 算符
+\newcommand{\Pop}{\hat{\mathcal{P}}}                    % 置换 P123
+\newcommand{\Uop}{\hat{U}}                              % AGS U-算符
+\newcommand{\Aop}{\hat{\mathcal{A}}}                    % 反对称化算符
+
+% --- Jacobi 动量 / 能量 ---
+\newcommand{\jacobip}{p}
+\newcommand{\jacobiq}{q}
+\newcommand{\bvec}[1]{\bm{#1}}
+\newcommand{\jacvec}{\bvec{p}, \bvec{q}}
+\newcommand{\Ejacobi}{E_{pq}}
+
+% --- Jacobi 态与部分波态 ---
+\newcommand{\jacobistate}[2]{\ket{#1, #2}}              % |p, q⟩
+\newcommand{\pwstate}[1]{\ket{#1}}                      % |α⟩
+\newcommand{\pwdual}[1]{\bra{#1}}                       % ⟨α|
+\newcommand{\WPbin}[1]{\ket{x_{#1}}}                    % WP 第 i 个 bin
+
+% --- 部分波索引 ---
+\newcommand{\PWchan}{\alpha}
+\newcommand{\PWchanp}{\alpha'}
+\newcommand{\PWtuple}{(\ell, s, j; \lambda, I; J^\pi, T)}
+
+% --- AGS / Faddeev ---
+\newcommand{\Uampl}[2]{U_{#1#2}}                        % U_{αβ}
+\newcommand{\Tampl}[2]{T_{#1#2}}                        % T_{αβ}
+
+% --- 散射观测量 ---
+\newcommand{\dsigma}{d\sigma}
+\newcommand{\dOmega}{d\Omega}
+\newcommand{\diffXS}{\frac{\dsigma}{\dOmega}}           % 微分截面
+\newcommand{\iTeleven}{i T_{11}}
+\newcommand{\Ttwentyzero}{T_{20}}
+\newcommand{\Ttwentyone}{T_{21}}
+\newcommand{\Ttwentytwo}{T_{22}}
+\newcommand{\Ay}{A_y}                                   % 极化分析能力
+
+% --- 3NF 低能常数 ---
+\newcommand{\cD}{c_D}
+\newcommand{\cE}{c_E}
+\newcommand{\cone}{c_1}
+\newcommand{\cthree}{c_3}
+\newcommand{\cfour}{c_4}
+
+% --- 数学符号 ---
+\newcommand{\re}{\operatorname{Re}}
+\newcommand{\im}{\operatorname{Im}}
+\newcommand{\sgn}{\operatorname{sgn}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\nudif}{n_{\text{dif}}}                      % Padé 阶差
+\newcommand{\TF}{\mathcal{F}}                            % Fourier 变换
+\newcommand{\identity}{\mathbb{1}}

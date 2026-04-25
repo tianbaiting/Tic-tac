@@ -1,0 +1,118 @@
+% =====================================================================
+% preamble.tex
+% 主文档预导言：宏包加载、字体配置、全局设置
+%
+% 编译：xelatex （必须 xelatex/lualatex，不能 pdflatex —— 因为 ctex+xeCJK）
+%
+% Wave 0 - 不允许后续 Wave subagents 修改本文件
+% =====================================================================
+
+% --- 字体与中文 ---
+\usepackage[UTF8, scheme=plain, fontset=none]{ctex}
+\setCJKmainfont[
+  BoldFont = Noto Serif CJK SC Bold,
+  ItalicFont = Noto Serif CJK SC,
+]{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
+\setmainfont{TeX Gyre Termes}      % 西文衬线
+\setsansfont{TeX Gyre Heros}       % 西文无衬线
+\setmonofont{DejaVu Sans Mono}[Scale=0.92]
+
+% --- 几何 ---
+\usepackage[a4paper, margin=2.5cm, headheight=14pt]{geometry}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE,RO]{\thepage}
+\fancyhead[LO]{\nouppercase\rightmark}
+\fancyhead[RE]{\nouppercase\leftmark}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% --- 数学 ---
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{bm}
+\usepackage{physics}      % \bra, \ket, \dv, \pdv, etc.
+\usepackage{siunitx}
+
+% --- 图形与表格 ---
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, calc, positioning, shapes.geometric, fit, backgrounds, decorations.pathreplacing}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{longtable}
+
+% --- 代码 listings ---
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\input{code_macros}
+
+% --- 算法伪码 ---
+\usepackage[ruled, vlined, linesnumbered]{algorithm2e}
+
+% --- 引用与超链接 ---
+\usepackage[colorlinks=true, linkcolor=NavyBlue, citecolor=ForestGreen, urlcolor=NavyBlue]{hyperref}
+\usepackage[capitalise, noabbrev]{cleveref}
+\crefname{equation}{式}{式}
+\crefname{figure}{图}{图}
+\crefname{table}{表}{表}
+\crefname{section}{节}{节}
+\crefname{chapter}{章}{章}
+\crefname{algorithm}{算法}{算法}
+\crefname{listing}{清单}{清单}
+
+% --- 参考文献 ---
+\usepackage[backend=biber, style=numeric-comp, sorting=none]{biblatex}
+\addbibresource{references.bib}
+
+% --- 定理环境 ---
+\theoremstyle{definition}
+\newtheorem{definition}{定义}[chapter]
+\newtheorem{example}{例}[chapter]
+\newtheorem{remark}{注}[chapter]
+
+\theoremstyle{plain}
+\newtheorem{theorem}{定理}[chapter]
+\newtheorem{proposition}{命题}[chapter]
+\newtheorem{lemma}{引理}[chapter]
+\newtheorem{corollary}{推论}[chapter]
+
+% --- 自定义环境 ---
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable, skins}
+
+% 数字闭环框（§x.6 用）
+\newtcolorbox{numericalbox}[1][]{
+  enhanced, breakable,
+  colback=blue!3, colframe=blue!50!black, boxrule=0.6pt,
+  title={\textbf{数字闭环}}, fonttitle=\bfseries,
+  #1
+}
+
+% 陷阱框（§x.8 用）
+\newtcolorbox{pitfallbox}[1][]{
+  enhanced, breakable,
+  colback=red!3, colframe=red!60!black, boxrule=0.6pt,
+  title={\textbf{常见陷阱}}, fonttitle=\bfseries,
+  #1
+}
+
+% 代码落地框（§x.5 用，可选）
+\newtcolorbox{codelandbox}[1][]{
+  enhanced, breakable,
+  colback=gray!3, colframe=black!60, boxrule=0.4pt,
+  title={\textbf{代码落地}}, fonttitle=\bfseries,
+  #1
+}
+
+% --- 物理符号宏 ---
+\input{physics_macros}
+
+% --- 章节深度 ---
+\setcounter{tocdepth}{2}
+\setcounter{secnumdepth}{3}

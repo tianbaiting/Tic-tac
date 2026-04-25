@@ -1,0 +1,103 @@
+% =====================================================================
+% main.tex —— 主文档
+%
+% 编译：xelatex main.tex （或 latexmk -xelatex main）
+% 输出：treatise.pdf
+% =====================================================================
+
+\documentclass[11pt, a4paper, oneside, openany]{book}
+
+\input{preamble}
+
+\title{
+  \Huge 三体核散射的 Wave-Packet Faddeev/AGS 数值实现 \\[0.5em]
+  \Large —— Tic-tac \& tictac-origin 内部技术参考
+}
+\author{Baiting Tian \\ \small 与 Claude 协作}
+\date{2026-04-25 — 第一版}
+
+\begin{document}
+
+\frontmatter
+\maketitle
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+% =====================================================================
+% 卷首
+% =====================================================================
+\input{chapters/00_preface}
+
+\mainmatter
+
+% =====================================================================
+% 第 I 部分  物理与算法基础
+% =====================================================================
+\part{物理与算法基础}
+\input{chapters/01_lippmann_schwinger}
+\input{chapters/02_two_body_numerics}
+\input{chapters/03_jacobi_partial_wave}
+\input{chapters/04_faddeev_ags}
+
+% =====================================================================
+% 第 II 部分  连续谱离散化
+% =====================================================================
+\part{连续谱离散化}
+\input{chapters/05_wpcd_math}
+\input{chapters/06_wp_swp_states}
+\input{chapters/07_pw_symm_states}
+\input{chapters/08_potential_matrix}
+
+% =====================================================================
+% 第 III 部分  三体核心机器
+% =====================================================================
+\part{三体核心机器}
+\input{chapters/09_permutation_p123}
+\input{chapters/10_resolvent}
+\input{chapters/11_faddeev_solver}
+
+% =====================================================================
+% 第 IV 部分  从 U-amplitude 到可观测量
+% =====================================================================
+\part{从 U-amplitude 到可观测量}
+\input{chapters/12_observables_basics}
+\input{chapters/13_polarization_observables}
+\input{chapters/14_miller_gate1}
+
+% =====================================================================
+% 第 V 部分  三核子力专章
+% =====================================================================
+\part{三核子力（3NF）}
+\input{chapters/15_3nf_physics}
+\input{chapters/16_3nf_pw_projection}
+\input{chapters/17_3nf_numerical}
+
+% =====================================================================
+% 第 VI 部分  仓库演化与上手实战
+% =====================================================================
+\part{仓库演化与上手实战}
+\input{chapters/18_origin_codebase}
+\input{chapters/19_refactor_evolution}
+\input{chapters/20_hands_on}
+
+% =====================================================================
+% 附录
+% =====================================================================
+\appendix
+\part{附录}
+\input{appendices/A_constants}
+\input{appendices/B_wigner}
+\input{appendices/C_quadrature}
+\input{appendices/D_libraries}
+\input{appendices/E_input_dictionary}
+\input{appendices/F_pitfalls_future}
+
+% =====================================================================
+% 参考文献
+% =====================================================================
+\backmatter
+\printbibliography[heading=bibintoc]
+
+\end{document}
