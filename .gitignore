@@ -27,3 +27,6 @@ docs/treatise/code_excerpts/snippets/*
 !docs/treatise/code_excerpts/snippets/.gitkeep
 docs/treatise/figures/snapshots/*.tex
 docs/treatise/figures/plots/*.pdf
+
+# Hash-keyed cache layer (P123, W1 caches)
+cache/

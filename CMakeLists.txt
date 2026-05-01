@@ -30,6 +30,14 @@ find_package(OpenMP COMPONENTS CXX Fortran)
 find_package(GSL REQUIRED)
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
 
+# Cache layer rollback switch
+option(TICTAC_USE_NEW_CACHE_LAYER "Use the hash-keyed cache layer for P123/W1" ON)
+if(TICTAC_USE_NEW_CACHE_LAYER)
+    add_compile_definitions(TICTAC_USE_NEW_CACHE_LAYER=1)
+else()
+    add_compile_definitions(TICTAC_USE_NEW_CACHE_LAYER=0)
+endif()
+
 # BLAS和LAPACK - 使用更简单的查找方式
 find_library(BLAS_LIB blas)
 find_library(LAPACK_LIB lapack)
