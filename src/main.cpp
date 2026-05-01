@@ -20,6 +20,9 @@
 #include "utils/kinetic_conversion.h"
 #include "interactions/potential_model.h"
 #include "interactions/three_nucleon_force_model.h"
+#if TICTAC_USE_NEW_CACHE_LAYER
+#include "io/cache_layer/cache_layer.h"
+#endif
 #include "make_potential_matrix.h"
 #include "make_wp_states.h"
 #include "make_swp_states.h"
@@ -223,6 +226,13 @@ int main(int argc, char* argv[]){
 	three_nucleon_force_model* tnf_ptr = three_nucleon_force_model::fetch(run_parameters);
 	std::cout << "Three-nucleon force model: " << tnf_ptr->name()
 			  << " (enabled=" << (tnf_ptr->enabled() ? "true" : "false") << ")" << std::endl;
+#if TICTAC_USE_NEW_CACHE_LAYER
+	tictac::cache::initialize(run_parameters.cache_root);
+	auto cache_stats = tictac::cache::summary();
+	std::cout << "Cache layer initialized at " << run_parameters.cache_root
+			  << " (existing entries: p123=" << cache_stats.n_p123
+			  << ", w1=" << cache_stats.n_w1 << ")" << std::endl;
+#endif
 
 	/* End of code segment for variables and arrays declaration */
 	/* ################################################################################################################### */
@@ -559,6 +569,9 @@ int main(int argc, char* argv[]){
 			}
 		}
 		/* Delete 3N-channel, model-independent arrays */
+#if TICTAC_USE_NEW_CACHE_LAYER
+		tictac::cache::shutdown();
+#endif
 		delete [] P123_sparse_val_array;
 		delete [] P123_sparse_row_array;
 		delete [] P123_sparse_col_array;
