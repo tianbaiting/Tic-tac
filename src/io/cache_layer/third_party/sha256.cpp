@@ -20,7 +20,8 @@ static const uint32_t K[64] = {
 static void transform(Ctx& ctx, const uint8_t* d) {
     uint32_t m[64];
     for (int i = 0, j = 0; i < 16; ++i, j += 4)
-        m[i] = (d[j]<<24)|(d[j+1]<<16)|(d[j+2]<<8)|d[j+3];
+        m[i] = (uint32_t(d[j])<<24) | (uint32_t(d[j+1])<<16)
+             | (uint32_t(d[j+2])<<8) | uint32_t(d[j+3]);
     for (int i = 16; i < 64; ++i) {
         uint32_t s0 = ROTR(m[i-15],7) ^ ROTR(m[i-15],18) ^ (m[i-15]>>3);
         uint32_t s1 = ROTR(m[i-2],17) ^ ROTR(m[i-2],19)  ^ (m[i-2]>>10);
