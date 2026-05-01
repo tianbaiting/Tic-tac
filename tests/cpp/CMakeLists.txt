@@ -71,6 +71,7 @@ add_test(NAME chiral_3nf_recoupling COMMAND test_chiral_3nf_recoupling)
 add_executable(cache_layer_test
     cache_layer_test.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
 )
 target_include_directories(cache_layer_test PRIVATE

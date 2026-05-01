@@ -1,8 +1,13 @@
 #include "cache_keys.h"
+#include "cache_manifest.h"
 #include "third_party/sha256.h"
 #include <cassert>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
 
 using tictac::cache::P123Key;
 using tictac::cache::W1Key;
@@ -99,6 +104,78 @@ void test_filename_prefix_p123() {
     EXPECT_EQ(p, std::string("Np30_Nq30_J2max2_JP1+1"));
 }
 
+static std::string make_tmpdir() {
+    char tmpl[] = "/tmp/tictac_cache_test_XXXXXX";
+    char* d = mkdtemp(tmpl);
+    if (!d) { std::cerr << "mkdtemp failed\n"; std::exit(2); }
+    return std::string(d);
+}
+
+static void rmrf(const std::string& path) {
+    std::string cmd = "rm -rf '" + path + "'";
+    int rc = std::system(cmd.c_str());
+    (void)rc;
+}
+
+void test_manifest_roundtrip() {
+    auto root = make_tmpdir();
+    tictac::cache::Manifest m;
+    tictac::cache::ManifestEntry e{};
+    e.kind = "p123";
+    e.filename = "p123/Np30_Nq30_J2max2_JP1+1__a3f9c2.h5";
+    e.key_hash_full = std::string(64, 'a');
+    e.key_json = "{\"Np_WP\":30}";
+    e.size_bytes = 12345;
+    e.schema_version = 1;
+    e.created_utc = "2026-05-01T00:00:00Z";
+    e.last_used_utc = "2026-05-01T00:00:00Z";
+    e.legacy_imported = false;
+    e.writer_version = "tictac-test";
+    bool inserted = m.upsert(e);
+    EXPECT(inserted);
+
+    m.save(root);
+
+    auto m2 = tictac::cache::Manifest::load(root);
+    EXPECT_EQ(m2.entries().size(), (size_t)1);
+    auto found = m2.find(e.key_hash_full);
+    EXPECT(found != nullptr);
+    if (found) {
+        EXPECT_EQ(found->filename, e.filename);
+        EXPECT_EQ(found->size_bytes, e.size_bytes);
+    }
+    rmrf(root);
+}
+
+void test_manifest_missing_returns_empty() {
+    auto root = make_tmpdir();
+    auto m = tictac::cache::Manifest::load(root);
+    EXPECT_EQ(m.entries().size(), (size_t)0);
+    rmrf(root);
+}
+
+void test_manifest_corrupt_returns_empty() {
+    auto root = make_tmpdir();
+    {
+        std::ofstream out(root + "/manifest.json");
+        out << "{ this is not valid json";
+    }
+    auto m = tictac::cache::Manifest::load(root);
+    EXPECT_EQ(m.entries().size(), (size_t)0);
+    rmrf(root);
+}
+
+void test_manifest_upsert_replaces() {
+    tictac::cache::Manifest m;
+    tictac::cache::ManifestEntry e{};
+    e.kind = "p123"; e.key_hash_full = std::string(64, 'b');
+    e.size_bytes = 100; e.filename = "p123/x.h5";
+    EXPECT(m.upsert(e));
+    e.size_bytes = 200;
+    EXPECT(!m.upsert(e));
+    EXPECT_EQ(m.find(e.key_hash_full)->size_bytes, (int64_t)200);
+}
+
 int main() {
     test_sha256_known_vectors();
     test_p123_canonical_json_keys_sorted();
@@ -107,6 +184,11 @@ int main() {
     test_w1_double_quantization();
     test_w1_double_above_quantum_changes_hash();
     test_filename_prefix_p123();
+
+    test_manifest_roundtrip();
+    test_manifest_missing_returns_empty();
+    test_manifest_corrupt_returns_empty();
+    test_manifest_upsert_replaces();
 
     if (failures > 0) {
         std::cerr << failures << " test(s) failed\n";
