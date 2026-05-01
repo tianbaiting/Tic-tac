@@ -57,6 +57,7 @@ bool W1Key::operator==(const W1Key& o) const {
         && Np_WP == o.Np_WP && Nq_WP == o.Nq_WP
         && J_2N_max == o.J_2N_max && two_J_3N_max == o.two_J_3N_max
         && two_J_3N == o.two_J_3N && P_3N == o.P_3N
+        && a_r == o.a_r && a_c == o.a_c
         && quantize_1e9(c_D) == quantize_1e9(o.c_D)
         && quantize_1e9(c_E) == quantize_1e9(o.c_E)
         && quantize_1e9(Lambda_3NF) == quantize_1e9(o.Lambda_3NF)
@@ -91,6 +92,8 @@ std::string canonical_json(const W1Key& k) {
        << ",\"Np_WP\":" << k.Np_WP
        << ",\"Nq_WP\":" << k.Nq_WP
        << ",\"P_3N\":" << k.P_3N
+       << ",\"a_c\":" << k.a_c
+       << ",\"a_r\":" << k.a_r
        << ",\"c_D\":" << fmt_double_q(k.c_D)
        << ",\"c_E\":" << fmt_double_q(k.c_E)
        << ",\"potential_model\":" << json_escape(k.potential_model)
@@ -129,7 +132,8 @@ std::string filename_prefix(const W1Key& k) {
        << "__Np" << k.Np_WP << "_Nq" << k.Nq_WP
        << "_J2max" << k.J_2N_max
        << "_J3Nmax" << k.two_J_3N_max
-       << "_JP" << k.two_J_3N << parity_str(k.P_3N);
+       << "_JP" << k.two_J_3N << parity_str(k.P_3N)
+       << "_a" << k.a_r << "_" << k.a_c;
     return os.str();
 }
 

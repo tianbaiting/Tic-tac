@@ -49,6 +49,7 @@ static W1Key make_w1_key() {
     k.c_D = -0.20; k.c_E = -0.205;
     k.Lambda_3NF = 500.0;
     k.regulator_kind = "gaussian";
+    k.a_r = 0; k.a_c = 0;
     return k;
 }
 
@@ -98,6 +99,13 @@ void test_w1_double_above_quantum_changes_hash() {
     auto k1 = make_w1_key();
     auto k2 = make_w1_key();
     k2.c_D = -0.2001;  // well above 1e-9 quantum
+    EXPECT(tictac::cache::hash_full(k1) != tictac::cache::hash_full(k2));
+}
+
+void test_w1_a_indices_change_hash() {
+    auto k1 = make_w1_key();
+    auto k2 = make_w1_key();
+    k2.a_r = 1;  // different alpha row
     EXPECT(tictac::cache::hash_full(k1) != tictac::cache::hash_full(k2));
 }
 
@@ -326,6 +334,7 @@ int main() {
     test_p123_hash_changes_on_field_change();
     test_w1_double_quantization();
     test_w1_double_above_quantum_changes_hash();
+    test_w1_a_indices_change_hash();
     test_filename_prefix_p123();
 
     test_manifest_roundtrip();

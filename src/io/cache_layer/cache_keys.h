@@ -24,6 +24,7 @@ struct W1Key {
     int    Np_WP, Nq_WP;
     int    J_2N_max, two_J_3N_max;
     int    two_J_3N, P_3N;
+    int    a_r, a_c;          // alpha row/col indices for the block
     double c_D, c_E, Lambda_3NF;
     std::string regulator_kind;
 
