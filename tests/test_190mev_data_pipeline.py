@@ -14,34 +14,63 @@ EXAMPLES_DIR = ROOT / "examples"
 if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
-from compare_Ay_experiment import parse_u_file, read_experimental_iT11, read_experimental_dsigma  # noqa: E402
+from compare_Ay_experiment import read_experimental_iT11, read_experimental_dsigma  # noqa: E402
 from deuteron_proton_Ay import SolverRunConfig as SingleEnergyRunConfig, write_solver_inputs as write_single_inputs  # noqa: E402
 from run_dpol_p_observables import SolverRunConfig as MultiEnergyRunConfig, write_solver_inputs as write_multi_inputs  # noqa: E402
+from pw_amplitudes import parse_u_file as pw_parse_u_file  # noqa: E402
 from tlab_utils import format_tlab_dir_name  # noqa: E402
 
 
-class Test190MeVSolverValidationHelpers(unittest.TestCase):
-    def test_parse_solver_u_file_and_proxy(self):
-        content = (
-            "# header\n"
-            "1.0000000000000000e+02  7.0000000000000000e+01        14   "
-            "+1.0000000000000000e+00+0.0000000000000000e+00j   "
-            "+0.0000000000000000e+00+1.0000000000000000e+00j   "
-            "+0.0000000000000000e+00+1.0000000000000000e+00j   "
-            "+1.0000000000000000e+00+0.0000000000000000e+00j\n"
-        )
+_MINIMAL_U_CONTENT = (
+    "# Elastic Nd-scattering U-matrix elements\n"
+    "#      Name   row-idx   col-idx        l'      2*j'         l       2*j\n"
+    "        U00         0         0         0         1         0         1\n"
+    "        U01         0         1         0         1         2         3\n"
+    "        U10         1         0         2         3         0         1\n"
+    "        U11         1         1         2         3         2         3\n"
+    "# header\n"
+    "1.0000000000000000e+02  7.0000000000000000e+01        14   "
+    "+1.0000000000000000e+00+0.0000000000000000e+00j   "
+    "+0.0000000000000000e+00+1.0000000000000000e+00j   "
+    "+0.0000000000000000e+00+1.0000000000000000e+00j   "
+    "+1.0000000000000000e+00+0.0000000000000000e+00j\n"
+)
 
+_MINIMAL_Q_KINEMATICS = (
+    "# BOUNDARIES:\n"
+    "# idx  q[MeV]  Ecm[MeV]  Tlab[MeV]\n"
+    "  14  +2.50e+02  +5.0e+01  +7.5e+01\n"
+    "  15  +3.00e+02  +7.0e+01  +1.05e+02\n"
+    "  16  +3.50e+02  +9.5e+01  +1.40e+02\n"
+    "# BIN MID-POINTS:\n"
+    "# idx  q[MeV]  Ecm[MeV]  Tlab[MeV]\n"
+    "  14  +2.75e+02  +6.0e+01  +9.0e+01\n"
+    "  15  +3.25e+02  +8.0e+01  +1.20e+02\n"
+)
+
+
+class Test190MeVSolverValidationHelpers(unittest.TestCase):
+    def test_pw_parse_u_file_extracts_jpi_block(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fpath = Path(tmpdir) / "U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt"
-            fpath.write_text(content, encoding="utf-8")
+            fpath.write_text(_MINIMAL_U_CONTENT, encoding="utf-8")
 
-            points = parse_u_file(fpath)
-            self.assertEqual(len(points), 1)
-            self.assertEqual(points[0].parity, "+")
-
-            # f_no_flip = 2+0j, f_flip = 0+2j => ay_proxy = Im(conj(f0)*f1)/(|f0|^2+|f1|^2)=4/8=0.5
-            self.assertTrue(math.isclose(points[0].ay_proxy, 0.5, rel_tol=0.0, abs_tol=1e-12))
-            self.assertTrue(math.isclose(points[0].dsigma_proxy, 8.0, rel_tol=0.0, abs_tol=1e-12))
+            block = pw_parse_u_file(fpath)
+            self.assertIsNotNone(block)
+            self.assertEqual(block.two_J, 1)
+            self.assertEqual(block.parity, 1)
+            self.assertEqual(len(block.channels), 2)
+            self.assertEqual((block.channels[0].l, block.channels[0].two_j), (0, 1))
+            self.assertEqual((block.channels[1].l, block.channels[1].two_j), (2, 3))
+            self.assertEqual(len(block.points), 1)
+            point = block.points[0]
+            self.assertEqual(point.q_idx, 14)
+            self.assertAlmostEqual(point.tlab, 100.0)
+            self.assertEqual(point.matrix.shape, (2, 2))
+            self.assertEqual(complex(point.matrix[0, 0]), 1 + 0j)
+            self.assertEqual(complex(point.matrix[0, 1]), 0 + 1j)
+            self.assertEqual(complex(point.matrix[1, 0]), 0 + 1j)
+            self.assertEqual(complex(point.matrix[1, 1]), 1 + 0j)
 
     def test_experiment_data_parsers(self):
         it11 = read_experimental_iT11(ROOT / "data/DataOfCrosssectionAndPol/CompletSetOFT/T.txt")
@@ -133,21 +162,13 @@ class Test190MeVSolverValidationHelpers(unittest.TestCase):
             self.assertIn("energy_input_file=Input/tlab_dpol_observables_autogen.txt", config_text)
 
     def test_compare_script_emits_tlab_named_summary_schema(self):
-        content = (
-            "# header\n"
-            "1.0000000000000000e+02  7.0000000000000000e+01        14   "
-            "+1.0000000000000000e+00+0.0000000000000000e+00j   "
-            "+0.0000000000000000e+00+1.0000000000000000e+00j   "
-            "+0.0000000000000000e+00+1.0000000000000000e+00j   "
-            "+1.0000000000000000e+00+0.0000000000000000e+00j\n"
-        )
-
         with tempfile.TemporaryDirectory() as tmpdir:
             work_dir = Path(tmpdir) / "work"
             solver_out_dir = Path(tmpdir) / "solver_out"
             solver_out_dir.mkdir(parents=True, exist_ok=True)
             u_file = solver_out_dir / "U_PW_elements_Np_20_Nq_20_JP_1_1_Jmax_2_PSI_0.txt"
-            u_file.write_text(content, encoding="utf-8")
+            u_file.write_text(_MINIMAL_U_CONTENT, encoding="utf-8")
+            (solver_out_dir / "q_kinematics_Nq_20.txt").write_text(_MINIMAL_Q_KINEMATICS, encoding="utf-8")
 
             cmd = [
                 sys.executable,

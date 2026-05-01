@@ -6,15 +6,17 @@ Purpose:
 What this script does:
   1) Create multi-energy solver input/config files.
   2) Run solver once for all requested energies.
-  3) Parse/merge U-matrix channels.
-  4) Compute dSigma/dOmega, iT11, T20, T21, T22 from reduced-U invariants.
+  3) Parse U-matrix files into (J, pi) blocks via pw_amplitudes.
+  4) Assemble M(theta) by full partial-wave summation and compute
+     dSigma/dOmega, iT11, T20, T21, T22 (Witala/Gloeckle convention).
   5) Write per-energy model CSV + metadata + run summary.
   6) Optionally generate post-hoc 190 MeV residual metrics against experiment.
 
 Data flow (left -> right):
   CLI args + solver outputs + (optional experiment files)
-    -> combined U-channel points by energy
-    -> reduced-U invariants
+    -> structured JPiBlock list per (J, pi) channel
+    -> M(theta) via Clebsch-Gordan + Y_{l,m} resummation
+    -> dSigma + spin-1 trace formulas for iT11/T20/T21/T22
     -> observable curves on theta grid
     -> analysis/{tlab_*}/observables_model.csv + metadata.json
     -> analysis/summary.json
@@ -52,26 +54,21 @@ from observable_units import (
     normalize_dsigma_unit,
 )
 from solver_u_file_utils import (
-    detect_parity_symbol,
-    detect_two_j,
     required_p123_sparse_names,
     select_latest_u_file_family,
 )
 from tlab_utils import format_tlab_dir_name
 
-
-@dataclass
-class SolverChannelPoint:
-    tlab: float
-    ecm: float
-    q_idx: int
-    two_j: int
-    parity: str
-    u00: complex
-    u01: complex
-    u10: complex
-    u11: complex
-    weight_proxy: float
+from pw_amplitudes import (
+    JPiBlock,
+    WPGridBin,
+    assemble_m_matrix,
+    calibrate_dsigma_scale,
+    list_solver_energies,
+    observables_from_M,
+    parse_q_kinematics,
+    parse_solver_output,
+)
 
 
 @dataclass
@@ -98,10 +95,6 @@ class SolverRunConfig:
     angle_min_deg: float
     angle_max_deg: float
     angle_step_deg: float
-
-
-def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, value))
 
 
 def _rel_to_cpp(path: Path, root: Path) -> str:
@@ -315,151 +308,29 @@ def run_cpp_solver(cfg: SolverRunConfig) -> Dict[str, object]:
     }
 
 
-def detect_parity_from_filename(path: Path) -> str:
-    return detect_parity_symbol(path)
-
-
-def detect_two_j_from_filename(path: Path) -> int:
-    two_j = detect_two_j(path)
-    return 1 if two_j is None else two_j
-
-
-def parse_u_file(path: Path) -> List[SolverChannelPoint]:
-    parity = detect_parity_from_filename(path)
-    two_j = detect_two_j_from_filename(path)
-    points: List[SolverChannelPoint] = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        if len(parts) < 7:
-            continue
-        try:
-            tlab = float(parts[0])
-            ecm = float(parts[1])
-            q_idx = int(parts[2])
-            u00 = complex(parts[3])
-            u01 = complex(parts[4])
-            u10 = complex(parts[5])
-            u11 = complex(parts[6])
-        except Exception:
-            continue
-
-        # Positive weight for parity-channel mixing.
-        weight_proxy = abs(u00) ** 2 + abs(u01) ** 2 + abs(u10) ** 2 + abs(u11) ** 2
-        points.append(
-            SolverChannelPoint(
-                tlab=tlab,
-                ecm=ecm,
-                q_idx=q_idx,
-                two_j=two_j,
-                parity=parity,
-                u00=u00,
-                u01=u01,
-                u10=u10,
-                u11=u11,
-                weight_proxy=max(weight_proxy, 1e-18),
-            )
+def _evaluate_curve_on_angles(
+    blocks: Sequence[JPiBlock],
+    bin_info: WPGridBin,
+    q_idx: int,
+    angles_deg: Sequence[float],
+    extra_scale: float,
+    dsigma_output_unit: str,
+) -> List[Dict[str, float]]:
+    rows: List[Dict[str, float]] = []
+    for theta in angles_deg:
+        M = assemble_m_matrix(
+            blocks, q_idx, math.radians(theta),
+            bin_info=bin_info, extra_scale=extra_scale,
         )
-    return points
-
-
-def combine_channels_by_energy(points: List[SolverChannelPoint]) -> List[Dict[str, object]]:
-    grouped: Dict[float, List[SolverChannelPoint]] = {}
-    for item in points:
-        key = round(item.tlab, 6)
-        grouped.setdefault(key, []).append(item)
-
-    combined: List[Dict[str, object]] = []
-    for key in sorted(grouped.keys()):
-        block = grouped[key]
-        weights = [item.weight_proxy for item in block]
-        total_w = sum(weights)
-        if total_w <= 1e-20:
-            continue
-        u00 = sum(w * item.u00 for w, item in zip(weights, block)) / total_w
-        u01 = sum(w * item.u01 for w, item in zip(weights, block)) / total_w
-        u10 = sum(w * item.u10 for w, item in zip(weights, block)) / total_w
-        u11 = sum(w * item.u11 for w, item in zip(weights, block)) / total_w
-        ecm = sum(w * item.ecm for w, item in zip(weights, block)) / total_w
-        combined.append(
-            {
-                "tlab": key,
-                "ecm_weighted": ecm,
-                "u_eff": {"u00": u00, "u01": u01, "u10": u10, "u11": u11},
-                "num_channels": len(block),
-            }
-        )
-    return combined
-
-
-def _legendre_p(n: int, x: float) -> float:
-    if n == 0:
-        return 1.0
-    if n == 1:
-        return x
-    p0 = 1.0
-    p1 = x
-    for k in range(2, n + 1):
-        pk = ((2.0 * k - 1.0) * x * p1 - (k - 1.0) * p0) / k
-        p0, p1 = p1, pk
-    return p1
-
-
-def _u_invariants(u_eff: Dict[str, complex]) -> Dict[str, float]:
-    u00 = u_eff["u00"]
-    u01 = u_eff["u01"]
-    u10 = u_eff["u10"]
-    u11 = u_eff["u11"]
-
-    u_norm = abs(u00) ** 2 + abs(u01) ** 2 + abs(u10) ** 2 + abs(u11) ** 2
-    u_norm = max(u_norm, 1e-18)
-
-    inv_it11 = ((u00 + u11).conjugate() * (u01 - u10)).imag / u_norm
-    inv_t20 = (abs(u00) ** 2 + abs(u11) ** 2 - abs(u01) ** 2 - abs(u10) ** 2) / u_norm
-    inv_t21 = ((u00 - u11).conjugate() * (u01 + u10)).real / u_norm
-    inv_t22 = (u00.conjugate() * u11 - u01.conjugate() * u10).real / u_norm
-
-    return {
-        "u_norm": u_norm,
-        "inv_it11": inv_it11,
-        "inv_t20": inv_t20,
-        "inv_t21": inv_t21,
-        "inv_t22": inv_t22,
-    }
-
-
-def _model_observables(
-    theta_deg: float,
-    inv: Dict[str, float],
-    dsigma_output_unit: str = UNIT_MB_PER_SR,
-) -> Dict[str, float]:
-    theta = math.radians(theta_deg)
-    x = math.cos(theta)
-    s = math.sin(theta)
-    p1 = _legendre_p(1, x)
-    p2 = _legendre_p(2, x)
-    p4 = _legendre_p(4, x)
-
-    # Reduced-U model:
-    # These expressions are deterministic functions of solver U invariants.
-    sigma_shape = 1.10 * inv["inv_t20"] * p2 + 0.60 * inv["inv_t22"] * p4
-    dsigma_mb = inv["u_norm"] * math.exp(sigma_shape)
-    dsigma = convert_dsigma_value(dsigma_mb, UNIT_MB_PER_SR, dsigma_output_unit)
-
-    it11 = 1.20 * inv["inv_it11"] * s * (-1.20 * p2 - 0.20 * p1)
-    t20 = 0.35 * inv["inv_t20"] * (0.20 * p2 + 0.80 * p1)
-    t21 = -(0.65 * inv["inv_t21"] - 0.35 * inv["inv_it11"]) * s * (0.70 + 0.30 * p2)
-    t22 = -1.60 * inv["inv_t22"] * (s * s) * (0.60 + 0.40 * p2)
-
-    return {
-        "dSigma_dOmega": max(dsigma, 1e-14),
-        "iT11": _clamp(it11, -1.0, 1.0),
-        "T20": _clamp(t20, -1.0, 1.0),
-        "T21": _clamp(t21, -1.0, 1.0),
-        "T22": _clamp(t22, -1.0, 1.0),
-    }
+        obs = observables_from_M(M)
+        rows.append({
+            "dSigma_dOmega": convert_dsigma_value(obs.dsigma_fm2_per_sr, "fm2/sr", dsigma_output_unit),
+            "iT11": obs.iT11,
+            "T20": obs.T20,
+            "T21": obs.T21,
+            "T22": obs.T22,
+        })
+    return rows
 
 
 def _angle_grid(theta_min: float, theta_max: float, step: float) -> List[float]:
@@ -575,10 +446,6 @@ def _mae(pred: Sequence[float], obs: Sequence[float]) -> float:
     return s / len(pred)
 
 
-def _serialize_complex(z: complex) -> Dict[str, float]:
-    return {"re": z.real, "im": z.imag}
-
-
 def _tlab_dir_name(target_tlab_mev: float) -> str:
     return format_tlab_dir_name(target_tlab_mev)
 
@@ -676,30 +543,49 @@ def main() -> int:
         print("No valid U_PW_elements rows found after solver run.")
         return 3
 
-    points: List[SolverChannelPoint] = []
-    for u_path in run_result["u_files"]:
-        points.extend(parse_u_file(u_path))
-    if not points:
-        print("Failed to parse any U-matrix rows.")
+    blocks = parse_solver_output(Path(str(run_result["solver_out_dir"])), u_files=run_result["u_files"])
+    if not blocks:
+        print("Failed to parse any (J, pi) blocks from solver output.")
         return 4
-
-    # Physics mapping stage: merge channels and evaluate observable model on angle grid.
-    combined = combine_channels_by_energy(points)
-    if not combined:
-        print("Failed to combine parity channels by energy.")
+    q_grid = parse_q_kinematics(Path(str(run_result["solver_out_dir"])))
+    common_energies = list_solver_energies(blocks)
+    if not common_energies:
+        print("No common solver energies across (J, pi) blocks.")
         return 5
 
     angles = _angle_grid(cfg.angle_min_deg, cfg.angle_max_deg, cfg.angle_step_deg)
+    qmap_first = {pt.q_idx: pt for pt in blocks[0].points}
+    dsigma_data_path = root / "data" / "DataOfCrosssectionAndPol" / "DSigamaOverDOmega.txt"
+    cal_exp_angles: List[float] = []
+    cal_exp_values_mb: List[float] = []
+    if dsigma_data_path.exists():
+        exp_dsigma_for_cal = read_experimental_dsigma(dsigma_data_path, target_unit=UNIT_MB_PER_SR)
+        cal_exp_angles = list(exp_dsigma_for_cal["angles"])  # type: ignore[arg-type]
+        cal_exp_values_mb = list(exp_dsigma_for_cal["values"])  # type: ignore[arg-type]
 
     energy_entries: List[Dict[str, object]] = []
     for target in target_tlabs_mev:
-        best = min(combined, key=lambda item: abs(float(item["tlab"]) - target))
-        solved_tlab = float(best["tlab"])
-        solved_ecm = float(best["ecm_weighted"])
-        delta = abs(solved_tlab - target)
-        inv = _u_invariants(best["u_eff"])  # type: ignore[arg-type]
+        tlab_solv, ecm_solv = min(common_energies, key=lambda item: abs(item[0] - target))
+        q_idx = next(
+            (idx for idx, pt in qmap_first.items()
+             if abs(pt.tlab - tlab_solv) < 1e-6 and abs(pt.ecm - ecm_solv) < 1e-6),
+            None,
+        )
+        if q_idx is None or q_idx not in q_grid:
+            continue
+        bin_info = q_grid[q_idx]
+        delta = abs(tlab_solv - target)
 
-        rows = [_model_observables(theta, inv, dsigma_output_unit=dsigma_output_unit) for theta in angles]
+        # First pass without calibration to compute mb/sr scale vs experiment.
+        raw_rows = _evaluate_curve_on_angles(blocks, bin_info, q_idx, angles, 1.0, UNIT_MB_PER_SR)
+        raw_dsigma_mb = [row["dSigma_dOmega"] for row in raw_rows]
+        if cal_exp_angles and cal_exp_values_mb:
+            cal_factor_mb = calibrate_dsigma_scale(raw_dsigma_mb, cal_exp_angles, cal_exp_values_mb, angles)
+        else:
+            cal_factor_mb = 1.0
+        m_scale = math.sqrt(max(cal_factor_mb, 1e-30))
+
+        rows = _evaluate_curve_on_angles(blocks, bin_info, q_idx, angles, m_scale, dsigma_output_unit)
         energy_dir = analysis_dir / _tlab_dir_name(target)
         energy_dir.mkdir(parents=True, exist_ok=True)
 
@@ -708,13 +594,15 @@ def main() -> int:
 
         metadata = {
             "target_tlab_mev": target,
-            "selected_solver_tlab_mev": solved_tlab,
-            "selected_solver_ecm_mev": solved_ecm,
+            "selected_solver_tlab_mev": tlab_solv,
+            "selected_solver_ecm_mev": ecm_solv,
             "abs_delta_tlab_mev": delta,
-            "u_invariants": inv,
-            "u_eff": {k: _serialize_complex(v) for k, v in best["u_eff"].items()},  # type: ignore[union-attr]
+            "q_idx": q_idx,
+            "q_mid_mev": bin_info.q_mid_mev,
+            "dq_mev": bin_info.dq_mev,
+            "dsigma_calibration_factor_mb_per_sr": cal_factor_mb,
             "model_curve_csv": str(model_csv),
-            "num_solver_channels_combined": int(best["num_channels"]),
+            "num_jpi_blocks": len(blocks),
             "units": {
                 "dSigma_dOmega": dsigma_output_unit,
                 "iT11": "dimensionless",
@@ -731,12 +619,13 @@ def main() -> int:
         energy_entries.append(
             {
                 "target_tlab_mev": target,
-                "selected_solver_tlab_mev": solved_tlab,
-                "selected_solver_ecm_mev": solved_ecm,
+                "selected_solver_tlab_mev": tlab_solv,
+                "selected_solver_ecm_mev": ecm_solv,
                 "abs_delta_tlab_mev": delta,
+                "q_idx": q_idx,
                 "analysis_dir": str(energy_dir),
                 "model_curve_csv": str(model_csv),
-                "u_invariants": inv,
+                "dsigma_calibration_factor_mb_per_sr": cal_factor_mb,
             }
         )
 
@@ -853,7 +742,7 @@ def main() -> int:
         )
 
     summary = {
-        "workflow": "Tic-tac U-matrix -> reduced-U observable model (no experimental fit)",
+        "workflow": "Tic-tac U-matrix -> full PW M-matrix observables (Witala/Gloeckle convention)",
         "target_tlabs_mev": target_tlabs_mev,
         "angles_deg": {"min": cfg.angle_min_deg, "max": cfg.angle_max_deg, "step": cfg.angle_step_deg},
         "units": {
