@@ -2,6 +2,7 @@
 #include "cache_manifest.h"
 #include "cache_io_p123.h"
 #include "cache_io_w1.h"
+#include "cache_layer.h"
 #include "third_party/sha256.h"
 #include <cassert>
 #include <cstdlib>
@@ -254,6 +255,70 @@ void test_w1_io_roundtrip() {
     rmrf(root);
 }
 
+void test_cache_layer_p123_roundtrip() {
+    auto root = make_tmpdir();
+    tictac::cache::initialize(root);
+
+    auto k = make_p123_key();
+    tictac::cache::P123Arrays w{};
+    w.nnz = 3;
+    w.val_array = new double[3]{ 7.0, 8.0, 9.0 };
+    w.row_array = new int[3]   { 1, 2, 3 };
+    w.col_array = new int[3]   { 0, 0, 0 };
+
+    tictac::cache::store_p123(k, w);
+
+    tictac::cache::P123Arrays r{};
+    auto res = tictac::cache::lookup_p123(k, &r);
+    EXPECT(res.hit);
+    EXPECT_EQ(r.nnz, (size_t)3);
+
+    auto stats = tictac::cache::summary();
+    EXPECT_EQ(stats.n_p123, (size_t)1);
+
+    delete[] w.val_array; delete[] w.row_array; delete[] w.col_array;
+    delete[] r.val_array; delete[] r.row_array; delete[] r.col_array;
+    tictac::cache::shutdown();
+    rmrf(root);
+}
+
+void test_cache_layer_lookup_miss_when_no_file() {
+    auto root = make_tmpdir();
+    tictac::cache::initialize(root);
+
+    auto k = make_p123_key();
+    tictac::cache::P123Arrays r{};
+    auto res = tictac::cache::lookup_p123(k, &r);
+    EXPECT(!res.hit);
+    EXPECT_EQ(res.miss_reason, std::string("not_found"));
+
+    tictac::cache::shutdown();
+    rmrf(root);
+}
+
+void test_cache_layer_w1_roundtrip() {
+    auto root = make_tmpdir();
+    tictac::cache::initialize(root);
+
+    auto k = make_w1_key();
+    tictac::cache::W1Block b{};
+    b.Nq = 2; b.Np = 2; b.a_r = 0; b.a_c = 0;
+    b.data.assign(b.Nq*b.Nq*b.Np*b.Np, 0.0f);
+    for (size_t i = 0; i < b.data.size(); ++i) b.data[i] = (float)(i + 1);
+
+    tictac::cache::store_w1(k, b);
+
+    tictac::cache::W1Block r{};
+    auto res = tictac::cache::lookup_w1(k, &r);
+    EXPECT(res.hit);
+    EXPECT_EQ(r.data.size(), b.data.size());
+    for (size_t i = 0; i < b.data.size(); ++i)
+        EXPECT_EQ(r.data[i], b.data[i]);
+
+    tictac::cache::shutdown();
+    rmrf(root);
+}
+
 int main() {
     test_sha256_known_vectors();
     test_p123_canonical_json_keys_sorted();
@@ -272,6 +337,10 @@ int main() {
     test_p123_io_key_mismatch_rejected();
 
     test_w1_io_roundtrip();
+
+    test_cache_layer_p123_roundtrip();
+    test_cache_layer_lookup_miss_when_no_file();
+    test_cache_layer_w1_roundtrip();
 
     if (failures > 0) {
         std::cerr << failures << " test(s) failed\n";
