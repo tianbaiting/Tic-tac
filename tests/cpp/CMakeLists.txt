@@ -68,27 +68,14 @@ target_link_libraries(test_chiral_3nf_recoupling ${GSL_LIBRARIES})
 add_test(NAME chiral_3nf_recoupling COMMAND test_chiral_3nf_recoupling)
 
 # Cache layer C++ unit tests
-# Note: cache_keys.cpp etc. are added in later tasks. We include them only if they exist
-# so CMake configure succeeds even before those files are introduced. The test executable
-# may fail to link until all sources are present, which is acceptable for early bootstrap.
-set(CACHE_LAYER_TEST_SOURCES cache_layer_test.cpp)
-foreach(_src
+add_executable(cache_layer_test
+    cache_layer_test.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
-    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
-    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_layer.cpp
-    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_p123.cpp
-    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_w1.cpp
-    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp)
-    if(EXISTS ${_src})
-        list(APPEND CACHE_LAYER_TEST_SOURCES ${_src})
-    endif()
-endforeach()
-add_executable(cache_layer_test ${CACHE_LAYER_TEST_SOURCES})
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
+)
 target_include_directories(cache_layer_test PRIVATE
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party
     ${CMAKE_SOURCE_DIR}/include
-    ${HDF5_INCLUDE_DIRS}
 )
-target_link_libraries(cache_layer_test PRIVATE ${HDF5_CXX_LIBRARIES} ${HDF5_LIBRARIES})
 add_test(NAME cache_layer_test COMMAND cache_layer_test)
