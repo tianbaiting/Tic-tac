@@ -86,18 +86,22 @@ bool read_p123_h5(const std::string& path,
 
     std::string kind; int sv = 0; std::string khash, kjson;
     if (!read_str_attr(file, "tictac_cache_kind", kind) || kind != "p123") {
-        if (miss_reason) *miss_reason = "kind_mismatch"; H5Fclose(file); return false;
+        if (miss_reason) *miss_reason = "kind_mismatch";
+        H5Fclose(file); return false;
     }
     if (!read_int_attr(file, "tictac_schema_version", sv) || sv != expected_key.schema_version) {
-        if (miss_reason) *miss_reason = "schema_mismatch"; H5Fclose(file); return false;
+        if (miss_reason) *miss_reason = "schema_mismatch";
+        H5Fclose(file); return false;
     }
     if (!read_str_attr(file, "tictac_key_hash_full", khash) || khash != hash_full(expected_key)) {
-        if (miss_reason) *miss_reason = "key_mismatch"; H5Fclose(file); return false;
+        if (miss_reason) *miss_reason = "key_mismatch";
+        H5Fclose(file); return false;
     }
 
     uint64_t nnz_v = 0;
     if (H5LTread_dataset(file, "/nnz", H5T_NATIVE_UINT64, &nnz_v) < 0) {
-        if (miss_reason) *miss_reason = "corrupt"; H5Fclose(file); return false;
+        if (miss_reason) *miss_reason = "corrupt";
+        H5Fclose(file); return false;
     }
     out->nnz = (size_t)nnz_v;
     out->val_array = new double[out->nnz];
@@ -108,7 +112,8 @@ bool read_p123_h5(const std::string& path,
      || H5LTread_dataset(file, "/col", H5T_NATIVE_INT, out->col_array) < 0) {
         delete[] out->val_array; delete[] out->row_array; delete[] out->col_array;
         out->val_array = nullptr; out->row_array = nullptr; out->col_array = nullptr;
-        if (miss_reason) *miss_reason = "corrupt"; H5Fclose(file); return false;
+        if (miss_reason) *miss_reason = "corrupt";
+        H5Fclose(file); return false;
     }
 
     H5Fclose(file);
