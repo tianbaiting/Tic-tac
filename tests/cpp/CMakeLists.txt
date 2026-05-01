@@ -72,11 +72,14 @@ add_executable(cache_layer_test
     cache_layer_test.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_p123.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
 )
 target_include_directories(cache_layer_test PRIVATE
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party
     ${CMAKE_SOURCE_DIR}/include
+    ${HDF5_INCLUDE_DIRS}
 )
+target_link_libraries(cache_layer_test PRIVATE ${HDF5_CXX_LIBRARIES} ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 add_test(NAME cache_layer_test COMMAND cache_layer_test)

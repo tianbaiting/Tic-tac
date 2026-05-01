@@ -1,5 +1,6 @@
 #include "cache_keys.h"
 #include "cache_manifest.h"
+#include "cache_io_p123.h"
 #include "third_party/sha256.h"
 #include <cassert>
 #include <cstdlib>
@@ -176,6 +177,58 @@ void test_manifest_upsert_replaces() {
     EXPECT_EQ(m.find(e.key_hash_full)->size_bytes, (int64_t)200);
 }
 
+void test_p123_io_roundtrip() {
+    auto root = make_tmpdir();
+    auto path = root + "/test_p123.h5";
+
+    auto k = make_p123_key();
+    tictac::cache::P123Arrays w{};
+    w.nnz = 5;
+    w.val_array = new double[5]{ 1.0, 2.0, 3.0, 4.0, 5.0 };
+    w.row_array = new int[5]   { 0, 1, 2, 3, 4 };
+    w.col_array = new int[5]   { 4, 3, 2, 1, 0 };
+
+    tictac::cache::write_p123_h5(path, k, w, "tictac-test");
+
+    tictac::cache::P123Arrays r{};
+    std::string miss;
+    bool ok = tictac::cache::read_p123_h5(path, k, &r, &miss);
+    EXPECT(ok);
+    EXPECT_EQ(r.nnz, (size_t)5);
+    if (r.nnz == 5) {
+        for (int i = 0; i < 5; ++i) {
+            EXPECT_EQ(r.val_array[i], w.val_array[i]);
+            EXPECT_EQ(r.row_array[i], w.row_array[i]);
+            EXPECT_EQ(r.col_array[i], w.col_array[i]);
+        }
+    }
+    delete[] w.val_array; delete[] w.row_array; delete[] w.col_array;
+    delete[] r.val_array; delete[] r.row_array; delete[] r.col_array;
+    rmrf(root);
+}
+
+void test_p123_io_key_mismatch_rejected() {
+    auto root = make_tmpdir();
+    auto path = root + "/test_p123.h5";
+
+    auto k1 = make_p123_key();
+    tictac::cache::P123Arrays w{}; w.nnz = 1;
+    w.val_array = new double[1]{1.0}; w.row_array = new int[1]{0}; w.col_array = new int[1]{0};
+    tictac::cache::write_p123_h5(path, k1, w, "tictac-test");
+
+    auto k2 = make_p123_key();
+    k2.Np_WP = 50;  // different key
+
+    tictac::cache::P123Arrays r{};
+    std::string miss;
+    bool ok = tictac::cache::read_p123_h5(path, k2, &r, &miss);
+    EXPECT(!ok);
+    EXPECT_EQ(miss, std::string("key_mismatch"));
+
+    delete[] w.val_array; delete[] w.row_array; delete[] w.col_array;
+    rmrf(root);
+}
+
 int main() {
     test_sha256_known_vectors();
     test_p123_canonical_json_keys_sorted();
@@ -189,6 +242,9 @@ int main() {
     test_manifest_missing_returns_empty();
     test_manifest_corrupt_returns_empty();
     test_manifest_upsert_replaces();
+
+    test_p123_io_roundtrip();
+    test_p123_io_key_mismatch_rejected();
 
     if (failures > 0) {
         std::cerr << failures << " test(s) failed\n";
