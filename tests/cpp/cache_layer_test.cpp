@@ -1,6 +1,7 @@
 #include "cache_keys.h"
 #include "cache_manifest.h"
 #include "cache_io_p123.h"
+#include "cache_io_w1.h"
 #include "third_party/sha256.h"
 #include <cassert>
 #include <cstdlib>
@@ -229,6 +230,30 @@ void test_p123_io_key_mismatch_rejected() {
     rmrf(root);
 }
 
+void test_w1_io_roundtrip() {
+    auto root = make_tmpdir();
+    auto path = root + "/test_w1.h5";
+
+    auto k = make_w1_key();
+    tictac::cache::W1Block b{};
+    b.Nq = 2; b.Np = 3; b.a_r = 4; b.a_c = 5;
+    b.data.assign(b.Nq * b.Nq * b.Np * b.Np, 0.0f);
+    for (size_t i = 0; i < b.data.size(); ++i) b.data[i] = (float)i * 0.5f;
+
+    tictac::cache::write_w1_h5(path, k, b, "tictac-test");
+
+    tictac::cache::W1Block r{};
+    std::string miss;
+    bool ok = tictac::cache::read_w1_h5(path, k, &r, &miss);
+    EXPECT(ok);
+    EXPECT_EQ(r.Nq, b.Nq); EXPECT_EQ(r.Np, b.Np);
+    EXPECT_EQ(r.a_r, b.a_r); EXPECT_EQ(r.a_c, b.a_c);
+    EXPECT_EQ(r.data.size(), b.data.size());
+    for (size_t i = 0; i < b.data.size(); ++i)
+        EXPECT_EQ(r.data[i], b.data[i]);
+    rmrf(root);
+}
+
 int main() {
     test_sha256_known_vectors();
     test_p123_canonical_json_keys_sorted();
@@ -245,6 +270,8 @@ int main() {
 
     test_p123_io_roundtrip();
     test_p123_io_key_mismatch_rejected();
+
+    test_w1_io_roundtrip();
 
     if (failures > 0) {
         std::cerr << failures << " test(s) failed\n";

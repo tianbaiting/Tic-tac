@@ -73,6 +73,7 @@ add_executable(cache_layer_test
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_p123.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_w1.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
 )
 target_include_directories(cache_layer_test PRIVATE
