@@ -30,3 +30,4 @@ docs/treatise/figures/plots/*.pdf
 
 # Hash-keyed cache layer (P123, W1 caches)
 cache/
+!cache/README.md
