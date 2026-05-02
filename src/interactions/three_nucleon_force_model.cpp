@@ -21,8 +21,12 @@ three_nucleon_force_model* three_nucleon_force_model::fetch(run_params run_param
 	}
 
 	if (model=="chiral_N2LO"){
-		// Select c₁,c₃,c₄ from the 2NF potential model
-		double c1 = 0.0, c3 = 0.0, c4 = 0.0;
+		// [EN] Select c_i LECs. For chiral 2NFs, inherit the matching set; for
+		// phenomenological 2NFs (nijmegen, malfliet_tjon, LO_internal) we fall back
+		// to the Idaho_N3LO set (c1=-0.81, c3=-3.2, c4=+5.4 GeV^-1) which is the
+		// standard Witała/Nogga choice when pairing chiral N2LO 3NF with a
+		// phenomenological 2NF such as AV18 or Nijmegen-I/II.
+		double c1 = c1_idaho_n3lo, c3 = c3_idaho_n3lo, c4 = c4_idaho_n3lo;
 		const std::string& pot = run_parameters.potential_model;
 		if (pot == "N2LOopt") {
 			c1 = c1_n2lo_opt; c3 = c3_n2lo_opt; c4 = c4_n2lo_opt;

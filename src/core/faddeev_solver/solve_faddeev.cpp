@@ -236,7 +236,7 @@ void calculate_CPVC_col(double*  col_array,
 	// / [CN] 3NF 贡献（Born 级）：把 W^(1)·(1+P)·C 加到 PVC_col 缓冲区。
 	//   单位部分：W^(1)·C —— 对中间 p 直接做 W1×C 求和
 	//   置换部分：W^(1)·P·C —— 用稀疏 P123 循环计算 P·C 列，然后施加 W^(1)
-	if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled()){
+	if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled() && tnf_ctx.w1_scale != 0.0){
 		const three_nucleon_force_model* tnf = tnf_ctx.tnf;
 		const pw_3N_statespace& pw_st = *tnf_ctx.pw_states;
 		const double* p_WP = tnf_ctx.p_WP_array;
@@ -254,10 +254,25 @@ void calculate_CPVC_col(double*  col_array,
 		// 对于作用在完整 (p,q) 空间的 W^(1)，其 WP 矩阵元为：
 		//   W^(1)_WP = p_r × q_r × p_c × q_c × √dp_r × √dq_r × √dp_c × √dq_c × W^(1)(mids)
 
+		// [EN] Momentum unit convention: p_WP/q_WP are stored in MeV (consistent with 2NF V, which uses MeV),
+		// but the 3NF W1_element API expects Jacobi momenta in fm^{-1}. We convert on the fly and scale
+		// the output so the WP matrix element lives in the same MeV-based convention as V_WP.
+		// W^(1) returned in fm^5 has natural-unit equivalence (hbarc)^5 MeV^{-5}; multiplying by 1/hbarc^5
+		// converts it to MeV^{-5}, which then combines with the four momentum×sqrt(bin-width) factors
+		// (MeV^6) to give a W1_WP matrix element in MeV — matching how V_WP (= p p' √(dp dp') V_MeV)
+		// combines to give MeV^4 and then integrates against MeV-measure basis functions.
+		// / [CN] p_WP/q_WP 为 MeV（与 2NF V 一致），但 W1_element API 约定动量单位为 fm^{-1}，
+		// 故在调用处做 MeV→fm^{-1} 换算，并用 1/hbarc^5 把 fm^5 的输出换成 MeV^{-5}，与 V_WP 的
+		// MeV 基约定一致。
+		const double inv_hbarc  = 1.0 / hbarc;
+		const double inv_hbarc5 = inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc;
+		const double w1_unit    = inv_hbarc5 * tnf_ctx.w1_scale;  // combined unit-conversion + diagnostic knob
+
 		// q_c bin midpoint and WP normalization factor
 		double q_c_mid = 0.5 * (q_WP[idx_q_c] + q_WP[idx_q_c + 1]);
 		double dq_c    = q_WP[idx_q_c + 1] - q_WP[idx_q_c];
-		double wq_c    = q_c_mid * std::sqrt(dq_c);  // q_c × √dq_c
+		double wq_c    = q_c_mid * std::sqrt(dq_c);  // q_c × √dq_c  [MeV^{3/2}]
+		double q_c_fm  = q_c_mid * inv_hbarc;
 
 		double* C_block = CT_RM_array[idx_alpha_c * Nalpha + idx_alpha_c];
 
@@ -271,28 +286,34 @@ void calculate_CPVC_col(double*  col_array,
 					double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
 					double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
 					double wq_r    = q_r_mid * std::sqrt(dq_r);
+					double q_r_fm  = q_r_mid * inv_hbarc;
 
 					for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
 						double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
 						double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
 						double wp_r    = p_r_mid * std::sqrt(dp_r);
+						double p_r_fm  = p_r_mid * inv_hbarc;
 
-						// Sum over intermediate p_j (WP basis) with C weight
+						// Sum over intermediate p_j (WP basis) with C weight.
+						// C_block = CT_RM_array[alpha_c, alpha_c] stores C^T, so C[p_j, p_c] = C^T[p_c, p_j]
+						// = C_block[idx_p_c * Np_WP + idx_p_j] — NOT C_block[idx_p_j * Np_WP + idx_p_c].
 						double w1c_element = 0.0;
 						for (size_t idx_p_j = 0; idx_p_j < Np_WP; idx_p_j++){
-							double C_val = C_block[idx_p_j * Np_WP + idx_p_c];
+							double C_val = C_block[idx_p_c * Np_WP + idx_p_j];
 							if (C_val == 0.0) continue;
 
 							double p_j_mid = 0.5 * (p_WP[idx_p_j] + p_WP[idx_p_j + 1]);
 							double dp_j    = p_WP[idx_p_j + 1] - p_WP[idx_p_j];
 							double wp_j    = p_j_mid * std::sqrt(dp_j);
+							double p_j_fm  = p_j_mid * inv_hbarc;
 
 							double w1_val = tnf->W1_element(idx_alpha_r, idx_alpha_c,
-															p_r_mid, q_r_mid,
-															p_j_mid, q_c_mid,
+															p_r_fm, q_r_fm,
+															p_j_fm, q_c_fm,
 															pw_st);
-							// WP normalization: p_r √dp_r × q_r √dq_r × p_j √dp_j × q_c √dq_c
-							w1c_element += w1_val * (wp_r * wq_r * wp_j * wq_c) * C_val;
+							// Scale fm^5 → MeV^{-5}: multiply by 1/hbarc^5.
+							// WP normalization: p_r √dp_r × q_r √dq_r × p_j √dp_j × q_c √dq_c  [MeV^6]
+							w1c_element += (w1_val * w1_unit) * (wp_r * wq_r * wp_j * wq_c) * C_val;
 						}
 
 						if (w1c_element != 0.0){
@@ -319,7 +340,8 @@ void calculate_CPVC_col(double*  col_array,
 		// Apply W^(1)_WP to PC_col. PC_col elements are already in WP basis (from P·C).
 		// W^(1)_WP is a matrix in WP basis, so this is a standard matrix-vector product:
 		//   (W1_WP × PC_col)[row] = Σ_k W1_WP[row,k] × PC_col[k]
-		// W1_WP[row,k] = p_r q_r p_k q_k √dp_r √dq_r √dp_k √dq_k × W1(mids)
+		// W1_WP[row,k] = p_r q_r p_k q_k √dp_r √dq_r √dp_k √dq_k × W1(mids) × 1/hbarc^5
+		// (MeV→fm^{-1} for the W1 call; fm^5 → MeV^{-5} via 1/hbarc^5.)
 		for (size_t idx_alpha_k = 0; idx_alpha_k < Nalpha; idx_alpha_k++){
 			for (size_t idx_q_k = 0; idx_q_k < Nq_WP; idx_q_k++){
 				for (size_t idx_p_k = 0; idx_p_k < Np_WP; idx_p_k++){
@@ -333,6 +355,8 @@ void calculate_CPVC_col(double*  col_array,
 					double dq_k    = q_WP[idx_q_k + 1] - q_WP[idx_q_k];
 					double wp_k    = p_k_mid * std::sqrt(dp_k);
 					double wq_k    = q_k_mid * std::sqrt(dq_k);
+					double p_k_fm  = p_k_mid * inv_hbarc;
+					double q_k_fm  = q_k_mid * inv_hbarc;
 
 					for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
 						if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_k]) continue;
@@ -343,16 +367,18 @@ void calculate_CPVC_col(double*  col_array,
 							double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
 							double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
 							double wq_r    = q_r_mid * std::sqrt(dq_r);
+							double q_r_fm  = q_r_mid * inv_hbarc;
 							for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
 								double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
 								double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
 								double wp_r    = p_r_mid * std::sqrt(dp_r);
+								double p_r_fm  = p_r_mid * inv_hbarc;
 
 								double w1 = tnf->W1_element(idx_alpha_r, idx_alpha_k,
-															p_r_mid, q_r_mid,
-															p_k_mid, q_k_mid, pw_st);
+															p_r_fm, q_r_fm,
+															p_k_fm, q_k_fm, pw_st);
 								if (w1 != 0.0){
-									double w1_wp = w1 * (wp_r * wq_r * wp_k * wq_k);
+									double w1_wp = (w1 * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
 									size_t idx_row = idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r;
 									PVC_col[idx_row] += w1_wp * pc_val;
 								}
@@ -463,16 +489,22 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 								  P123_dim);
 
 				// [EN] 3NF contributions: W^(1)·(1+P)·C = W^(1)·C + W^(1)·P·C
-				// with WP bin-averaging normalization (see first 3NF block above for derivation)
-				if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled()){
+				// Momenta converted MeV→fm^{-1} for W1 API; output scaled fm^5→MeV^{-5}.
+				// w1_scale==0 short-circuit skips the ~O(Nα² Nq² Np³) W1_element hot path.
+				if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled() && tnf_ctx.w1_scale != 0.0){
 					const three_nucleon_force_model* tnf = tnf_ctx.tnf;
 					const pw_3N_statespace& pw_st = *tnf_ctx.pw_states;
 					const double* p_WP = tnf_ctx.p_WP_array;
 					const double* q_WP = tnf_ctx.q_WP_array;
 
+					const double inv_hbarc  = 1.0 / hbarc;
+					const double inv_hbarc5 = inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc;
+					const double w1_unit    = inv_hbarc5 * tnf_ctx.w1_scale;
+
 					double q_c_mid = 0.5 * (q_WP[idx_q_c] + q_WP[idx_q_c + 1]);
 					double dq_c    = q_WP[idx_q_c + 1] - q_WP[idx_q_c];
 					double wq_c    = q_c_mid * std::sqrt(dq_c);
+					double q_c_fm  = q_c_mid * inv_hbarc;
 
 					// Identity part: W^(1)·C
 					double* C_block = tnf_ctx.CT_RM_array[idx_alpha_c * Nalpha + idx_alpha_c];
@@ -485,21 +517,25 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 								double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
 								double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
 								double wq_r    = q_r_mid * std::sqrt(dq_r);
+								double q_r_fm  = q_r_mid * inv_hbarc;
 								for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
 									double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
 									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
 									double wp_r    = p_r_mid * std::sqrt(dp_r);
+									double p_r_fm  = p_r_mid * inv_hbarc;
 									double w1c = 0.0;
 									for (size_t idx_p_j = 0; idx_p_j < Np_WP; idx_p_j++){
-										double C_val = C_block[idx_p_j * Np_WP + idx_p_c];
+										// CT_RM_array stores C^T in row-major; C[p_j, p_c] = C^T[p_c, p_j] = C_block[p_c*Np+p_j]
+										double C_val = C_block[idx_p_c * Np_WP + idx_p_j];
 										if (C_val == 0.0) continue;
 										double p_j_mid = 0.5 * (p_WP[idx_p_j] + p_WP[idx_p_j + 1]);
 										double dp_j    = p_WP[idx_p_j + 1] - p_WP[idx_p_j];
 										double wp_j    = p_j_mid * std::sqrt(dp_j);
-										w1c += tnf->W1_element(idx_alpha_r, idx_alpha_c,
-															   p_r_mid, q_r_mid,
-															   p_j_mid, q_c_mid, pw_st)
-											   * (wp_r * wq_r * wp_j * wq_c) * C_val;
+										double p_j_fm  = p_j_mid * inv_hbarc;
+										double w1_val = tnf->W1_element(idx_alpha_r, idx_alpha_c,
+																		p_r_fm, q_r_fm,
+																		p_j_fm, q_c_fm, pw_st);
+										w1c += (w1_val * w1_unit) * (wp_r * wq_r * wp_j * wq_c) * C_val;
 									}
 									if (w1c != 0.0){
 										PVC_col[idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_r] += w1c;
@@ -531,6 +567,8 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 						double dq_k    = q_WP[idx_q_k + 1] - q_WP[idx_q_k];
 						double wp_k    = p_k_mid * std::sqrt(dp_k);
 						double wq_k    = q_k_mid * std::sqrt(dq_k);
+						double p_k_fm  = p_k_mid * inv_hbarc;
+						double q_k_fm  = q_k_mid * inv_hbarc;
 						for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
 							if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_k]) continue;
 							if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_k]) continue;
@@ -539,15 +577,17 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 								double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
 								double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
 								double wq_r    = q_r_mid * std::sqrt(dq_r);
+								double q_r_fm  = q_r_mid * inv_hbarc;
 								for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
 									double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
 									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
 									double wp_r    = p_r_mid * std::sqrt(dp_r);
+									double p_r_fm  = p_r_mid * inv_hbarc;
 									double w1 = tnf->W1_element(idx_alpha_r, idx_alpha_k,
-																p_r_mid, q_r_mid,
-																p_k_mid, q_k_mid, pw_st);
+																p_r_fm, q_r_fm,
+																p_k_fm, q_k_fm, pw_st);
 									if (w1 != 0.0){
-										double w1_wp = w1 * (wp_r * wq_r * wp_k * wq_k);
+										double w1_wp = (w1 * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
 										PVC_col[idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r] += w1_wp * pc_val;
 									}
 								}
@@ -1854,6 +1894,7 @@ void solve_faddeev_equations(cdouble*  U_array,
 	tnf_ctx.p_WP_array = fwp_states.p_WP_array;
 	tnf_ctx.q_WP_array = fwp_states.q_WP_array;
 	tnf_ctx.CT_RM_array = CT_RM_array;
+	tnf_ctx.w1_scale   = run_parameters.w1_scale;
 
 	/* Test optimized routine for PVC columns */
 	if (test_PVC_col_routine){

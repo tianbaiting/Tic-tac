@@ -34,6 +34,7 @@ struct tnf_kernel_context {
 	const double*                    p_WP_array;   // WP boundaries, size Np_WP+1
 	const double*                    q_WP_array;   // WP boundaries, size Nq_WP+1
 	double**                         CT_RM_array;  // C^T row-major = C column-major, [Nalpha*Nalpha]
+	double                           w1_scale;     // Overall scale factor applied to W^(1) output (diagnostic knob)
 };
 
 void solve_faddeev_equations(cdouble*  U_array,
