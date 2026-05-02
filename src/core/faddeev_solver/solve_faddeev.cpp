@@ -1,5 +1,6 @@
 #include "solve_faddeev.h"
 #include "interactions/three_nucleon_force_model.h"
+#include "interactions/w1_pw_cache.h"
 #include <gsl/gsl_cblas.h>
 #include <cstring>
 #include <vector>
@@ -307,10 +308,13 @@ void calculate_CPVC_col(double*  col_array,
 							double wp_j    = p_j_mid * std::sqrt(dp_j);
 							double p_j_fm  = p_j_mid * inv_hbarc;
 
-							double w1_val = tnf->W1_element(idx_alpha_r, idx_alpha_c,
-															p_r_fm, q_r_fm,
-															p_j_fm, q_c_fm,
-															pw_st);
+							double w1_val = (tnf_ctx.w1_cache != nullptr)
+								? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_c,
+														idx_p_r, idx_q_r, idx_p_j, idx_q_c)
+								: tnf->W1_element(idx_alpha_r, idx_alpha_c,
+												  p_r_fm, q_r_fm,
+												  p_j_fm, q_c_fm,
+												  pw_st);
 							// Scale fm^5 → MeV^{-5}: multiply by 1/hbarc^5.
 							// WP normalization: p_r √dp_r × q_r √dq_r × p_j √dp_j × q_c √dq_c  [MeV^6]
 							w1c_element += (w1_val * w1_unit) * (wp_r * wq_r * wp_j * wq_c) * C_val;
@@ -374,9 +378,12 @@ void calculate_CPVC_col(double*  col_array,
 								double wp_r    = p_r_mid * std::sqrt(dp_r);
 								double p_r_fm  = p_r_mid * inv_hbarc;
 
-								double w1 = tnf->W1_element(idx_alpha_r, idx_alpha_k,
-															p_r_fm, q_r_fm,
-															p_k_fm, q_k_fm, pw_st);
+								double w1 = (tnf_ctx.w1_cache != nullptr)
+									? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
+															idx_p_r, idx_q_r, idx_p_k, idx_q_k)
+									: tnf->W1_element(idx_alpha_r, idx_alpha_k,
+													  p_r_fm, q_r_fm,
+													  p_k_fm, q_k_fm, pw_st);
 								if (w1 != 0.0){
 									double w1_wp = (w1 * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
 									size_t idx_row = idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r;
@@ -532,9 +539,12 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 										double dp_j    = p_WP[idx_p_j + 1] - p_WP[idx_p_j];
 										double wp_j    = p_j_mid * std::sqrt(dp_j);
 										double p_j_fm  = p_j_mid * inv_hbarc;
-										double w1_val = tnf->W1_element(idx_alpha_r, idx_alpha_c,
-																		p_r_fm, q_r_fm,
-																		p_j_fm, q_c_fm, pw_st);
+										double w1_val = (tnf_ctx.w1_cache != nullptr)
+											? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_c,
+																	idx_p_r, idx_q_r, idx_p_j, idx_q_c)
+											: tnf->W1_element(idx_alpha_r, idx_alpha_c,
+															  p_r_fm, q_r_fm,
+															  p_j_fm, q_c_fm, pw_st);
 										w1c += (w1_val * w1_unit) * (wp_r * wq_r * wp_j * wq_c) * C_val;
 									}
 									if (w1c != 0.0){
@@ -583,9 +593,12 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
 									double wp_r    = p_r_mid * std::sqrt(dp_r);
 									double p_r_fm  = p_r_mid * inv_hbarc;
-									double w1 = tnf->W1_element(idx_alpha_r, idx_alpha_k,
-																p_r_fm, q_r_fm,
-																p_k_fm, q_k_fm, pw_st);
+									double w1 = (tnf_ctx.w1_cache != nullptr)
+										? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
+																idx_p_r, idx_q_r, idx_p_k, idx_q_k)
+										: tnf->W1_element(idx_alpha_r, idx_alpha_k,
+														  p_r_fm, q_r_fm,
+														  p_k_fm, q_k_fm, pw_st);
 									if (w1 != 0.0){
 										double w1_wp = (w1 * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
 										PVC_col[idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r] += w1_wp * pc_val;
@@ -1895,6 +1908,30 @@ void solve_faddeev_equations(cdouble*  U_array,
 	tnf_ctx.q_WP_array = fwp_states.q_WP_array;
 	tnf_ctx.CT_RM_array = CT_RM_array;
 	tnf_ctx.w1_scale   = run_parameters.w1_scale;
+	tnf_ctx.w1_cache   = nullptr;
+
+	// [EN] Pre-evaluate W^(1) on the WP bin-midpoint grid so the CPVC hot path
+	// becomes O(1) lookups instead of full PW recoupling + GL quadrature per call.
+	// Skipped when 3NF is null/disabled or w1_scale=0 (the hot-path early-exit guards
+	// the same conditions, so cache build would just waste memory).
+	// / [CN] 提前在 WP bin 中点网格上算好 W^(1)，让 CPVC 热路径变成 O(1) 查表。
+	W1_PW_cache w1_cache_storage;
+	if (tnf != nullptr && tnf->enabled() && run_parameters.w1_scale != 0.0) {
+		printf(" - Pre-building W^(1) PW cache (Np=%zu, Nq=%zu, Nalpha=%d) ... \n",
+			   Np_WP, Nq_WP, pw_states.Nalpha); fflush(stdout);
+		auto t0 = std::chrono::system_clock::now();
+		w1_cache_storage.build(*tnf,
+							   fwp_states.p_WP_array, Np_WP,
+							   fwp_states.q_WP_array, Nq_WP,
+							   pw_states,
+							   run_parameters);
+		auto t1 = std::chrono::system_clock::now();
+		printf("   - Done. blocks=%zu, size=%.2f GB, build=%.1f s \n",
+			   w1_cache_storage.num_blocks(),
+			   w1_cache_storage.total_bytes() / 1.073741824e9,
+			   std::chrono::duration<double>(t1 - t0).count()); fflush(stdout);
+		tnf_ctx.w1_cache = &w1_cache_storage;
+	}
 
 	/* Test optimized routine for PVC columns */
 	if (test_PVC_col_routine){

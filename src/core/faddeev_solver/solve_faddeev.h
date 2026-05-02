@@ -23,6 +23,7 @@
 #include "utils/matrix_routines.h"
 
 class three_nucleon_force_model;
+class W1_PW_cache;
 
 // [EN] Bundles all data the column-computation hot path needs for the 3NF contribution so that
 // existing function signatures stay manageable. When tnf->enabled()==false (null object) the entire
@@ -35,6 +36,7 @@ struct tnf_kernel_context {
 	const double*                    q_WP_array;   // WP boundaries, size Nq_WP+1
 	double**                         CT_RM_array;  // C^T row-major = C column-major, [Nalpha*Nalpha]
 	double                           w1_scale;     // Overall scale factor applied to W^(1) output (diagnostic knob)
+	const W1_PW_cache*               w1_cache;     // optional: bin-midpoint-evaluated W1 lookup table (nullptr → fall back to direct W1_element)
 };
 
 void solve_faddeev_equations(cdouble*  U_array,
