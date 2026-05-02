@@ -1,6 +1,11 @@
 
 #include "make_permutation_matrix.h"
 
+#if TICTAC_USE_NEW_CACHE_LAYER
+#include "io/cache_layer/cache_layer.h"
+#include "cache_schema.h"
+#endif
+
 namespace {
 
 // [EN] P123 couples two packet states |X_{alpha,qp,pp}> and |X_{alpha',q,p}>. These helpers keep the four-packet
@@ -1376,6 +1381,29 @@ void calculate_permutation_matrices_for_all_3N_channels(double** P123_sparse_val
 	delete [] P123_val_dense_array;
 }
 
+#if TICTAC_USE_NEW_CACHE_LAYER
+static tictac::cache::P123Key build_p123_cache_key(
+	const run_params& run_parameters,
+	int Np_WP, int Nq_WP, int J_2N_max,
+	int two_J_3N, int P_3N)
+{
+	tictac::cache::P123Key k{};
+	k.schema_version       = tictac::cache::P123_SCHEMA_VERSION;
+	k.Np_WP                = Np_WP;
+	k.Nq_WP                = Nq_WP;
+	k.J_2N_max             = J_2N_max;
+	k.two_J_3N             = two_J_3N;
+	k.P_3N                 = P_3N;
+	k.Nphi                 = run_parameters.Nphi;
+	k.Nx                   = run_parameters.Nx;
+	k.tensor_force         = run_parameters.tensor_force;
+	k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
+	k.chebyshev_s          = run_parameters.chebyshev_s;
+	k.chebyshev_t          = run_parameters.chebyshev_t;
+	return k;
+}
+#endif
+
 void fill_P123_arrays(double** P123_sparse_val_array,
 					  int**    P123_sparse_row_array,
 					  int**    P123_sparse_col_array,
@@ -1403,6 +1431,27 @@ void fill_P123_arrays(double** P123_sparse_val_array,
 										+ to_string(two_J_3N) + "_" + to_string(P_3N)
 										+ "_Np_" + to_string(Np_WP) + "_Nq_" + to_string(Nq_WP)
 										+ "_J2max_" + to_string(J_2N_max) + ".h5";
+
+#if TICTAC_USE_NEW_CACHE_LAYER
+	tictac::cache::P123Key cache_key =
+		build_p123_cache_key(run_parameters, Np_WP, Nq_WP, J_2N_max, two_J_3N, P_3N);
+
+	{
+		tictac::cache::P123Arrays out{};
+		auto res = tictac::cache::lookup_p123(cache_key, &out);
+		if (res.hit) {
+			*P123_sparse_val_array = out.val_array;
+			*P123_sparse_row_array = out.row_array;
+			*P123_sparse_col_array = out.col_array;
+			P123_sparse_dim        = out.nnz;
+			printf("P123 cache hit: %s (nnz=%zu)\n",
+			       res.source_path.c_str(), P123_sparse_dim);
+			return;
+		}
+		printf("P123 cache miss (%s); falling back to legacy path\n",
+		       res.miss_reason.c_str());
+	}
+#endif
 
 	if (run_parameters.calculate_and_store_P123){
 
@@ -1488,4 +1537,18 @@ void fill_P123_arrays(double** P123_sparse_val_array,
 		chrono::duration<double> time_P123_read = timestamp_P123_read_end - timestamp_P123_read_start;
 		printf(" - Done. Time used: %.6f\n", time_P123_read.count());
 	}
+
+#if TICTAC_USE_NEW_CACHE_LAYER
+	// Reached only on cache miss — both branches above fill the output arrays
+	// (compute-and-write OR read-from-legacy). Mirror that into the new cache.
+	if (*P123_sparse_val_array != nullptr && P123_sparse_dim > 0) {
+		tictac::cache::P123Arrays in{};
+		in.val_array = *P123_sparse_val_array;
+		in.row_array = *P123_sparse_row_array;
+		in.col_array = *P123_sparse_col_array;
+		in.nnz       = P123_sparse_dim;
+		tictac::cache::store_p123(cache_key, in);
+		printf("P123 stored into cache layer (nnz=%zu)\n", P123_sparse_dim);
+	}
+#endif
 }

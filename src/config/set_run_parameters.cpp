@@ -70,6 +70,7 @@ std::string create_input_printout_string(run_params run_parameters){
 	output_string << "Parameter set index (PSI) end:   " << type_to_string(run_parameters.PSI_end)		  				<< "\n";
 	output_string << "Energy input file:               " << type_to_string(run_parameters.energy_input_file)	  		<< "\n";
 	output_string << "P123-matrix read/write folder:   " << type_to_string(run_parameters.P123_folder) 		  	  		<< "\n";
+	output_string << "Cache root:                      " << type_to_string(run_parameters.cache_root)             << "\n";
 	output_string << "Parallel run:                    " << type_to_string(run_parameters.parallel_run)  		  	  	<< "\n";
 	if(run_parameters.parallel_run==true){
 	output_string << "Channel index:                   " << type_to_string(run_parameters.channel_idx) 		  	  		<< "\n";
@@ -226,6 +227,9 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 	else if (option == "Lambda_3NF"){
 		run_parameters.Lambda_3NF = std::stod(input);
 	}
+	else if (option == "w1_scale"){
+		run_parameters.w1_scale = std::stod(input);
+	}
 	else if (option == "subfolder"){
 		run_parameters.subfolder = input;
 	}
@@ -253,6 +257,9 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 	else if (option == "P123_folder"){
 			run_parameters.P123_folder = input;
 		}
+	else if (option == "cache_root"){
+		run_parameters.cache_root = input;
+	}
 	else{
 		valid_option_found = false;
 	}
@@ -576,7 +583,11 @@ void show_usage(){
 			  << "                                                     writes matrix to some/folder/ \n"
 			  << seperationLine
 			  << std::endl;
-	
+
+	std::cout << "cache_root:               Sets the project-local cache root for P123/W1 caches.\n"
+			  << "Example:                  cache_root=cache -> Program reads/writes hash-keyed\n"
+			  << "                          caches under cache/p123/ and cache/w1/.\n";
+
 	std::cout << std::endl;
 }
 
@@ -633,6 +644,7 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.c_D                      = 0.0;
 	run_parameters.c_E                      = 0.0;
 	run_parameters.Lambda_3NF               = 500.0;
+	run_parameters.w1_scale                 = 1.0;
 	run_parameters.subfolder	  	        = "Output";
 	run_parameters.p_grid_type 	  	        = "chebyshev";
 	run_parameters.p_grid_filename 	        = "";
@@ -654,7 +666,8 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.production_run		    = true;
 	run_parameters.energy_input_file        = "lab_energies.txt";
 	run_parameters.output_folder  	        = "Output";
-	run_parameters.P123_folder  	        = "Output";
+	run_parameters.P123_folder  	        = "cache/p123";
+	run_parameters.cache_root               = "cache";
 }
 
 void set_run_parameters(int& argc, char* argv[], run_params& run_parameters){

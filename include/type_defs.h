@@ -136,6 +136,11 @@ typedef struct run_params{
 	double      c_D;
 	double      c_E;
 	double      Lambda_3NF;
+	// Diagnostic knob: scale the entire W^(1) contribution by this factor before adding to the kernel.
+	// Default 1.0 = physical strength. Used to empirically locate the normalization that makes the
+	// Padé-accelerated Neumann iteration converge while preserving the relative structure of the
+	// 3NF contribution across LECs. / [CN] 诊断用标度：在加入核之前对整个 W^(1) 乘以此系数。
+	double      w1_scale;
 	std::string subfolder;
 	std::string p_grid_type;
 	std::string p_grid_filename;
@@ -145,6 +150,7 @@ typedef struct run_params{
 	std::string energy_input_file;
     std::string output_folder;
 	std::string P123_folder;
+	std::string cache_root;     // hash-keyed cache root (P123, W1)
 } run_params;
 
 /* Structs for compact storage */
