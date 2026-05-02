@@ -253,7 +253,20 @@ def migrate_file(
     if apply:
         os.makedirs(os.path.join(target_root, "p123"), exist_ok=True)
 
-        # Copy the file first (we need to open it for attribute writing)
+        if os.path.exists(dest_path):
+            try:
+                with h5py.File(dest_path, "r") as hf:
+                    raw = hf.attrs.get("tictac_key_hash_full", "")
+                existing_hash = raw.decode() if isinstance(raw, bytes) else str(raw)
+            except Exception:
+                existing_hash = ""
+            if existing_hash == key_hash_full:
+                summary += "\n        SKIP (target already exists with matching hash)"
+                return summary
+            summary += (f"\n        ERROR collision: target exists with different hash"
+                        f" ({existing_hash[:12]}... != {key_hash_full[:12]}...); skipped")
+            return summary
+
         shutil.copy2(src_path, dest_path)
 
         # Write new root attributes
