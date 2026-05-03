@@ -1,0 +1,54 @@
+# Miller Gate 1 step-3 combined run: cell-averaged W^(1) + refined p-grid.
+# Seed Np=20 chebyshev, refined to Np=31 in [30,200] MeV (P-wave band).
+# W^(1) cell-averaged with 4x4 Gauss quadrature per (p,q) bin.
+# Compare against Np=20 1x1 baseline to test 2P doublet unitarity.
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=31
+Nq_WP=20
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+# Cell-averaged W^(1) bin matrix elements (4-pt Gauss per axis).
+Np_per_WP_W1=4
+Nq_per_WP_W1=4
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=custom
+p_grid_filename=CPP/Input/p_grid_np20_refined.txt
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=nijmegen
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=chiral_N2LO
+c_D=-0.20
+c_E=-0.205
+Lambda_3NF=500.0
+w1_scale=1.0
+
+energy_input_file=CPP/Input/lab_energies_miller_gate1.txt
+output_folder=CPP/Output/miller_gate1_np31_3nf_celled
+P123_folder=CPP/Output/miller_gate1_np31
