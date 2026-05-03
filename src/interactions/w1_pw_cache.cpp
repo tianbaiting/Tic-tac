@@ -66,7 +66,14 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         k.c_D             = run_parameters.c_D;
         k.c_E             = run_parameters.c_E;
         k.Lambda_3NF      = run_parameters.Lambda_3NF;
+        // Today every supported chiral 3NF uses a Gaussian regulator; if a
+        // different regulator family is added later, expose it through
+        // three_nucleon_force_model and source it here instead of hardcoding.
         k.regulator_kind  = "gaussian";
+        k.chebyshev_s        = run_parameters.chebyshev_s;
+        k.chebyshev_t        = run_parameters.chebyshev_t;
+        k.tensor_force       = run_parameters.tensor_force;
+        k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
         return k;
     };
 #endif

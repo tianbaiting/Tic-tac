@@ -61,7 +61,11 @@ bool W1Key::operator==(const W1Key& o) const {
         && quantize_1e9(c_D) == quantize_1e9(o.c_D)
         && quantize_1e9(c_E) == quantize_1e9(o.c_E)
         && quantize_1e9(Lambda_3NF) == quantize_1e9(o.Lambda_3NF)
-        && regulator_kind == o.regulator_kind;
+        && regulator_kind == o.regulator_kind
+        && quantize_1e9(chebyshev_s) == quantize_1e9(o.chebyshev_s)
+        && quantize_1e9(chebyshev_t) == quantize_1e9(o.chebyshev_t)
+        && tensor_force == o.tensor_force
+        && isospin_breaking_1S0 == o.isospin_breaking_1S0;
 }
 
 std::string canonical_json(const P123Key& k) {
@@ -96,9 +100,13 @@ std::string canonical_json(const W1Key& k) {
        << ",\"a_r\":" << k.a_r
        << ",\"c_D\":" << fmt_double_q(k.c_D)
        << ",\"c_E\":" << fmt_double_q(k.c_E)
+       << ",\"chebyshev_s\":" << fmt_double_q(k.chebyshev_s)
+       << ",\"chebyshev_t\":" << fmt_double_q(k.chebyshev_t)
+       << ",\"isospin_breaking_1S0\":" << (k.isospin_breaking_1S0 ? "true" : "false")
        << ",\"potential_model\":" << json_escape(k.potential_model)
        << ",\"regulator_kind\":" << json_escape(k.regulator_kind)
        << ",\"schema_version\":" << k.schema_version
+       << ",\"tensor_force\":" << (k.tensor_force ? "true" : "false")
        << ",\"tnf_model\":" << json_escape(k.tnf_model)
        << ",\"two_J_3N\":" << k.two_J_3N
        << ",\"two_J_3N_max\":" << k.two_J_3N_max

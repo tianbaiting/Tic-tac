@@ -27,6 +27,11 @@ struct W1Key {
     int    a_r, a_c;          // alpha row/col indices for the block
     double c_D, c_E, Lambda_3NF;
     std::string regulator_kind;
+    // Grid + channel parameters: change them, the WP bin midpoints change,
+    // hence the cached W^(1) values change.
+    double chebyshev_s, chebyshev_t;
+    bool   tensor_force;
+    bool   isospin_breaking_1S0;
 
     bool operator==(const W1Key& o) const;
 };

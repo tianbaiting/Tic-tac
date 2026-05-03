@@ -40,7 +40,7 @@ static P123Key make_p123_key() {
 
 static W1Key make_w1_key() {
     W1Key k{};
-    k.schema_version = 1;
+    k.schema_version = 2;
     k.potential_model = "N2LOopt";
     k.tnf_model = "chiral_N2LO";
     k.Np_WP = 30; k.Nq_WP = 30;
@@ -50,6 +50,9 @@ static W1Key make_w1_key() {
     k.Lambda_3NF = 500.0;
     k.regulator_kind = "gaussian";
     k.a_r = 0; k.a_c = 0;
+    k.chebyshev_s = 1.5; k.chebyshev_t = 1.0;
+    k.tensor_force = true;
+    k.isospin_breaking_1S0 = false;
     return k;
 }
 
@@ -107,6 +110,26 @@ void test_w1_a_indices_change_hash() {
     auto k2 = make_w1_key();
     k2.a_r = 1;  // different alpha row
     EXPECT(tictac::cache::hash_full(k1) != tictac::cache::hash_full(k2));
+}
+
+void test_w1_grid_and_channel_fields_change_hash() {
+    auto base = make_w1_key();
+    {
+        auto k = make_w1_key(); k.chebyshev_s = 2.0;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
+    {
+        auto k = make_w1_key(); k.chebyshev_t = 0.5;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
+    {
+        auto k = make_w1_key(); k.tensor_force = false;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
+    {
+        auto k = make_w1_key(); k.isospin_breaking_1S0 = true;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
 }
 
 void test_filename_prefix_p123() {
@@ -335,6 +358,7 @@ int main() {
     test_w1_double_quantization();
     test_w1_double_above_quantum_changes_hash();
     test_w1_a_indices_change_hash();
+    test_w1_grid_and_channel_fields_change_hash();
     test_filename_prefix_p123();
 
     test_manifest_roundtrip();
