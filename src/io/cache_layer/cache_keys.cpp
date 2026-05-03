@@ -65,7 +65,9 @@ bool W1Key::operator==(const W1Key& o) const {
         && quantize_1e9(chebyshev_s) == quantize_1e9(o.chebyshev_s)
         && quantize_1e9(chebyshev_t) == quantize_1e9(o.chebyshev_t)
         && tensor_force == o.tensor_force
-        && isospin_breaking_1S0 == o.isospin_breaking_1S0;
+        && isospin_breaking_1S0 == o.isospin_breaking_1S0
+        && Np_per_WP_W1 == o.Np_per_WP_W1
+        && Nq_per_WP_W1 == o.Nq_per_WP_W1;
 }
 
 std::string canonical_json(const P123Key& k) {
@@ -94,7 +96,9 @@ std::string canonical_json(const W1Key& k) {
        << "\"J_2N_max\":" << k.J_2N_max
        << ",\"Lambda_3NF\":" << fmt_double_q(k.Lambda_3NF)
        << ",\"Np_WP\":" << k.Np_WP
+       << ",\"Np_per_WP_W1\":" << k.Np_per_WP_W1
        << ",\"Nq_WP\":" << k.Nq_WP
+       << ",\"Nq_per_WP_W1\":" << k.Nq_per_WP_W1
        << ",\"P_3N\":" << k.P_3N
        << ",\"a_c\":" << k.a_c
        << ",\"a_r\":" << k.a_r

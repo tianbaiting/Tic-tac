@@ -32,6 +32,11 @@ struct W1Key {
     double chebyshev_s, chebyshev_t;
     bool   tensor_force;
     bool   isospin_breaking_1S0;
+    // Cell-quadrature order used when building the W^(1) bin matrix elements.
+    // 1 = legacy midpoint (single-point Gauss), >=2 = cell-averaged via Gauss-Legendre
+    // quadrature. Different orders produce different cached values, so they must
+    // appear in the key.
+    int    Np_per_WP_W1, Nq_per_WP_W1;
 
     bool operator==(const W1Key& o) const;
 };

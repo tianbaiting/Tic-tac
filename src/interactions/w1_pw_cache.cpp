@@ -2,7 +2,9 @@
 
 #include "three_nucleon_force_model.h"
 #include "constants.h"
+#include "gauss_legendre.h"
 
+#include <cmath>
 #include <omp.h>
 
 #if TICTAC_USE_NEW_CACHE_LAYER
@@ -10,6 +12,54 @@
 #include "cache_schema.h"
 #include <cstring>  // memcpy
 #endif
+
+namespace {
+
+// Build per-bin Gauss-Legendre nodes/weights along one axis.
+// nodes_out[i*Npts + k] is the k-th Gauss point in bin i (in MeV).
+// w_axis_out[i*Npts + k] is the corresponding weight in MeV (already mapped
+// from [-1,1] to [bin_lower, bin_upper]).
+//
+// For Npts=1 the single-point rule is forced to (midpoint, bin_width); this
+// keeps the cache value bit-for-bit identical to the legacy midpoint formula
+// when Np_per_WP_W1 = Nq_per_WP_W1 = 1.
+void build_per_bin_quadrature(const double* boundary_array,
+                              std::size_t   N_bins,
+                              int           Npts,
+                              std::vector<double>& nodes_out,
+                              std::vector<double>& weights_out)
+{
+    nodes_out.assign(N_bins * (std::size_t)Npts, 0.0);
+    weights_out.assign(N_bins * (std::size_t)Npts, 0.0);
+
+    if (Npts == 1) {
+        for (std::size_t i = 0; i < N_bins; ++i) {
+            double lo = boundary_array[i];
+            double hi = boundary_array[i + 1];
+            nodes_out[i]   = 0.5 * (lo + hi);
+            weights_out[i] = hi - lo;          // single-point rule weight = bin width
+        }
+        return;
+    }
+
+    std::vector<double> xref(Npts), wref(Npts);
+    gauss(xref.data(), wref.data(), Npts);     // nodes/weights on [-1, 1]
+
+    for (std::size_t i = 0; i < N_bins; ++i) {
+        double lo = boundary_array[i];
+        double hi = boundary_array[i + 1];
+        double a  = 0.5 * (hi - lo);
+        double b  = 0.5 * (hi + lo);
+        double*  n  = &nodes_out[i * (std::size_t)Npts];
+        double*  w  = &weights_out[i * (std::size_t)Npts];
+        for (int k = 0; k < Npts; ++k) {
+            n[k] = a * xref[k] + b;
+            w[k] = a * wref[k];
+        }
+    }
+}
+
+}  // namespace
 
 void W1_PW_cache::build(const three_nucleon_force_model& tnf,
                         const double*               p_WP_array,
@@ -39,13 +89,48 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
     const std::size_t per_block = m_Nq * m_Nq * m_Np * m_Np;
     m_data.assign(m_blocks.size() * per_block, 0.0);
 
-    // Bin midpoints in fm^-1 (W1_element API expects Jacobi momenta in fm^-1).
-    const double inv_hbarc = 1.0 / hbarc;
-    std::vector<double> p_mid(m_Np), q_mid(m_Nq);
+    // [EN] Cache value semantics: for each (alpha_r, alpha_c, p_r, q_r, p_c, q_c) cell
+    // tuple we store the WP bin matrix element of W^(1) in MeV (the diagnostic w1_scale
+    // is applied at consumption time):
+    //
+    //   W^(1)_WP[i_p_r, i_q_r, i_p_c, i_q_c]
+    //     = (1/hbarc^5)
+    //       * (1 / sqrt(Δp_r·Δq_r·Δp_c·Δq_c))
+    //       * ∫_bin_p_r dp_r ∫_bin_q_r dq_r ∫_bin_p_c dp_c ∫_bin_q_c dq_c
+    //         p_r q_r p_c q_c · W^(1)(p_r,q_r,p_c,q_c)
+    //
+    // The 1/sqrt(Δ) per side comes from WP basis normalization (orthonormalized
+    // packets); p·q per side is the radial measure left over from PW reduction;
+    // 1/hbarc^5 converts the W^(1) output (fm^5) to MeV^{-5} so the bin matrix
+    // element comes out in MeV, matching V_WP's MeV convention.
+    //
+    // For Np_per_WP_W1 = Nq_per_WP_W1 = 1 (default) the integral collapses to the
+    // single-point rule and the value reduces bit-for-bit to:
+    //   p_r·q_r·p_c·q_c · sqrt(Δp_r·Δq_r·Δp_c·Δq_c) · W^(1)(midpoints) / hbarc^5
+    // which is what the consumer in solve_faddeev.cpp used to compute inline,
+    // so the legacy code path is preserved exactly.
+    //
+    // / [CN] 缓存值语义：每个 (α_r, α_c, p_r, q_r, p_c, q_c) cell 元组存放 W^(1) 在
+    // WP 基下的 bin 矩阵元（MeV，单位与 V_WP 一致；w1_scale 诊断标度在消费侧再乘）。
+    // Np_per_WP_W1 = Nq_per_WP_W1 = 1 时退化为现行 midpoint 公式，逐比特复现旧结果。
+
+    const double inv_hbarc  = 1.0 / hbarc;
+    const double inv_hbarc5 = std::pow(inv_hbarc, 5);
+
+    const int Np_quad = std::max(1, run_parameters.Np_per_WP_W1);
+    const int Nq_quad = std::max(1, run_parameters.Nq_per_WP_W1);
+
+    // Per-bin Gauss nodes/weights in MeV (consumer convention).
+    std::vector<double> p_nodes_MeV, p_w_MeV, q_nodes_MeV, q_w_MeV;
+    build_per_bin_quadrature(p_WP_array, m_Np, Np_quad, p_nodes_MeV, p_w_MeV);
+    build_per_bin_quadrature(q_WP_array, m_Nq, Nq_quad, q_nodes_MeV, q_w_MeV);
+
+    // Pre-compute WP normalization factor 1/sqrt(Δ) per bin.
+    std::vector<double> p_inv_sqrtD(m_Np), q_inv_sqrtD(m_Nq);
     for (std::size_t i = 0; i < m_Np; ++i)
-        p_mid[i] = 0.5 * (p_WP_array[i] + p_WP_array[i + 1]) * inv_hbarc;
+        p_inv_sqrtD[i] = 1.0 / std::sqrt(p_WP_array[i + 1] - p_WP_array[i]);
     for (std::size_t i = 0; i < m_Nq; ++i)
-        q_mid[i] = 0.5 * (q_WP_array[i] + q_WP_array[i + 1]) * inv_hbarc;
+        q_inv_sqrtD[i] = 1.0 / std::sqrt(q_WP_array[i + 1] - q_WP_array[i]);
 
     const std::size_t num_blocks = m_blocks.size();
 
@@ -74,6 +159,8 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         k.chebyshev_t        = run_parameters.chebyshev_t;
         k.tensor_force       = run_parameters.tensor_force;
         k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
+        k.Np_per_WP_W1       = Np_quad;
+        k.Nq_per_WP_W1       = Nq_quad;
         return k;
     };
 #endif
@@ -98,16 +185,49 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         }
 #endif
 
-        // Cache miss: do the original computation.
+        // Cache miss: integrate W^(1) over each (p_r, q_r, p_c, q_c) bin tuple.
         for (std::size_t iqr = 0; iqr < m_Nq; ++iqr) {
+            const double inv_sqrt_dq_r = q_inv_sqrtD[iqr];
             for (std::size_t iqc = 0; iqc < m_Nq; ++iqc) {
+                const double inv_sqrt_dq_c = q_inv_sqrtD[iqc];
                 for (std::size_t ipr = 0; ipr < m_Np; ++ipr) {
+                    const double inv_sqrt_dp_r = p_inv_sqrtD[ipr];
                     for (std::size_t ipc = 0; ipc < m_Np; ++ipc) {
+                        const double inv_sqrt_dp_c = p_inv_sqrtD[ipc];
+
+                        double accum = 0.0;
+                        for (int kqr = 0; kqr < Nq_quad; ++kqr) {
+                            const double q_r_MeV = q_nodes_MeV[iqr * Nq_quad + kqr];
+                            const double w_qr    = q_w_MeV   [iqr * Nq_quad + kqr];
+                            const double q_r_fm  = q_r_MeV * inv_hbarc;
+                            for (int kqc = 0; kqc < Nq_quad; ++kqc) {
+                                const double q_c_MeV = q_nodes_MeV[iqc * Nq_quad + kqc];
+                                const double w_qc    = q_w_MeV   [iqc * Nq_quad + kqc];
+                                const double q_c_fm  = q_c_MeV * inv_hbarc;
+                                for (int kpr = 0; kpr < Np_quad; ++kpr) {
+                                    const double p_r_MeV = p_nodes_MeV[ipr * Np_quad + kpr];
+                                    const double w_pr    = p_w_MeV   [ipr * Np_quad + kpr];
+                                    const double p_r_fm  = p_r_MeV * inv_hbarc;
+                                    for (int kpc = 0; kpc < Np_quad; ++kpc) {
+                                        const double p_c_MeV = p_nodes_MeV[ipc * Np_quad + kpc];
+                                        const double w_pc    = p_w_MeV   [ipc * Np_quad + kpc];
+                                        const double p_c_fm  = p_c_MeV * inv_hbarc;
+
+                                        const double w1 = tnf.W1_element(a_r, a_c,
+                                                                          p_r_fm, q_r_fm,
+                                                                          p_c_fm, q_c_fm,
+                                                                          pw_states);
+                                        accum += (p_r_MeV * q_r_MeV * p_c_MeV * q_c_MeV)
+                                               * (w_pr * w_qr * w_pc * w_qc)
+                                               * w1;
+                                    }
+                                }
+                            }
+                        }
+
+                        const double bin_norm = inv_sqrt_dp_r * inv_sqrt_dq_r * inv_sqrt_dp_c * inv_sqrt_dq_c;
                         slab[((iqr * m_Nq + iqc) * m_Np + ipr) * m_Np + ipc]
-                            = (float)tnf.W1_element(a_r, a_c,
-                                                    p_mid[ipr], q_mid[iqr],
-                                                    p_mid[ipc], q_mid[iqc],
-                                                    pw_states);
+                            = (float)(accum * bin_norm * inv_hbarc5);
                     }
                 }
             }

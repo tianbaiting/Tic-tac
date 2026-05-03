@@ -308,16 +308,21 @@ void calculate_CPVC_col(double*  col_array,
 							double wp_j    = p_j_mid * std::sqrt(dp_j);
 							double p_j_fm  = p_j_mid * inv_hbarc;
 
-							double w1_val = (tnf_ctx.w1_cache != nullptr)
-								? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_c,
-														idx_p_r, idx_q_r, idx_p_j, idx_q_c)
-								: tnf->W1_element(idx_alpha_r, idx_alpha_c,
-												  p_r_fm, q_r_fm,
-												  p_j_fm, q_c_fm,
-												  pw_st);
-							// Scale fm^5 → MeV^{-5}: multiply by 1/hbarc^5.
-							// WP normalization: p_r √dp_r × q_r √dq_r × p_j √dp_j × q_c √dq_c  [MeV^6]
-							w1c_element += (w1_val * w1_unit) * (wp_r * wq_r * wp_j * wq_c) * C_val;
+							// Cache value is the WP bin matrix element in MeV (pre-w1_scale);
+							// fallback does the legacy 1-point midpoint computation inline.
+							double w1_bin;
+							if (tnf_ctx.w1_cache != nullptr) {
+								w1_bin = tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_c,
+															   idx_p_r, idx_q_r, idx_p_j, idx_q_c)
+								         * tnf_ctx.w1_scale;
+							} else {
+								double w1_raw = tnf->W1_element(idx_alpha_r, idx_alpha_c,
+																 p_r_fm, q_r_fm,
+																 p_j_fm, q_c_fm,
+																 pw_st);
+								w1_bin = (w1_raw * w1_unit) * (wp_r * wq_r * wp_j * wq_c);
+							}
+							w1c_element += w1_bin * C_val;
 						}
 
 						if (w1c_element != 0.0){
@@ -378,14 +383,20 @@ void calculate_CPVC_col(double*  col_array,
 								double wp_r    = p_r_mid * std::sqrt(dp_r);
 								double p_r_fm  = p_r_mid * inv_hbarc;
 
-								double w1 = (tnf_ctx.w1_cache != nullptr)
-									? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
-															idx_p_r, idx_q_r, idx_p_k, idx_q_k)
-									: tnf->W1_element(idx_alpha_r, idx_alpha_k,
-													  p_r_fm, q_r_fm,
-													  p_k_fm, q_k_fm, pw_st);
-								if (w1 != 0.0){
-									double w1_wp = (w1 * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
+								// Cache value is the WP bin matrix element in MeV (pre-w1_scale);
+								// fallback does the legacy 1-point midpoint computation inline.
+								double w1_wp;
+								if (tnf_ctx.w1_cache != nullptr) {
+									w1_wp = tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
+																  idx_p_r, idx_q_r, idx_p_k, idx_q_k)
+									        * tnf_ctx.w1_scale;
+								} else {
+									double w1_raw = tnf->W1_element(idx_alpha_r, idx_alpha_k,
+																	 p_r_fm, q_r_fm,
+																	 p_k_fm, q_k_fm, pw_st);
+									w1_wp = (w1_raw * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
+								}
+								if (w1_wp != 0.0){
 									size_t idx_row = idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r;
 									PVC_col[idx_row] += w1_wp * pc_val;
 								}
@@ -539,13 +550,20 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 										double dp_j    = p_WP[idx_p_j + 1] - p_WP[idx_p_j];
 										double wp_j    = p_j_mid * std::sqrt(dp_j);
 										double p_j_fm  = p_j_mid * inv_hbarc;
-										double w1_val = (tnf_ctx.w1_cache != nullptr)
-											? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_c,
-																	idx_p_r, idx_q_r, idx_p_j, idx_q_c)
-											: tnf->W1_element(idx_alpha_r, idx_alpha_c,
-															  p_r_fm, q_r_fm,
-															  p_j_fm, q_c_fm, pw_st);
-										w1c += (w1_val * w1_unit) * (wp_r * wq_r * wp_j * wq_c) * C_val;
+										// Cache value is the WP bin matrix element in MeV (pre-w1_scale);
+										// fallback does the legacy 1-point midpoint computation inline.
+										double w1_bin;
+										if (tnf_ctx.w1_cache != nullptr) {
+											w1_bin = tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_c,
+																		   idx_p_r, idx_q_r, idx_p_j, idx_q_c)
+											         * tnf_ctx.w1_scale;
+										} else {
+											double w1_raw = tnf->W1_element(idx_alpha_r, idx_alpha_c,
+																			 p_r_fm, q_r_fm,
+																			 p_j_fm, q_c_fm, pw_st);
+											w1_bin = (w1_raw * w1_unit) * (wp_r * wq_r * wp_j * wq_c);
+										}
+										w1c += w1_bin * C_val;
 									}
 									if (w1c != 0.0){
 										PVC_col[idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_r] += w1c;
@@ -593,14 +611,20 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
 									double wp_r    = p_r_mid * std::sqrt(dp_r);
 									double p_r_fm  = p_r_mid * inv_hbarc;
-									double w1 = (tnf_ctx.w1_cache != nullptr)
-										? tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
-																idx_p_r, idx_q_r, idx_p_k, idx_q_k)
-										: tnf->W1_element(idx_alpha_r, idx_alpha_k,
-														  p_r_fm, q_r_fm,
-														  p_k_fm, q_k_fm, pw_st);
-									if (w1 != 0.0){
-										double w1_wp = (w1 * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
+									// Cache value is the WP bin matrix element in MeV (pre-w1_scale);
+									// fallback does the legacy 1-point midpoint computation inline.
+									double w1_wp;
+									if (tnf_ctx.w1_cache != nullptr) {
+										w1_wp = tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
+																	  idx_p_r, idx_q_r, idx_p_k, idx_q_k)
+										        * tnf_ctx.w1_scale;
+									} else {
+										double w1_raw = tnf->W1_element(idx_alpha_r, idx_alpha_k,
+																		 p_r_fm, q_r_fm,
+																		 p_k_fm, q_k_fm, pw_st);
+										w1_wp = (w1_raw * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
+									}
+									if (w1_wp != 0.0){
 										PVC_col[idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r] += w1_wp * pc_val;
 									}
 								}

@@ -6,6 +6,6 @@ namespace tictac::cache {
 // Version is part of the hash key, so old caches are preserved (not overwritten)
 // when this is bumped.
 constexpr int P123_SCHEMA_VERSION = 1;
-constexpr int W1_SCHEMA_VERSION   = 2;
+constexpr int W1_SCHEMA_VERSION   = 3;
 
 }  // namespace tictac::cache

@@ -45,6 +45,8 @@ std::string create_input_printout_string(run_params run_parameters){
 	output_string << "chebyshev scale:                 " << type_to_string(run_parameters.chebyshev_s) 		  	  		<< "\n";
 	output_string << "Np_per_WP:                       " << type_to_string(run_parameters.Np_per_WP) 			  	  	<< "\n";
 	output_string << "Nq_per_WP:                       " << type_to_string(run_parameters.Nq_per_WP) 			  	  	<< "\n";
+	output_string << "Np_per_WP_W1:                    " << type_to_string(run_parameters.Np_per_WP_W1) 			  	<< "\n";
+	output_string << "Nq_per_WP_W1:                    " << type_to_string(run_parameters.Nq_per_WP_W1) 			  	<< "\n";
 	output_string << "P123-recovery mode on:           " << type_to_string(run_parameters.P123_recovery) 		  	  	<< "\n";
 	output_string << "P123 omp number of threads:      " << type_to_string(run_parameters.P123_omp_num_threads) 	  	<< "\n";
 	output_string << "Tensor-force on:                 " << type_to_string(run_parameters.tensor_force) 		  	  	<< "\n";
@@ -111,6 +113,12 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 	}
 	else if (option == "Nq_per_WP"){
 		run_parameters.Nq_per_WP = std::stoi(input);
+	}
+	else if (option == "Np_per_WP_W1"){
+		run_parameters.Np_per_WP_W1 = std::stoi(input);
+	}
+	else if (option == "Nq_per_WP_W1"){
+		run_parameters.Nq_per_WP_W1 = std::stoi(input);
 	}
 	else if (option == "P123_omp_num_threads"){
 		run_parameters.P123_omp_num_threads = std::stoi(input);
@@ -637,6 +645,8 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.chebyshev_s		        = 100;
 	run_parameters.Np_per_WP	 	        = 8;
 	run_parameters.Nq_per_WP	 	        = 8;
+	run_parameters.Np_per_WP_W1             = 1;  // 1 = legacy midpoint W^(1); >=2 = Gauss cell-averaged
+	run_parameters.Nq_per_WP_W1             = 1;
 	run_parameters.channel_idx		        = -1;
 	run_parameters.parallel_run		        = false;
 	run_parameters.potential_model	        = "LO_internal";

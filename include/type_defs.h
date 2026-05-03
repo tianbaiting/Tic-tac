@@ -111,6 +111,15 @@ typedef struct run_params{
 	int         Nx;
 	int         Np_per_WP;
 	int         Nq_per_WP;
+	// [EN] Quadrature points per WP cell when building the W^(1) bin matrix elements
+	// (3NF cache). Default 1 reproduces the legacy midpoint approximation bit-for-bit.
+	// Set to >=2 to upgrade W^(1)_WP to a proper cell-averaged matrix element via
+	// Gauss-Legendre quadrature, matching the convention V_WP already uses with Np_per_WP.
+	// / [CN] 构建 W^(1) WP bin 矩阵元（3NF 缓存）时每个 cell 的 Gauss 积分点数。默认 1
+	// 等价于现行 midpoint 近似，逐比特复现旧结果；>=2 时升级为 cell-averaged 矩阵元，
+	// 与 V_WP 已使用 Np_per_WP 的约定保持一致。
+	int         Np_per_WP_W1;
+	int         Nq_per_WP_W1;
 	int			channel_idx;
 	int			P123_omp_num_threads;
 	double 		chebyshev_t;

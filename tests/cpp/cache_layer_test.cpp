@@ -40,7 +40,7 @@ static P123Key make_p123_key() {
 
 static W1Key make_w1_key() {
     W1Key k{};
-    k.schema_version = 2;
+    k.schema_version = 3;
     k.potential_model = "N2LOopt";
     k.tnf_model = "chiral_N2LO";
     k.Np_WP = 30; k.Nq_WP = 30;
@@ -53,6 +53,7 @@ static W1Key make_w1_key() {
     k.chebyshev_s = 1.5; k.chebyshev_t = 1.0;
     k.tensor_force = true;
     k.isospin_breaking_1S0 = false;
+    k.Np_per_WP_W1 = 1; k.Nq_per_WP_W1 = 1;
     return k;
 }
 
@@ -128,6 +129,14 @@ void test_w1_grid_and_channel_fields_change_hash() {
     }
     {
         auto k = make_w1_key(); k.isospin_breaking_1S0 = true;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
+    {
+        auto k = make_w1_key(); k.Np_per_WP_W1 = 4;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
+    {
+        auto k = make_w1_key(); k.Nq_per_WP_W1 = 4;
         EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
     }
 }
