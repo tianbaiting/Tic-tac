@@ -1,0 +1,57 @@
+# Step 4 starter: d+p Tlab=190 MeV/u with chiral N2LO 3NF on Np=20.
+# Same infrastructure as Miller Gate 1 Np=20 3NF (+99.91° validated),
+# only target energy + chebyshev_s changed for 190 MeV q range.
+# Witala/Navratil convention LECs: c_D=-0.20, c_E=-0.205, Lambda_3NF=500 MeV.
+# Note: 2P doublet still off-unitary (Step 3 finding) — observables will be
+# starter-quality, not Ay-puzzle-grade. Higher Np / breakup absorption needed.
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=20
+Nq_WP=20
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+# Default 1x1 W^(1) cache (legacy bit-for-bit). Cell-averaged 4x4
+# would help convergence per Step 3, but adds ~16x cache-build cost.
+Np_per_WP_W1=1
+Nq_per_WP_W1=1
+
+chebyshev_s=150
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=Idaho_N3LO
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=chiral_N2LO
+c_D=-0.20
+c_E=-0.205
+Lambda_3NF=500.0
+w1_scale=1.0
+
+energy_input_file=CPP/Input/tlab_190MeV.txt
+output_folder=CPP/Output/dpol190_np20_3nf
+P123_folder=CPP/Output/dpol190_np20
