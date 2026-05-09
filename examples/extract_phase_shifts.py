@@ -36,6 +36,10 @@ M_PROTON_MEV = 938.272
 M_NEUTRON_MEV = 939.565
 M_DEUTERON_MEV = 1875.61
 
+# Sidecar (U_PW_convergence_*.txt) convergence-status codes.
+SIDECAR_CONV_TRULY_CONVERGED = 1
+SIDECAR_CONV_MAXITER_TRUNCATED = 2
+
 # Miller's m_N for the S-matrix prefactor (PRC 106, text after Eq. D3).
 MN_MILLER = 2.0 * M_PROTON_MEV * M_NEUTRON_MEV / (M_PROTON_MEV + M_NEUTRON_MEV)
 
@@ -269,7 +273,7 @@ def extract_for_file(u_path: Path, q_kin_path: Path, tlab_target: float | None,
         inelast_diag = np.abs(np.diag(S))
 
         results.append(dict(
-            tlab=r["tlab"], ecm=r["ecm"], q0=q0, dE=dE,
+            tlab=r["tlab"], ecm=r["ecm"], q_idx=q_idx, q0=q0, dE=dE,
             S=S, eigvals=eigs, delta_eig=deltas,
             delta_diag=delta_diag, inelast_diag=inelast_diag,
         ))
@@ -317,15 +321,15 @@ def write_markdown_report(results_per_file, out_path: Path,
     for u_path, results in results_per_file.items():
         lines.append(f"## {u_path.name}")
         lines.append("")
-        lines.append("| Tlab [MeV] | block | δ_diag [°] | \\|S_kk\\| | \\|\\|SS†-1\\|\\| | status |")
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("| Tlab [MeV] | block | Re δ_diag [°] | Im δ_diag [°] | \\|S_kk\\| | \\|\\|SS†-1\\|\\| | status |")
+        lines.append("|---|---|---|---|---|---|---|")
         for res in results:
             S = res["S"]
             unit_def = float(np.linalg.norm(S @ S.conj().T - np.eye(S.shape[0])))
+            q_idx = res.get("q_idx", 0)
             for k in range(len(res["delta_diag"])):
                 d = res["delta_diag"][k]
-                # canonical_delta_deg already exists in this file
-                re_deg = np.angle(np.exp(1j * 2 * d.real)) * 0.5 * 180.0 / math.pi
+                re_deg, im_deg = canonical_delta_deg(d)
                 inelast = float(res["inelast_diag"][k])
                 if unit_def > unit_def_threshold:
                     status = "FAIL"
@@ -334,10 +338,10 @@ def write_markdown_report(results_per_file, out_path: Path,
                     status = "PASS"
                 if conv_codes_per_file:
                     codes = conv_codes_per_file.get(u_path, {})
-                    if any(v == 2 for v in codes.values()):
+                    if codes.get((k, k, q_idx)) == SIDECAR_CONV_MAXITER_TRUNCATED:
                         status = "⚠ maxiter-truncated, " + status
                 lines.append(
-                    f"| {res['tlab']:.2f} | row={k} | {re_deg:+.3f} | {inelast:.4f} | {unit_def:.4f} | {status} |"
+                    f"| {res['tlab']:.2f} | row={k} | {re_deg:+.3f} | {im_deg:+.3f} | {inelast:.4f} | {unit_def:.4f} | {status} |"
                 )
         lines.append("")
     lines.append("")
@@ -357,9 +361,9 @@ def main():
     ap.add_argument("--unit-def-threshold", type=float, default=0.2,
                     help="||SS†-1|| above this triggers FAIL in the markdown report "
                          "(default 0.2 — anything above is too non-unitary to trust)")
-    ap.add_argument("--maxiter-warn", action="store_true", default=True,
-                    help="read U_PW_convergence_*.txt sidecars and add ⚠ for "
-                         "Padé-maxiter-truncated rows in the markdown report")
+    ap.add_argument("--no-maxiter-warn", action="store_false", dest="maxiter_warn",
+                    default=True,
+                    help="suppress ⚠ markers from U_PW_convergence_*.txt sidecars")
     args = ap.parse_args()
 
     u_files = sorted(args.solver_out_dir.glob("U_PW_elements_*.txt"))
