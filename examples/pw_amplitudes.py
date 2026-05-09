@@ -183,6 +183,13 @@ TAU_2_0 = (1.0 / _SQRT6) * (3.0 * (_S_Z @ _S_Z) - 2.0 * _I3)
 TAU_2_PLUS_1 = -0.5 * (_S_Z @ _S_PLUS + _S_PLUS @ _S_Z)
 TAU_2_PLUS_2 = 0.5 * (_S_PLUS @ _S_PLUS)
 
+# Pauli matrices for the spectator nucleon (basis ordered |+1/2>, |-1/2>).
+# Used for the Madison-convention vector analyzing power Ay(N) of the
+# polarized-nucleon beam, where the y axis is normal to the scattering plane
+# (k_in x k_out). The M-matrix is built using Y_{l,m}(theta, phi=0), so the
+# scattering plane is xz and the Pauli-y operator's axis matches Madison y.
+SIGMA_Y_NUCLEON_2 = np.array([[0.0, -1j], [1j, 0.0]], dtype=complex)
+
 
 # ---------------------------------------------------------------------------
 # Spin-state ordering for the 6x6 M matrix
@@ -206,6 +213,13 @@ def embed_deuteron_operator(op3: np.ndarray) -> np.ndarray:
     if op3.shape != (3, 3):
         raise ValueError("operator must be 3x3 in deuteron spin space")
     return np.kron(op3, np.eye(2, dtype=complex))
+
+
+def embed_nucleon_operator(op2: np.ndarray) -> np.ndarray:
+    """Embed a 2x2 nucleon-spin operator into the 6x6 (deuteron x proton) space."""
+    if op2.shape != (2, 2):
+        raise ValueError("operator must be 2x2 in nucleon spin space")
+    return np.kron(np.eye(3, dtype=complex), op2)
 
 
 # ---------------------------------------------------------------------------
@@ -594,6 +608,7 @@ class PolarizationObservables:
     T20: float
     T21: float
     T22: float
+    Ay_n: float                  # Madison vector analyzing power of the polarized nucleon beam
     trace_M_Mdag: float
 
 
@@ -605,7 +620,7 @@ def observables_from_M(M: np.ndarray) -> PolarizationObservables:
     M_Mdag = M @ M_dag
     trace_norm = float(np.trace(M_Mdag).real)
     if trace_norm <= 0.0:
-        return PolarizationObservables(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        return PolarizationObservables(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     # Unpolarized differential cross section: 1/6 * sum_{m_d,m_p,m_d',m_p'} |M|^2
     dsigma = trace_norm / 6.0
@@ -619,12 +634,19 @@ def observables_from_M(M: np.ndarray) -> PolarizationObservables:
     A_21 = _A(TAU_2_PLUS_1)
     A_22 = _A(TAU_2_PLUS_2)
 
+    # Madison Ay(N): polarized-nucleon-beam vector analyzing power.
+    # sigma(p_y) = (1/N_d)(1/2) Tr[M (I + p_y sigma_y) M_dag] = sigma_0 (1 + p_y Ay)
+    # so Ay = Tr[M sigma_y^(in,N) M_dag] / Tr[M M_dag], sigma_y on the in-nucleon spin.
+    sigma_y_6 = embed_nucleon_operator(SIGMA_Y_NUCLEON_2)
+    Ay_n = float((np.trace(M @ sigma_y_6 @ M_dag) / trace_norm).real)
+
     return PolarizationObservables(
         dsigma_fm2_per_sr=dsigma,
         iT11=float((1j * A_11).real),
         T20=float(A_20.real),
         T21=float(A_21.real),
         T22=float(A_22.real),
+        Ay_n=Ay_n,
         trace_M_Mdag=trace_norm,
     )
 
