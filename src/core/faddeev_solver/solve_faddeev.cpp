@@ -3,6 +3,9 @@
 #include "interactions/w1_pw_cache.h"
 #include <gsl/gsl_cblas.h>
 #include <cstring>
+#include <cstdio>
+#include <cmath>
+#include <string>
 #include <vector>
 
 namespace {
@@ -122,6 +125,21 @@ bool row_has_only_converged_targets(size_t idx_d_row,
 }
 
 } // namespace
+
+// [EN] Tracing helper for trace_im_path. Appends one row to im_path_trace.txt.
+// [CN] trace_im_path 用的追踪辅助函数：向 im_path_trace.txt 追加一行。
+static void append_trace_row(const std::string& output_folder,
+                             const char* stage,
+                             double re_norm,
+                             double im_norm){
+    std::string p = output_folder + "/im_path_trace.txt";
+    FILE* fp = std::fopen(p.c_str(), "a");
+    if (!fp) return;
+    std::fprintf(fp, "%s\t%.6e\t%.6e\t%.6e\n",
+                 stage, re_norm, im_norm,
+                 im_norm / (re_norm + 1e-30));
+    std::fclose(fp);
+}
 
 // Helper function for in-place matrix transpose
 void inplace_transpose(double* A, int rows, int cols) {
@@ -1299,6 +1317,20 @@ void pade_method_solve(cdouble*  U_array,
 			}
 		}
 	}
+	// [EN] Trace hook: capture the elastic on-shell K-block for n=0 (initial CPVC fill). /
+	// [CN] 追踪钩子：记录 n=0（初始 CPVC 填充）时弹性 on-shell K 块的 Re/Im 范数。
+	if (run_parameters.trace_im_path){
+		double re_sq = 0.0, im_sq = 0.0;
+		for (size_t i=0; i<num_on_shell_A_rows; i++){
+			for (size_t j=0; j<dense_dim; j++){
+				size_t k = i*dense_dim + j;
+				re_sq += re_A_An_row_array_prev[k]*re_A_An_row_array_prev[k];
+				im_sq += im_A_An_row_array_prev[k]*im_A_An_row_array_prev[k];
+			}
+		}
+		append_trace_row(run_parameters.output_folder, "K_n0_on_shell_row",
+		                 std::sqrt(re_sq), std::sqrt(im_sq));
+	}
 	/* Extract breakup terms */
 	if (run_parameters.include_breakup_channels){
 		for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
@@ -1816,6 +1848,26 @@ void pade_method_solve(cdouble*  U_array,
 			}
 		}
 		printf("         - Done \n"); fflush(stdout);
+
+		// [EN] Trace hook: ‖Re‖, ‖Im‖ over the elastic on-shell row block AFTER
+		// the n=2NM-1, 2NM Neumann updates land in _array_prev. Stage label uses
+		// (int)NM so successive rows visualize ratio decay across Padé orders. /
+		// [CN] 追踪钩子：在 n=2NM-1, 2NM 的 Neumann 更新写入 _array_prev 之后，
+		// 记录弹性 on-shell 行块的 ‖Re‖/‖Im‖；阶段名使用 (int)NM。
+		if (run_parameters.trace_im_path){
+			double re_sq = 0.0, im_sq = 0.0;
+			for (size_t i=0; i<num_on_shell_A_rows; i++){
+				for (size_t j=0; j<dense_dim; j++){
+					size_t k = i*dense_dim + j;
+					re_sq += re_A_An_row_array_prev[k]*re_A_An_row_array_prev[k];
+					im_sq += im_A_An_row_array_prev[k]*im_A_An_row_array_prev[k];
+				}
+			}
+			char stage[64];
+			std::snprintf(stage, sizeof(stage), "AKn_elastic_n%d", (int)NM);
+			append_trace_row(run_parameters.output_folder, stage,
+			                 std::sqrt(re_sq), std::sqrt(im_sq));
+		}
 	}
 
 	printf("     - Extracting on-shell U-matrix elements \n"); fflush(stdout);
@@ -1842,6 +1894,25 @@ void pade_method_solve(cdouble*  U_array,
 				printf("       - U-matrix element for alpha'=%ld, alpha=%ld, q=%ld: %.10e + %.10ei \n", ndos.alpha_row, ndos.alpha_col, ndos.q_idx, U_array[ndos.value_storage_idx].real(), U_array[ndos.value_storage_idx].imag());
 			}
 		}
+	}
+
+	// [EN] Trace hook: aggregate ‖Re U‖, ‖Im U‖ over all elastic on-shell elements
+	// after the best Padé selection. Also write an "S_matrix_diagonal_elastic" row
+	// that mirrors the U aggregate (the actual S = 1 + 2i U conversion happens in
+	// the Python extractor). /
+	// [CN] 追踪钩子：在选定最佳 Padé 之后，聚合所有弹性 on-shell 元的 ‖Re U‖、‖Im U‖。
+	// 同时写一行 S_matrix_diagonal_elastic（实际 S = 1 + 2i U 的换算在 Python 提取器中完成）。
+	if (run_parameters.trace_im_path){
+		double re_sq = 0.0, im_sq = 0.0;
+		for (size_t idx=0; idx<num_EL_A_vals; idx++){
+			cdouble u = U_array[idx];
+			re_sq += u.real()*u.real();
+			im_sq += u.imag()*u.imag();
+		}
+		append_trace_row(run_parameters.output_folder, "Pade_best_PA_elastic_U",
+		                 std::sqrt(re_sq), std::sqrt(im_sq));
+		append_trace_row(run_parameters.output_folder, "S_matrix_diagonal_elastic",
+		                 std::sqrt(re_sq), std::sqrt(im_sq));
 	}
 
 	/* Sidecar: write per-element convergence honesty flags so the Python
