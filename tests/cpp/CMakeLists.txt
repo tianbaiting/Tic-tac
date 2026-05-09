@@ -67,6 +67,25 @@ add_executable(test_chiral_3nf_recoupling
 target_link_libraries(test_chiral_3nf_recoupling ${GSL_LIBRARIES})
 add_test(NAME chiral_3nf_recoupling COMMAND test_chiral_3nf_recoupling)
 
+# Resolvent analytic Im parts
+add_executable(resolvent_im_test
+    resolvent_im_test.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/resolvent/make_resolvent.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/kinetic_conversion.cpp
+)
+target_include_directories(resolvent_im_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/core
+    ${CMAKE_SOURCE_DIR}/src/core/resolvent
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(resolvent_im_test ${GSL_LIBRARIES})
+add_test(NAME resolvent_im_test COMMAND resolvent_im_test)
+
 # Cache layer C++ unit tests
 add_executable(cache_layer_test
     cache_layer_test.cpp
