@@ -196,6 +196,14 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 			raise_error("Invalid value for input parameter trace_im_path!");
 		}
 	}
+	else if (option == "n0_neumann_complex_born"){
+		if (input=="true" || input=="false"){
+			run_parameters.n0_neumann_complex_born = (input=="true");
+		}
+		else{
+			raise_error("Invalid value for input parameter n0_neumann_complex_born!");
+		}
+	}
 	else if (option == "solve_faddeev"){
 		if (input=="true" || input=="false"){
 			run_parameters.solve_faddeev = (input=="true");
@@ -680,6 +688,7 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.calculate_and_store_P123 = true;
 	run_parameters.include_breakup_channels = false;
 	run_parameters.trace_im_path            = false;
+	run_parameters.n0_neumann_complex_born  = true;
 	run_parameters.solve_faddeev		    = true;
 	run_parameters.solve_dense				= false;
 	run_parameters.production_run		    = true;

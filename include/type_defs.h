@@ -136,6 +136,16 @@ typedef struct run_params{
                                          // single-shot diagnostic run. Default false. /
                                          // [CN] true 时单次诊断跑里输出每个阶段的 Re/Im
                                          // 范数到 im_path_trace.txt。默认 false。
+	bool		n0_neumann_complex_born;   // [EN] when true (default), the n=0 Neumann
+                                         // coefficient extraction in solve_faddeev_equations
+                                         // builds cdouble{re, im} from BOTH re_A_An_row_array_prev
+                                         // and im_A_An_row_array_prev (mirroring the n>=1 site).
+                                         // When false, restores the legacy Re-only behavior that
+                                         // silently dropped the Born term's imaginary part — kept
+                                         // reachable for A/B comparison. /
+                                         // [CN] true（默认）时 n=0 项从 re_/im_ 两个缓冲区组装
+                                         // 复数（与 n>=1 一致）；false 时恢复仅取实部的旧行为，
+                                         // 保留以便 A/B 对照。
 	bool		solve_faddeev;
 	bool		solve_dense;
 	bool		production_run;

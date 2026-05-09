@@ -1302,7 +1302,18 @@ void pade_method_solve(cdouble*  U_array,
 																				 Np_WP);
 
 				/* Calculate coefficient */
-				cdouble a_coeff = re_A_An_row_array_prev[ndos.row_storage_idx*dense_dim + ndos.col_storage_idx];
+				/* [EN] n0_neumann_complex_born=true (default): build cdouble{re, im}
+				 *      from BOTH buffers (mirrors n>=1 site at the elastic recurrence below).
+				 *      false: legacy Re-only path that silently dropped the Born term's Im. /
+				 * [CN] true（默认）：从 re_/im_ 两个缓冲区组装复数（与 n>=1 一致）；
+				 *      false：恢复仅取实部的旧路径，保留以便 A/B 对照。 */
+				cdouble a_coeff;
+				if (run_parameters.n0_neumann_complex_born){
+					a_coeff = {re_A_An_row_array_prev[ndos.row_storage_idx*dense_dim + ndos.col_storage_idx],
+					           im_A_An_row_array_prev[ndos.row_storage_idx*dense_dim + ndos.col_storage_idx]};
+				} else {
+					a_coeff = re_A_An_row_array_prev[ndos.row_storage_idx*dense_dim + ndos.col_storage_idx];
+				}
 
 				/* Store coefficient */
 				a_coeff_array[ndos.value_storage_idx*num_neumann_terms] = a_coeff;
@@ -1347,8 +1358,16 @@ void pade_method_solve(cdouble*  U_array,
 					size_t idx_col_NDOS   = idx_alpha_NDOS*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
 
 					/* Calculate coefficient */
-					cdouble a_BU_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
-					
+					/* [EN] Twin of the elastic Born-term gating above; mirror n>=1 BU recurrence. /
+					 * [CN] 与上方弹性 Born 项的开关一致；与 n>=1 BU 递推保持一致。 */
+					cdouble a_BU_coeff;
+					if (run_parameters.n0_neumann_complex_born){
+						a_BU_coeff = {re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS],
+						              im_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS]};
+					} else {
+						a_BU_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
+					}
+
 					/* Store coefficient */
 					size_t idx_NDOS = breakup_value_storage_index(idx_d_row,
 																 idx_BU_chn,
