@@ -1918,10 +1918,8 @@ void pade_method_solve(cdouble*  U_array,
 	delete [] pade_approximants_BU_array;
 	delete [] pade_approximants_BU_idx_array;
 	delete [] pade_approximants_BU_conv_array;
-	if (pade_approximants_BU_truly_converged_array != NULL){
-		delete [] pade_approximants_BU_truly_converged_array;
-		delete [] pade_approximants_BU_maxiter_truncated_array;
-	}
+	delete [] pade_approximants_BU_truly_converged_array;
+	delete [] pade_approximants_BU_maxiter_truncated_array;
 }
 
 void solve_faddeev_equations(cdouble*  U_array,

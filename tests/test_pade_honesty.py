@@ -1,6 +1,6 @@
 # tests/test_pade_honesty.py
-"""Regression: Conv column must appear in U_PW_elements_*.txt after the
-Padé-honesty patch. Cheap 13 MeV Nijmegen-I config, ~3 min wall."""
+"""Regression: U_PW_convergence_*.txt sidecar must appear with valid Conv
+codes after the Padé-honesty patch. Cheap 13 MeV Nijmegen-I config, ~3 min wall."""
 import os
 import re
 import subprocess
