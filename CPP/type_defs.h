@@ -104,6 +104,11 @@ typedef struct run_params{
 	bool 		midpoint_approx;
 	bool		calculate_and_store_P123;
 	bool		include_breakup_channels;
+	bool		trace_im_path;             // [EN] when true, dump per-stage Re/Im norms
+                                         // to <output_folder>/im_path_trace.txt during a
+                                         // single-shot diagnostic run. Default false. /
+                                         // [CN] true 时单次诊断跑里输出每个阶段的 Re/Im
+                                         // 范数到 im_path_trace.txt。默认 false。
 	bool		solve_faddeev;
 	bool		solve_dense;
 	bool		production_run;
