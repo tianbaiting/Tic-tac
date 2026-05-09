@@ -16,6 +16,13 @@ def trace_run(tmp_path_factory):
     cfg_text = CFG.read_text()
     cfg_text = re.sub(r"^output_folder=.*$",
                       f"output_folder={out}", cfg_text, flags=re.M)
+    # Read-only test: do NOT redirect P123_folder so we reuse the shared cache,
+    # but force recovery/store off so the test cannot poison it (the merged-h5
+    # integer-truncation bug at make_permutation_matrix.cpp:1310 only triggers
+    # when recovery=true + store=true, which we override below).
+    cfg_text = re.sub(r"^P123_recovery=.*$", "P123_recovery=false", cfg_text, flags=re.M)
+    cfg_text = re.sub(r"^calculate_and_store_P123=.*$",
+                      "calculate_and_store_P123=false", cfg_text, flags=re.M)
     if "trace_im_path" not in cfg_text:
         cfg_text += "\ntrace_im_path=true\n"
     else:

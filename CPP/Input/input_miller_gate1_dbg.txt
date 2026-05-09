@@ -26,13 +26,13 @@ q_grid_filename=
 P123_omp_num_threads=4
 parallel_run=false
 channel_idx=-1
-P123_recovery=true
+P123_recovery=false
 
 # Physics switches
 tensor_force=true
 isospin_breaking_1S0=true
 midpoint_approx=false
-calculate_and_store_P123=true
+calculate_and_store_P123=false
 include_breakup_channels=true
 solve_faddeev=true
 solve_dense=false
