@@ -26,8 +26,14 @@ def cheap_run(tmp_path_factory):
     return out
 
 def test_conv_column_present(cheap_run):
-    files = list(cheap_run.glob("U_PW_elements_*.txt"))
-    assert files, "no U_PW_elements_*.txt produced"
-    text = files[0].read_text()
-    assert " Conv " in text or "\tConv\t" in text, \
-        f"Conv column missing in {files[0].name}"
+    sidecars = list(cheap_run.glob("U_PW_convergence_*.txt"))
+    assert sidecars, "no U_PW_convergence_*.txt sidecar produced"
+    lines = sidecars[0].read_text().strip().splitlines()
+    data_rows = [l for l in lines if not l.startswith("#")]
+    assert data_rows, "sidecar has no data rows"
+    cols = data_rows[0].split()
+    assert len(cols) == 5, f"expected 5 columns, got {len(cols)}: {cols}"
+    conv_codes = {int(l.split()[3]) for l in data_rows}
+    # at least one row should be coded; both 1 and 2 may appear
+    assert conv_codes.issubset({0, 1, 2}) and conv_codes != {0}, \
+        f"conv codes look wrong: {conv_codes}"

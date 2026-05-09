@@ -1843,6 +1843,32 @@ void pade_method_solve(cdouble*  U_array,
 			}
 		}
 	}
+
+	/* Sidecar: write per-element convergence honesty flags so the Python
+	 * extractor can distinguish truly-converged from maxiter-truncated PAs.
+	 * Sidecar file is OPTIONAL for legacy consumers — only the new extractor
+	 * looks for it. */
+	{
+		std::string conv_file = run_parameters.output_folder + "/U_PW_convergence" + file_identification + ".txt";
+		std::ofstream cf(conv_file);
+		cf << "# Per-element Padé convergence honesty (additive sidecar).\n";
+		cf << "# Conv: 1 = truly_converged (criteria 1/2/3); 2 = maxiter_truncated (criterion 0 only).\n";
+		cf << "# Columns: row col q_com Conv idx_best_PA\n";
+		for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
+			for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
+				for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
+					size_t idx_NDOS = elastic_value_storage_index(idx_d_row, idx_d_col, idx_q_com,
+																 num_deuteron_states, num_q_com);
+					int conv_code = pade_approximants_truly_converged_array[idx_NDOS]   ? 1 :
+									pade_approximants_maxiter_truncated_array[idx_NDOS] ? 2 : 0;
+					cf << idx_d_row << " " << idx_d_col << " " << idx_q_com << " "
+					   << conv_code << " " << pade_approximants_idx_array[idx_NDOS] << "\n";
+				}
+			}
+		}
+		cf.close();
+	}
+
 	/* Set on-shell breakup U-matrix elements equal "best" PA */
 	if (run_parameters.include_breakup_channels){
 		for (size_t idx_q_com=0; idx_q_com<num_q_com; idx_q_com++){
