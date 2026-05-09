@@ -949,12 +949,22 @@ void pade_method_solve(cdouble*  U_array,
 	cdouble* pade_approximants_array      = new cdouble [num_EL_A_vals * (NM_max+1)];
 	size_t*  pade_approximants_idx_array  = new size_t  [num_EL_A_vals];
 	bool*    pade_approximants_conv_array = new bool    [num_EL_A_vals];
+	// [EN] Honesty layer (additive, parallel to *_conv_array). truly_converged_array is
+	// set when criteria 1/2/3 fire; maxiter_truncated_array is set ONLY when criterion 0
+	// (NM == NM_max) fired without any of 1/2/3. Old consumers reading *_conv_array are
+	// unaffected. / [CN] 诚信层（与 *_conv_array 平行新增）。truly_converged_array 在
+	// criteria 1/2/3 触发时置位；maxiter_truncated_array 仅在 criterion 0 (NM == NM_max)
+	// 触发而 1/2/3 都未满足时置位。读旧 *_conv_array 的代码不受影响。
+	bool*    pade_approximants_truly_converged_array     = new bool [num_EL_A_vals];
+	bool*    pade_approximants_maxiter_truncated_array   = new bool [num_EL_A_vals];
 	size_t	 num_converged_elements		  = 0;
 
 	/* Arrays to store Pade-approximants (PA) for each on-shell breakup elements */
-	cdouble* pade_approximants_BU_array      = NULL;//new cdouble [num_BU_A_vals * (NM_max+1)];
-	size_t*  pade_approximants_BU_idx_array  = NULL;//new size_t  [num_BU_A_vals];
-	bool*    pade_approximants_BU_conv_array = NULL;//new bool    [num_BU_A_vals];
+	cdouble* pade_approximants_BU_array                  = NULL;
+	size_t*  pade_approximants_BU_idx_array              = NULL;
+	bool*    pade_approximants_BU_conv_array             = NULL;
+	bool*    pade_approximants_BU_truly_converged_array  = NULL;
+	bool*    pade_approximants_BU_maxiter_truncated_array= NULL;
 	size_t	 num_converged_BU_elements		 = 0;
 
 	// [EN] The CPVC kernel is generated in chunks because the full dense object is far larger than the active
@@ -981,7 +991,9 @@ void pade_method_solve(cdouble*  U_array,
 	int*     omp_CPVC_nnz_to_row_array  = new int    [dense_dim * num_threads];
 
 	for (size_t idx_NDOS=0; idx_NDOS<num_EL_A_vals; idx_NDOS++){
-		pade_approximants_conv_array[idx_NDOS] = false;
+		pade_approximants_conv_array[idx_NDOS]              = false;
+		pade_approximants_truly_converged_array[idx_NDOS]   = false;
+		pade_approximants_maxiter_truncated_array[idx_NDOS] = false;
 	}
 
 	if (run_parameters.include_breakup_channels){
@@ -991,8 +1003,12 @@ void pade_method_solve(cdouble*  U_array,
 		pade_approximants_BU_idx_array  = new size_t  [num_BU_A_vals];
 		pade_approximants_BU_conv_array = new bool    [num_BU_A_vals];
 		
+		pade_approximants_BU_truly_converged_array   = new bool [num_BU_A_vals];
+		pade_approximants_BU_maxiter_truncated_array = new bool [num_BU_A_vals];
 		for (size_t idx_NDOS=0; idx_NDOS<num_BU_A_vals; idx_NDOS++){
-			pade_approximants_BU_conv_array[idx_NDOS] = false;
+			pade_approximants_BU_conv_array[idx_NDOS]              = false;
+			pade_approximants_BU_truly_converged_array[idx_NDOS]   = false;
+			pade_approximants_BU_maxiter_truncated_array[idx_NDOS] = false;
 		}
 	}
 
