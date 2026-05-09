@@ -1726,6 +1726,17 @@ void pade_method_solve(cdouble*  U_array,
 						pade_approximants_conv_array[idx_NDOS] = true;
 						pade_approximants_idx_array[idx_NDOS]  = idx_best_PA;
 						num_converged_elements += 1;
+						// [EN] Honesty split: only criteria 1/2/3 represent genuine
+						// convergence. Criterion 0 (NM == NM_max) without any of 1/2/3
+						// is a max-iter timeout, not convergence. / [CN] 诚信拆分：
+						// 仅 criteria 1/2/3 代表真收敛；criterion 0 (NM == NM_max) 单
+						// 独触发表示达到迭代上限而非收敛。
+						bool genuinely_converged =  convergence_criteria_1
+												 || convergence_criteria_2
+												 || convergence_criteria_3;
+						pade_approximants_truly_converged_array[idx_NDOS]   = genuinely_converged;
+						pade_approximants_maxiter_truncated_array[idx_NDOS] = !genuinely_converged
+																			  && convergence_criteria_0;
 					}
 				}
 			}
@@ -1793,6 +1804,12 @@ void pade_method_solve(cdouble*  U_array,
 							pade_approximants_BU_conv_array[idx_NDOS] = true;
 							pade_approximants_BU_idx_array[idx_NDOS]  = idx_best_PA;
 							num_converged_elements += 1;
+							bool genuinely_converged =  convergence_criteria_1
+													 || convergence_criteria_2
+													 || convergence_criteria_3;
+							pade_approximants_BU_truly_converged_array[idx_NDOS]   = genuinely_converged;
+							pade_approximants_BU_maxiter_truncated_array[idx_NDOS] = !genuinely_converged
+																					  && convergence_criteria_0;
 						}
 					}
 				}
@@ -1870,9 +1887,15 @@ void pade_method_solve(cdouble*  U_array,
 	delete [] pade_approximants_array;
 	delete [] pade_approximants_idx_array;
 	delete [] pade_approximants_conv_array;
+	delete [] pade_approximants_truly_converged_array;
+	delete [] pade_approximants_maxiter_truncated_array;
 	delete [] pade_approximants_BU_array;
 	delete [] pade_approximants_BU_idx_array;
 	delete [] pade_approximants_BU_conv_array;
+	if (pade_approximants_BU_truly_converged_array != NULL){
+		delete [] pade_approximants_BU_truly_converged_array;
+		delete [] pade_approximants_BU_maxiter_truncated_array;
+	}
 }
 
 void solve_faddeev_equations(cdouble*  U_array,
