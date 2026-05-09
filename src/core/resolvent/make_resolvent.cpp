@@ -1,6 +1,10 @@
 
 #include "make_resolvent.h"
 
+#include <cmath>
+#include <cstdio>
+#include <string>
+
 namespace {
 
 bool is_singlet_s_wave_channel(int L_2N, int S_2N, int J_2N){
@@ -227,6 +231,57 @@ void calculate_resolvent_array_in_SWP_basis(cdouble* G_array,
 				//}
 				//std::cout << R << " " << Q << std::endl;
 			}
+		}
+	}
+
+	// [EN] Trace hook (additive). When trace_im_path=true, dump the on-shell q-bin
+	// row of (Re G, Im G) aggregated over all (alpha, p) pairs for this E. Cheap:
+	// one extra full sweep, only on the diagnostic run. /
+	// [CN] 追踪钩子（新增，可选）。trace_im_path=true 时，把当前 E 的 on-shell q-bin
+	// 行（在所有 (alpha, p) 上聚合）的 Re/Im G 写入诊断文件。开销：1 次额外扫描，仅诊断跑生效。
+	if (run_parameters.trace_im_path){
+		double sum_re_bc_sq = 0.0, sum_im_bc_sq = 0.0;
+		double sum_re_cc_sq = 0.0, sum_im_cc_sq = 0.0;
+		for (int idx_alpha=0; idx_alpha<Nalpha; idx_alpha++){
+			int L = L_2N_array[idx_alpha];
+			int S = S_2N_array[idx_alpha];
+			int J = J_2N_array[idx_alpha];
+			int T = T_2N_array[idx_alpha];
+			int two_T_3N = two_T_3N_array[idx_alpha];
+			double* e_SWP_array_ptr = select_swp_energy_branch(L, S, J, T, two_T_3N,
+															   Np_WP, e_SWP_unco_array,
+															   e_SWP_coup_array, run_parameters);
+			for (int idx_p=0; idx_p<Np_WP; idx_p++){
+				bool bs = (e_SWP_array_ptr[idx_p] < 0);
+				for (int idx_q=0; idx_q<Nq_WP; idx_q++){
+					int G_idx = idx_alpha*Nq_WP*Np_WP + idx_q*Np_WP + idx_p;
+					cdouble g = G_array[G_idx];
+					if (bs){
+						sum_re_bc_sq += g.real()*g.real();
+						sum_im_bc_sq += g.imag()*g.imag();
+					} else {
+						// [EN] Aggregate all CC cells; cells whose Im is exactly zero
+						// (E outside cell support) contribute nothing to Im sum but do
+						// contribute to Re sum. The aggregate ratio Im/Re reveals
+						// global straddle weight. /
+						// [CN] 聚合所有 CC 单元；E 落在单元外时 Im 为零，仅对 Re 求和有贡献，
+						// 总比例 Im/Re 反映 straddle 权重。
+						sum_re_cc_sq += g.real()*g.real();
+						sum_im_cc_sq += g.imag()*g.imag();
+					}
+				}
+			}
+		}
+		std::string trace_path = run_parameters.output_folder + "/im_path_trace.txt";
+		FILE* fp = std::fopen(trace_path.c_str(), "a");
+		if (fp){
+			std::fprintf(fp, "G0_BC_on_shell_q\t%.6e\t%.6e\t%.6e\n",
+						 std::sqrt(sum_re_bc_sq), std::sqrt(sum_im_bc_sq),
+						 std::sqrt(sum_im_bc_sq) / (std::sqrt(sum_re_bc_sq) + 1e-30));
+			std::fprintf(fp, "G0_CC_straddle_aggregate\t%.6e\t%.6e\t%.6e\n",
+						 std::sqrt(sum_re_cc_sq), std::sqrt(sum_im_cc_sq),
+						 std::sqrt(sum_im_cc_sq) / (std::sqrt(sum_re_cc_sq) + 1e-30));
+			std::fclose(fp);
 		}
 	}
 }
