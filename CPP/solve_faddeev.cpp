@@ -804,7 +804,17 @@ void pade_method_solve(cdouble*  U_array,
 				size_t idx_col_NDOS   = idx_alpha_NDOS_col*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
 
 				/* Calculate coefficient */
-				cdouble a_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
+				/* [EN] Stale legacy mirror; kept in sync with src/core/faddeev_solver/solve_faddeev.cpp.
+				 *      n0_neumann_complex_born=true (default) builds cdouble{re, im} from BOTH buffers. /
+				 * [CN] 旧版镜像（不参与编译），与 src 路径保持一致：
+				 *      n0_neumann_complex_born=true（默认）从 re_/im_ 两个缓冲区组装复数。 */
+				cdouble a_coeff;
+				if (run_parameters.n0_neumann_complex_born){
+					a_coeff = {re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS],
+					           im_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS]};
+				} else {
+					a_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
+				}
 
 				/* Store coefficient */
 				size_t idx_NDOS = idx_d_row*num_deuteron_states*num_q_com + idx_d_col*num_q_com + idx_q_com;
@@ -836,8 +846,16 @@ void pade_method_solve(cdouble*  U_array,
 					size_t idx_col_NDOS   = idx_alpha_NDOS*Nq_WP*Np_WP + idx_q_NDOS*Np_WP + idx_p_NDOS;
 
 					/* Calculate coefficient */
-					cdouble a_BU_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
-					
+					/* [EN] Twin of elastic gating above; legacy mirror only. /
+					 * [CN] 与上方弹性 Born 项的开关一致；旧版镜像。 */
+					cdouble a_BU_coeff;
+					if (run_parameters.n0_neumann_complex_born){
+						a_BU_coeff = {re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS],
+						              im_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS]};
+					} else {
+						a_BU_coeff = re_A_An_row_array_prev[idx_row_NDOS*dense_dim + idx_col_NDOS];
+					}
+
 					/* Store coefficient */
 					size_t idx_NDOS = idx_d_row*chn_os_indexing.num_BU_chns + idx_BU_chn;
 					a_BU_coeff_array[idx_NDOS*num_neumann_terms] = a_BU_coeff;
