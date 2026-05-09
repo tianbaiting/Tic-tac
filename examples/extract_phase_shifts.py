@@ -303,18 +303,71 @@ def extract_for_file(u_path: Path, q_kin_path: Path, tlab_target: float | None,
     return results
 
 
+def write_markdown_report(results_per_file, out_path: Path,
+                          unit_def_threshold: float,
+                          conv_codes_per_file):
+    """Additive: writes a structured markdown report. The existing stdout
+    printing in extract_for_file is unaffected.
+
+    results_per_file: { u_path : list of result dicts (as produced by extract_for_file) }
+    conv_codes_per_file: { u_path : { (row, col, q_com) : conv_code } } or None
+    """
+    lines = ["# Phase-shift extraction report", ""]
+    overall_pass = True
+    for u_path, results in results_per_file.items():
+        lines.append(f"## {u_path.name}")
+        lines.append("")
+        lines.append("| Tlab [MeV] | block | δ_diag [°] | \\|S_kk\\| | \\|\\|SS†-1\\|\\| | status |")
+        lines.append("|---|---|---|---|---|---|")
+        for res in results:
+            S = res["S"]
+            unit_def = float(np.linalg.norm(S @ S.conj().T - np.eye(S.shape[0])))
+            for k in range(len(res["delta_diag"])):
+                d = res["delta_diag"][k]
+                # canonical_delta_deg already exists in this file
+                re_deg = np.angle(np.exp(1j * 2 * d.real)) * 0.5 * 180.0 / math.pi
+                inelast = float(res["inelast_diag"][k])
+                if unit_def > unit_def_threshold:
+                    status = "FAIL"
+                    overall_pass = False
+                else:
+                    status = "PASS"
+                if conv_codes_per_file:
+                    codes = conv_codes_per_file.get(u_path, {})
+                    if any(v == 2 for v in codes.values()):
+                        status = "⚠ maxiter-truncated, " + status
+                lines.append(
+                    f"| {res['tlab']:.2f} | row={k} | {re_deg:+.3f} | {inelast:.4f} | {unit_def:.4f} | {status} |"
+                )
+        lines.append("")
+    lines.append("")
+    lines.append(f"**Overall:** {'PASS' if overall_pass else 'FAIL'}")
+    out_path.write_text("\n".join(lines))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--solver-out-dir", required=True, type=Path,
                     help="directory holding U_PW_elements_*.txt + q_kinematics_Nq_*.txt")
     ap.add_argument("--tlab", type=float, default=None,
                     help="show only rows within ±5 MeV of this Tlab (default: all)")
+    ap.add_argument("--markdown-out", type=Path, default=None,
+                    help="if set, write a structured markdown report to this path "
+                         "with PASS/⚠/FAIL markers per (J,P) block")
+    ap.add_argument("--unit-def-threshold", type=float, default=0.2,
+                    help="||SS†-1|| above this triggers FAIL in the markdown report "
+                         "(default 0.2 — anything above is too non-unitary to trust)")
+    ap.add_argument("--maxiter-warn", action="store_true", default=True,
+                    help="read U_PW_convergence_*.txt sidecars and add ⚠ for "
+                         "Padé-maxiter-truncated rows in the markdown report")
     args = ap.parse_args()
 
     u_files = sorted(args.solver_out_dir.glob("U_PW_elements_*.txt"))
     if not u_files:
         raise SystemExit(f"no U_PW_elements_*.txt under {args.solver_out_dir}")
 
+    results_per_file = {}
+    conv_codes_per_file = {}
     # Pick matching q_kinematics file by Nq suffix.
     for u_path in u_files:
         m = re.search(r"Nq_(\d+)", u_path.name)
@@ -325,7 +378,27 @@ def main():
         if not q_kin.exists():
             print(f"[skip] no q_kinematics_Nq_{nq}.txt for {u_path.name}")
             continue
-        extract_for_file(u_path, q_kin, args.tlab)
+        res = extract_for_file(u_path, q_kin, args.tlab)
+        if res:
+            results_per_file[u_path] = res
+        # Read sidecar if present
+        sidecar_name = u_path.name.replace("U_PW_elements_", "U_PW_convergence_")
+        sidecar = args.solver_out_dir / sidecar_name
+        if args.maxiter_warn and sidecar.exists():
+            codes = {}
+            for line in sidecar.read_text().splitlines():
+                if line.startswith("#") or not line.strip():
+                    continue
+                parts = line.split()
+                if len(parts) >= 4:
+                    codes[(int(parts[0]), int(parts[1]), int(parts[2]))] = int(parts[3])
+            conv_codes_per_file[u_path] = codes
+
+    if args.markdown_out:
+        write_markdown_report(results_per_file, args.markdown_out,
+                              args.unit_def_threshold,
+                              conv_codes_per_file or None)
+        print(f"[markdown] {args.markdown_out}")
 
 
 if __name__ == "__main__":
