@@ -115,6 +115,57 @@ def clebsch_gordan(j1: float, m1: float, j2: float, m2: float, j: float, m: floa
     return math.sqrt(triangle_sq * norm_sq) * summation
 
 
+def wigner_6j(j1: float, j2: float, j3: float,
+              j4: float, j5: float, j6: float) -> float:
+    """Wigner 6j symbol {j1 j2 j3; j4 j5 j6} via the Racah formula.
+
+    Args may be integer or half-integer (passed as floats). Returns 0
+    outside any triangle inequality. Used for the jj-coupling -> channel-spin
+    transformation of the on-shell U-matrix per Miller PRC 106 (2022) Eq. (D4).
+    """
+    def tri(a, b, c):
+        return abs(a - b) - 1e-9 <= c <= a + b + 1e-9
+    if not (tri(j1, j2, j3) and tri(j1, j5, j6)
+            and tri(j4, j2, j6) and tri(j4, j5, j3)):
+        return 0.0
+    for triplet in ((j1, j2, j3), (j1, j5, j6), (j4, j2, j6), (j4, j5, j3)):
+        s = sum(triplet)
+        if abs(s - round(s)) > 1e-9:
+            return 0.0
+
+    def ifact(x: float) -> int:
+        return math.factorial(int(round(x)))
+
+    def Delta(a: float, b: float, c: float) -> float:
+        return math.sqrt(
+            ifact(a + b - c) * ifact(a - b + c) * ifact(-a + b + c)
+            / ifact(a + b + c + 1)
+        )
+
+    pre = (Delta(j1, j2, j3) * Delta(j1, j5, j6)
+           * Delta(j4, j2, j6) * Delta(j4, j5, j3))
+
+    k_min = max(j1 + j2 + j3, j1 + j5 + j6, j4 + j2 + j6, j4 + j5 + j3)
+    k_max = min(j1 + j2 + j4 + j5, j2 + j3 + j5 + j6, j3 + j1 + j6 + j4)
+    k_min_int = int(round(k_min))
+    k_max_int = int(round(k_max))
+    if k_max_int < k_min_int:
+        return 0.0
+
+    summ = 0.0
+    for k in range(k_min_int, k_max_int + 1):
+        denom = (
+            ifact(k - j1 - j2 - j3) * ifact(k - j1 - j5 - j6)
+            * ifact(k - j4 - j2 - j6) * ifact(k - j4 - j5 - j3)
+            * ifact(j1 + j2 + j4 + j5 - k)
+            * ifact(j2 + j3 + j5 + j6 - k)
+            * ifact(j3 + j1 + j6 + j4 - k)
+        )
+        summ += ((-1) ** k) * ifact(k + 1) / denom
+
+    return pre * summ
+
+
 def _associated_legendre(l: int, m: int, x: float) -> float:
     """Condon-Shortley associated Legendre P_l^m(x) for m >= 0, |x| <= 1."""
     if m < 0 or m > l:
@@ -547,6 +598,117 @@ def _geometric_factor(
     return y_in_amp * cg_in_orb * cg_in_jjd * y_out * cg_out_orb * cg_out_jjd
 
 
+_S_DEUTERON = 1.0
+_S_NUCLEON  = 0.5
+_CHANNEL_SPINS = (0.5, 1.5)  # Sigma = J_d (x) s_p = 1/2 or 3/2
+
+
+def _block_jj_to_channel_spin(block: "JPiBlock", U_jj: np.ndarray
+                              ) -> Tuple[List[Tuple[int, float]], np.ndarray]:
+    """Transform on-shell U-matrix from jj to channel-spin basis (Miller D4).
+
+    Input:  U_jj shape (n_jj, n_jj), rows/cols indexed by ``block.channels`` (l, j).
+    Output: (cs_channels, U_cs).
+        cs_channels: list of (l, Sigma) tuples allowed in this (J, parity) block.
+        U_cs: complex (n_cs, n_cs).
+
+    Per Miller PRC 106 024001 (2022) Eq. (D4):
+        U^J_{l' Sigma', l Sigma} = sum_{j',j}
+            ĵ' (-1)^(J + j' + l' + 1/2) {l' 1/2 j'; J_d J Sigma'}
+          × ĵ  (-1)^(J + j  + l  + 1/2) {l 1/2 j ;  J_d J Sigma }
+          × U^J_{l' j', l j}
+    with ĵ = sqrt(2 j + 1).
+    """
+    J = block.J
+    parity = block.parity
+    ls = sorted({c.l for c in block.channels})
+
+    cs_channels: List[Tuple[int, float]] = []
+    for l in ls:
+        if (-1) ** l != parity:
+            continue
+        for Sigma in _CHANNEL_SPINS:
+            # Triangle (l, Sigma, J) — the only constraint that determines membership.
+            if abs(l - Sigma) - 1e-9 > J or l + Sigma + 1e-9 < J:
+                continue
+            cs_channels.append((l, Sigma))
+
+    n_cs = len(cs_channels)
+    n_jj = len(block.channels)
+    U_cs = np.zeros((n_cs, n_cs), dtype=complex)
+    if n_cs == 0 or n_jj == 0:
+        return cs_channels, U_cs
+
+    # Build T[cs_idx, jj_idx] per Miller PRC 106 (2022) Eq. (D4) verbatim
+    # (arxiv:2201.09600 TeX source):
+    #   T = (-1)^(J + j) sqrt((2j+1)(2 Sigma+1)) {l 1/2 j; J_d J Sigma}
+    # For half-integer J and j the exponent (J + j) is integer, so the phase is well
+    # defined. T is block-diagonal in l (a (l, Sigma) cs-channel only mixes with
+    # (l, *) jj-channels).
+    T = np.zeros((n_cs, n_jj))
+    for cs_idx, (l, Sigma) in enumerate(cs_channels):
+        for jj_idx, chan in enumerate(block.channels):
+            if chan.l != l:
+                continue
+            j = chan.j
+            sj = wigner_6j(l, _S_NUCLEON, j, _S_DEUTERON, J, Sigma)
+            if sj == 0.0:
+                continue
+            phase = (-1.0) ** int(round(J + j))
+            T[cs_idx, jj_idx] = (
+                phase
+                * math.sqrt((2.0 * j + 1.0) * (2.0 * Sigma + 1.0))
+                * sj
+            )
+
+    # U_cs = T @ U_jj @ T.T (real T, complex U).
+    U_cs = T @ U_jj @ T.T
+    return cs_channels, U_cs
+
+
+def _channel_spin_geometric_factor(J: float, parity: int,
+                                   l_in: int, l_out: int,
+                                   Sigma_in: float, m_Sigma_in: float,
+                                   Sigma_out: float, m_Sigma_out: float,
+                                   theta: float) -> complex:
+    """Geometric factor for one (Sigma',l') <- (Sigma,l) term per Miller D2:
+        g = i^(l_out - l_in) sqrt(2 l_in + 1)
+            * <Sigma m_Sigma; l_in 0 | J m_Sigma>
+            * <Sigma' m_Sigma'; l_out (m_Sigma - m_Sigma') | J m_Sigma>
+            * Y_{l_out}^{m_Sigma - m_Sigma'}(theta, 0)
+    Returns 0 outside triangle / parity / m-conservation domain.
+    """
+    # Parity (consistency check; transformation already filtered, but cheap).
+    if (-1) ** l_in != parity or (-1) ** l_out != parity:
+        return 0+0j
+    # Triangle (Sigma, l, J) on each side.
+    if abs(l_in - Sigma_in) - 1e-9 > J or l_in + Sigma_in + 1e-9 < J:
+        return 0+0j
+    if abs(l_out - Sigma_out) - 1e-9 > J or l_out + Sigma_out + 1e-9 < J:
+        return 0+0j
+    # m_l_out fixed by total-M conservation: m_Sigma_in = m_l_out + m_Sigma_out.
+    m_l_out = m_Sigma_in - m_Sigma_out
+    if abs(m_l_out) > l_out + 1e-9:
+        return 0+0j
+
+    cg_in = clebsch_gordan(Sigma_in, m_Sigma_in, l_in, 0.0, J, m_Sigma_in)
+    if cg_in == 0.0:
+        return 0+0j
+    cg_out = clebsch_gordan(Sigma_out, m_Sigma_out, l_out, m_l_out, J, m_Sigma_in)
+    if cg_out == 0.0:
+        return 0+0j
+    Y = spherical_harmonic_phi0(l_out, int(round(m_l_out)), theta)
+    if Y == 0.0:
+        return 0+0j
+
+    # NOTE: Eq. (D2) of Miller PRC 106 (2022) has an i^(l'-l) factor sitting in front of
+    # (S^J - delta), but Eq. (D3) defines (S - delta) = -2*pi*i*q*m_N * i^(l'-l) * U^J.
+    # Substituting (D3) into (D2) gives i^(l'-l) * i^(l'-l) = i^(2(l'-l)) = 1 since
+    # (l'-l) is even by parity. Hence when M is expressed directly in terms of U (skipping
+    # the explicit S construction) the i^(l'-l) factor cancels and is NOT applied here.
+    return math.sqrt(2.0 * l_in + 1.0) * cg_in * cg_out * Y
+
+
 def assemble_m_matrix(
     blocks: Sequence[JPiBlock],
     q_idx: int,
@@ -554,16 +716,108 @@ def assemble_m_matrix(
     *,
     bin_info: Optional[WPGridBin] = None,
     extra_scale: float = 1.0,
+    legacy_jj: bool = False,
 ) -> np.ndarray:
     """Build the 6x6 elastic d+p amplitude M(theta) at the chosen on-shell bin.
+
+    Default path: Miller PRC 106 024001 (2022) Appendix D — channel-spin scheme.
+    Steps per block (J, pi):
+      1. Transform on-shell U from jj to channel-spin basis (Eq. D4, 6j).
+      2. Sum partial-wave contributions to M_{Sigma' m_Sigma'; Sigma m_Sigma} per Eq. D2
+         (with the i^(l'-l) phase, sqrt(2l+1) factor, Madison Y_{l'}^{m_l'}(theta, 0)).
+      3. Project to (m_d, m_p) helicity basis via channel-spin Clebsch-Gordans.
 
     Index ordering (rows = final, cols = initial) follows SPIN_INDEX_TABLE.
     If ``bin_info`` is provided, the WP-basis kinematic prefactor is applied
     so that |M|^2 has units fm^2; otherwise M is returned in raw partial-wave
     units (still useful for polarization observables, which are ratios).
-    The ``extra_scale`` knob lets callers absorb any residual calibration
-    constant determined empirically against experiment.
+
+    ``legacy_jj=True`` falls back to the original jj-coupling assembly that
+    skipped Eq. D4 and the i^(l'-l) phase. Numerically wrong for J_3N > 1/2 but
+    kept for A/B comparison and to reproduce pre-fix outputs.
     """
+    if legacy_jj:
+        return _assemble_m_matrix_legacy_jj(
+            blocks, q_idx, theta, bin_info=bin_info, extra_scale=extra_scale,
+        )
+
+    M = np.zeros((6, 6), dtype=complex)
+
+    # Enumerate channel-spin states (Sigma, m_Sigma) for the spinor projection.
+    cs_states = [(Sigma, m_S)
+                 for Sigma in _CHANNEL_SPINS
+                 for m_S in np.arange(-Sigma, Sigma + 0.5, 1.0)]
+
+    # Pre-compute the (s_d, s_p) -> (Sigma, m_Sigma) Clebsch-Gordan basis change matrix.
+    #   |Sigma m_Sigma> = sum_{m_d, m_p} <s_d m_d; s_p m_p | Sigma m_Sigma> |m_d m_p>
+    # Indexing in 6-d helicity basis follows SPIN_INDEX_TABLE.
+    cs_to_helicity = np.zeros((6, len(cs_states)))
+    for hel_idx, (_, _, m_d, m_p) in enumerate(SPIN_INDEX_TABLE):
+        for cs_idx, (Sigma, m_S) in enumerate(cs_states):
+            if abs((m_d + m_p) - m_S) > 1e-9:
+                continue
+            cg = clebsch_gordan(_S_DEUTERON, m_d, _S_NUCLEON, m_p, Sigma, m_S)
+            cs_to_helicity[hel_idx, cs_idx] = cg
+
+    for block in blocks:
+        point: Optional[UEnergyPoint] = None
+        for candidate in block.points:
+            if candidate.q_idx == q_idx:
+                point = candidate
+                break
+        if point is None:
+            continue
+
+        cs_channels, U_cs = _block_jj_to_channel_spin(block, point.matrix)
+        if not cs_channels:
+            continue
+
+        # Accumulate channel-spin amplitude M_cs[(Sigma', m_Sigma'), (Sigma, m_Sigma)]
+        # from this (J, pi) block.
+        n_cs_states = len(cs_states)
+        M_cs = np.zeros((n_cs_states, n_cs_states), dtype=complex)
+        J = block.J
+        parity = block.parity
+        for cs_out_idx, (l_out, Sigma_out) in enumerate(cs_channels):
+            for cs_in_idx, (l_in, Sigma_in) in enumerate(cs_channels):
+                u_val = U_cs[cs_out_idx, cs_in_idx]
+                if u_val == 0.0:
+                    continue
+                for s_out_idx, (Sigma_o, m_S_o) in enumerate(cs_states):
+                    if abs(Sigma_o - Sigma_out) > 1e-9:
+                        continue
+                    for s_in_idx, (Sigma_i, m_S_i) in enumerate(cs_states):
+                        if abs(Sigma_i - Sigma_in) > 1e-9:
+                            continue
+                        g = _channel_spin_geometric_factor(
+                            J, parity, l_in, l_out,
+                            Sigma_in, m_S_i, Sigma_out, m_S_o, theta,
+                        )
+                        if g == 0:
+                            continue
+                        M_cs[s_out_idx, s_in_idx] += u_val * g
+
+        # Project channel-spin amplitudes back to 6x6 helicity matrix:
+        #   M[hel_out, hel_in] += sum_{cs_out, cs_in} cs_to_helicity[hel_out, cs_out]
+        #                       * M_cs[cs_out, cs_in] * cs_to_helicity[hel_in, cs_in]
+        M += cs_to_helicity @ M_cs @ cs_to_helicity.T
+
+    if bin_info is not None:
+        M *= kinematic_prefactor_wp(bin_info)
+    if extra_scale != 1.0:
+        M *= extra_scale
+    return M
+
+
+def _assemble_m_matrix_legacy_jj(
+    blocks: Sequence[JPiBlock],
+    q_idx: int,
+    theta: float,
+    *,
+    bin_info: Optional[WPGridBin] = None,
+    extra_scale: float = 1.0,
+) -> np.ndarray:
+    """Legacy jj-coupling assembly. Wrong for J_3N > 1/2; preserved for A/B."""
     M = np.zeros((6, 6), dtype=complex)
 
     for block in blocks:
