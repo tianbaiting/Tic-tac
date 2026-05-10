@@ -175,13 +175,18 @@ def _evaluate_energy(
     q_idx: int,
     angles_deg: Sequence[float],
     extra_scale: float = 1.0,
-) -> Tuple[List[float], List[float], List[float], List[float], List[float]]:
-    """Return (dsigma_fm2_per_sr, iT11, T20, T21, T22) on the given angle grid."""
+) -> Tuple[List[float], List[float], List[float], List[float], List[float], List[float]]:
+    """Return (dsigma_fm2_per_sr, iT11, T20, T21, T22, Ay_n) on the given angle grid.
+
+    Ay_n is the polarized-nucleon-beam vector analyzing power (Madison) added
+    after the Miller PRC 106 (2022) Eq. D2/D4 fix to assemble_m_matrix.
+    """
     dsigma: List[float] = []
     it11: List[float] = []
     t20: List[float] = []
     t21: List[float] = []
     t22: List[float] = []
+    ay_n: List[float] = []
     for theta in angles_deg:
         M = assemble_m_matrix(
             blocks, q_idx, math.radians(theta),
@@ -193,7 +198,8 @@ def _evaluate_energy(
         t20.append(obs.T20)
         t21.append(obs.T21)
         t22.append(obs.T22)
-    return dsigma, it11, t20, t21, t22
+        ay_n.append(obs.Ay_n)
+    return dsigma, it11, t20, t21, t22, ay_n
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +474,7 @@ def main() -> int:
         bin_info = q_grid[q_idx]
 
         # First pass: model dSigma without empirical calibration.
-        ds_model_raw, _, _, _, _ = _evaluate_energy(blocks, bin_info, q_idx, exp_dsigma["angles"])
+        ds_model_raw, _, _, _, _, _ = _evaluate_energy(blocks, bin_info, q_idx, exp_dsigma["angles"])
         ds_model_mb = [convert_dsigma_value(v, "fm2/sr", UNIT_MB_PER_SR) for v in ds_model_raw]
         if args.no_dsigma_calibration:
             cal_factor_mb = 1.0
@@ -488,18 +494,25 @@ def main() -> int:
             dsigma_calibration_factor = cal_factor_mb
 
         # Second pass: scaled observables on every relevant angle grid.
-        ds_pred_fm2, _, _, _, _ = _evaluate_energy(
+        ds_pred_fm2, _, _, _, _, _ = _evaluate_energy(
             blocks, bin_info, q_idx, exp_dsigma["angles"], extra_scale=m_scale,
         )
         ds_pred_user = [convert_dsigma_value(v, "fm2/sr", dsigma_output_unit) for v in ds_pred_fm2]
 
         # Polarization observables on each experimental angle grid (which can differ).
-        _, it11_pred, _, _, _ = _evaluate_energy(
+        _, it11_pred, _, _, _, _ = _evaluate_energy(
             blocks, bin_info, q_idx, exp_it11["angles"], extra_scale=m_scale,
         )
         t20_pred = _evaluate_energy(blocks, bin_info, q_idx, exp_tensor_full["T20"]["angles"], extra_scale=m_scale)[2]
         t21_pred = _evaluate_energy(blocks, bin_info, q_idx, exp_tensor_full["T21"]["angles"], extra_scale=m_scale)[3]
         t22_pred = _evaluate_energy(blocks, bin_info, q_idx, exp_tensor_full["T22"]["angles"], extra_scale=m_scale)[4]
+        # Ay_n on a fixed 1-degree theta grid (no experimental data plumbed yet for the
+        # polarized-nucleon-beam vector analyzing power; Miller Gate 2 reference data
+        # is at Tlab={10,35,67} MeV in data/miller_paper3_fig6/Ay_n_expt_*.csv).
+        ay_n_angles = list(range(0, 181, 1))
+        _, _, _, _, _, ay_n_pred = _evaluate_energy(
+            blocks, bin_info, q_idx, ay_n_angles, extra_scale=m_scale,
+        )
 
         it11_metrics = _residual_metrics(it11_pred, exp_it11["values"])
         t20_metrics = _residual_metrics(t20_pred, exp_tensor_full["T20"]["values"])
@@ -551,6 +564,10 @@ def main() -> int:
                 "exp": exp_tensor_full["T22"]["values"],
                 "pred": t22_pred,
             },
+            "ay_n_curve": {
+                "angles_deg": ay_n_angles,
+                "pred": ay_n_pred,
+            },
         })
 
     if not enriched:
@@ -579,6 +596,15 @@ def main() -> int:
     _write_curve_csv(t20_csv, best["t20_curve"]["angles_deg"], best["t20_curve"]["exp"], best["t20_curve"]["pred"], "T20_exp", "T20_model")
     _write_curve_csv(t21_csv, best["t21_curve"]["angles_deg"], best["t21_curve"]["exp"], best["t21_curve"]["pred"], "T21_exp", "T21_model")
     _write_curve_csv(t22_csv, best["t22_curve"]["angles_deg"], best["t22_curve"]["exp"], best["t22_curve"]["pred"], "T22_exp", "T22_model")
+    # Ay_n model-only curve (no experiment plumbed; cross-reference with
+    # data/miller_paper3_fig6/Ay_n_expt_*.csv at the appropriate Tlab).
+    ay_n_csv = work_dir / "best_energy_Ay_n_curve.csv"
+    with ay_n_csv.open("w", encoding="utf-8") as f:
+        f.write("# Madison polarized-nucleon-beam vector analyzing power Ay(n)\n")
+        f.write(f"# Best solver Tlab = {best['tlab_mev']:.4f} MeV (target {args.target_tlab_mev} MeV)\n")
+        f.write("theta_cm_deg,Ay_n_model\n")
+        for th, v in zip(best["ay_n_curve"]["angles_deg"], best["ay_n_curve"]["pred"]):
+            f.write(f"{th:.1f},{v:+.6e}\n")
     dsigma_csv_suffix = _unit_to_csv_suffix(dsigma_output_unit)
     _write_curve_csv(
         dsigma_csv, best["dsigma_curve"]["angles_deg"], best["dsigma_curve"]["exp"], best["dsigma_curve"]["pred"],
@@ -621,7 +647,7 @@ def main() -> int:
             "energy_delta_pass": args.energy_delta_pass,
         },
         "model_settings": {
-            "observable_model": "full PW M-matrix (jj coupling) with WP-basis kinematic prefactor",
+            "observable_model": "full PW M-matrix (channel-spin recoupling per Miller PRC 106 App D, arxiv:2201.09600) with WP-basis kinematic prefactor",
             "dsigma_calibration_factor": float(best["dsigma_calibration_factor"]),
             "calibration_method": (
                 "disabled" if args.no_dsigma_calibration else "log-space geometric mean fit per energy"
