@@ -1,0 +1,170 @@
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{mathtools}
+\usepackage{bbm}
+\usepackage{import}
+%\usepackage{pgfplots}
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+\usepackage{tikz}
+\usepackage{array}
+\usepackage{units}
+\usepackage{courier}
+\usepackage{slashed}
+\usepackage{bm}
+\usepackage{dsfont}
+\usepackage{epigraph}
+\usepackage{verbatim}
+\usepackage{listings}
+\usepackage{comment}
+\usepackage{multirow}
+%\usepackage{caption}
+\usepackage{wrapfig} 
+\usepackage{hyperref}
+\usepackage{enumerate}% http://ctan.org/pkg/enumerate
+
+%\usepackage[disable]{todonotes}
+\usepackage[textsize=normalsize]{todonotes}
+
+%%%%%%%%%%%%%%%%%%%
+% New topic environment and counter
+% Individual todo-boxes
+%%%%%%%%%%%%%%%%%%%
+\newcounter{topic} % no optional argument implies that counter is
+                     % not reset. Try e.g. [section] for reset at section level
+\newenvironment{topic}[1][]{\refstepcounter{topic}\par\medskip
+   \textbf{Topic~\thetopic. #1}
+   \rmfamily\color{gray}}{\color{black}\par }
+%   Empty version for draft versions
+%\usepackage{environ}
+%\NewEnviron{topic}{}{}
+
+% Individual todo-boxes
+\newcommand{\todoAE}[1]{\todo[author=AE, inline, color=green!40]{#1}}
+\newcommand{\todoSM}[1]{\todo[author=SM, inline, color=cyan!50]{#1}}
+\newcommand{\todoKH}[1]{\todo[author=KH, inline, color=red!50]{#1}}
+% For preliminary/unverified values. To be checked and verified prior to submission
+\newcommand{\verifyvalue}[1]{\textcolor{red}{#1}}
+
+
+% only show chapters and sections in table of contents
+\setcounter{tocdepth}{1}
+
+%font
+%\usepackage{libertine}
+%\usepackage[libertine]{newtxmath}
+%\usepackage{dsfont}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{definition}{Definition}[section]
+
+\DeclarePairedDelimiter\ceil{\lceil}{\rceil}
+
+% Text-mode commands
+\newcommand*\diff{\mathop{}\!\mathrm{d}}
+\newcommand*\Diff[1]{\mathop{}\!\mathrm{d^#1}}
+\newcommand{\NNLOopt}{$\text{N2LO}_{\text{opt}}$}
+\newcommand{\NNLOsat}{$\text{N2LO}_{\text{sat}}$}
+\newcommand{\NijmI}{Nijmegen-I}
+\newcommand{\INNNLO}{Idaho-N3LO}
+\newcommand{\NNNLO}{N3LO}
+\newcommand{\NNLO}{N2LO}
+\newcommand{\cib}{CIB}
+\newcommand{\cm}{c.m.}
+\newcommand{\evc}{EVC}
+\newcommand{\wpcd}{WPCD}
+\newcommand{\mi}{MI}
+\newcommand{\swp}{SWP}
+\newcommand{\fwp}{FWP}
+\newcommand{\ls}{LS}
+\newcommand{\pdf}{pdf}
+\newcommand{\SWAVE}{$^1\text{S}_0$}
+\newcommand{\STWAVE}{$^3\text{S}_1$}
+\newcommand{\cheft}{$\chi$EFT}
+\newcommand{\LEC}{LEC}
+\newcommand{\NN}{$NN$}
+\newcommand{\NNN}{$NNN$}
+\newcommand{\Nd}{$Nd$}
+\newcommand{\nn}{$nn$}
+\newcommand{\np}{$np$}
+\newcommand{\pp}{$pp$}
+\newcommand{\nd}{$nd$}
+\newcommand{\pd}{$pd$}
+
+
+% Math-mode commands
+\newcommand{\Ecm}{E_{\text{cm}}}
+\newcommand{\Elab}{E_\text{Lab}}
+\newcommand{\Par}{\Pi}
+\newcommand{\NWP}{N_{\text{WP}}}
+
+% command for importing pgf images that rely on .png files in a subfolder
+\newcommand\inputpgf[2]{{
+		\let\pgfimageWithoutPath\pgfimage
+		\renewcommand{\pgfimage}[2][]{\pgfimageWithoutPath[##1]{#1/##2}}
+		\input{#1/#2}
+}}
+
+\newenvironment{changemargin}[2]{%
+	\begin{list}{}{%
+			\setlength{\topsep}{0pt}%
+			\setlength{\leftmargin}{#1}%
+			\setlength{\rightmargin}{#2}%
+			\setlength{\listparindent}{\parindent}%
+			\setlength{\itemindent}{\parindent}%
+			\setlength{\parsep}{\parskip}%
+		}%
+		\item[]}{\end{list}}
+
+% Tikz library settings
+\usetikzlibrary{shapes,arrows}	
+\usetikzlibrary{arrows,decorations.markings}
+\usetikzlibrary{positioning}
+\definecolor{decisionColor}{HTML}{DEE1B2}
+\definecolor{nodeColor}{HTML}{EBFAFF}
+\tikzstyle{roundrect}=[rectangle, rounded corners, minimum width=0cm, minimum height=0.5cm, text centered, draw=black, fill=nodeColor, text width=2.2cm] 
+\tikzstyle{decision} = [diamond, minimum width=3.7cm, minimum height=3.2cm, text centered, draw=black, fill=decisionColor, scale=1, text width=2.05cm]
+\tikzstyle{arrow} = [decoration={markings,mark=at position 1 with
+	{\arrow[scale=1.5,>=stealth]{>}}},postaction={decorate}]
+%https://tex.stackexchange.com/questions/50780/arrows-at-right-angles-on-a-tikzpicture-matrix
+\tikzset{
+	desicion/.style={
+		diamond,
+		draw,
+		text width=3em,
+		text badly centered,
+		inner sep=0pt
+	},
+	block/.style={
+		rectangle,
+		draw,
+		text width=10em,
+		text centered,
+		rounded corners
+	},
+	cloud/.style={
+		draw,
+		ellipse,
+		minimum height=2em
+	},
+	descr/.style={
+		fill=white,
+		inner sep=2.5pt
+	},
+	connector/.style={
+		-latex
+	},
+	rectangle connector/.style={
+		connector,
+		to path={(\tikztostart) -- ++(#1,0pt) \tikztonodes |- (\tikztotarget) },
+		pos=0.5
+	},
+	rectangle connector/.default=-2cm,
+	straight connector/.style={
+		connector,
+		to path=--(\tikztotarget) \tikztonodes
+	}
+}
+
+
