@@ -40,6 +40,10 @@ RUNS: List[Tuple[str, int, Path]] = [
     ("v5: J_3N<=13/2", 13, REPO / "CPP" / "Output" / "miller_gate2_v5_J3N13_J2N3"),
 ]
 
+# Optional Np=30 grid-convergence run from labenpg (same J truncation as v4).
+# Loaded separately because it has different Np, not just different J.
+NP30_RUN = ("Np=30, J_3N<=9/2 (labenpg)", REPO / "CPP" / "Output" / "labenpg_Np30_J3N9_2NF")
+
 ENERGIES: List[Tuple[int, str]] = [
     (10, "Elab10MeV"),
     (35, "Elab35MeV"),
@@ -100,11 +104,22 @@ def plot_angular_panels(output_path: Path) -> None:
             ax.plot(theta_grid, ay, color=colors_legacy[run_idx],
                     linewidth=0.9, alpha=0.7, label=label)
 
-        # v5 — bold
+        # v5 — bold (Np=20, J_3N<=13/2)
         label, jmax, blocks, q_kin, points = runs_to_plot[-1]
         tlab_v5, ay_v5 = compute_angular_curve(blocks, q_kin, points, target_mev, theta_grid)
         ax.plot(theta_grid, ay_v5, color=color_final, linewidth=2.2,
-                label=f"{label} (this work)")
+                label=f"{label} (Np=20)")
+
+        # Np=30 grid-convergence overlay (if present)
+        if NP30_RUN[1].exists():
+            try:
+                blocks_n30, qkin_n30, points_n30 = load_run(NP30_RUN[1])
+                tlab_n30, ay_n30 = compute_angular_curve(
+                    blocks_n30, qkin_n30, points_n30, target_mev, theta_grid)
+                ax.plot(theta_grid, ay_n30, color="#9c27b0", linewidth=2.2,
+                        linestyle="-.", label=NP30_RUN[0])
+            except Exception:
+                pass
 
         # Miller N3LO digitized
         if n3lo:

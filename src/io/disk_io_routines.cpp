@@ -91,12 +91,19 @@ void read_input_energies(double*& energy_array,
 	std::ifstream input_file;
 	open_readfile(input_file, file_path);
 
-	/* Read file */
+	/* Read file: skip blank lines and lines whose first non-space char is '#' */
 	std::vector<double> energies_vector;
-	double entry = 0;
-	while (input_file >> entry){
-        energies_vector.push_back(entry);
-    }
+	std::string line;
+	while (std::getline(input_file, line)){
+		size_t first = line.find_first_not_of(" \t\r");
+		if (first == std::string::npos) continue;
+		if (line[first] == '#') continue;
+		std::istringstream iss(line.substr(first));
+		double entry;
+		while (iss >> entry){
+			energies_vector.push_back(entry);
+		}
+	}
 
 	/* Close file */
 	input_file.close();

@@ -1,6 +1,6 @@
-.o
+*.o
 run
-.h5
+*.h5
 Output
 *.log
 *.out
@@ -20,7 +20,7 @@ __pycache__/
 CPP/Output/
 CPP/Input/*_autogen.txt
 CPP/Input/energy_*_autogen.txt
-
+docs/
 # treatise (LaTeX) build artifacts
 docs/treatise/_build/
 docs/treatise/code_excerpts/snippets/*
@@ -31,3 +31,13 @@ docs/treatise/figures/plots/*.pdf
 # Hash-keyed cache layer (P123, W1 caches)
 cache/
 !cache/README.md
+
+# EXFOR raw cache (regeneratable from manifest)
+data/nd_scattering/_raw_cache/
+
+# Built executable under tools/
+tools/check_3nf_normalization/check_3nf_normalization
+
+# Stray scratch outputs at repo root
+/alpha_pq_boundaries.txt
+/lab_energies.txt
