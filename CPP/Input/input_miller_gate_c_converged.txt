@@ -1,0 +1,48 @@
+# Miller Gate C (converged): 2NF-only Ay(n) benchmark at E_Lab ∈ {10, 35, 67} MeV.
+# Target: Miller & Ekström PRC 107, 014002 (2023) Fig. 6 N3LO 2NF red curves.
+# Paper III used J≤3, J_3N≤17/2, N_WP=150. We relax J_3N due to cost; Np=50
+# is the phase-shift-converged minimum from Miller Gate 1.
+# Expected wall time: hours per energy; use P123_recovery after first run.
+
+two_J_3N_max=3
+J_2N_max=3
+Np_WP=50
+Nq_WP=50
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=Idaho_N3LO
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=none
+
+energy_input_file=CPP/Input/lab_energies_miller_gate_c.txt
+output_folder=CPP/Output/miller_gate_c_converged
+P123_folder=CPP/Output/miller_gate_c_converged

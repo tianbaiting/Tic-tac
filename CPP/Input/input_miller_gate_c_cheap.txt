@@ -1,0 +1,50 @@
+# Miller Gate C (cheap): 2NF-only Ay(n) benchmark at E_Lab ∈ {10, 35, 67} MeV.
+# Target: Miller & Ekström PRC 107, 014002 (2023) Fig. 6 N3LO 2NF red curves.
+# Cheap config for data-pipeline validation; numerics coarse, not production.
+# Upgrade path: input_miller_gate_c_converged.txt (Np=50, higher J).
+
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=20
+Nq_WP=20
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+# Paper III uses chiral N3LO (Svensson 2022/2023 posterior-sampled LECs).
+# Idaho_N3LO is the closest available in Tic-tac (Entem/Machleidt 500 MeV).
+# Curves won't match exactly but should be within Paper III PPD bands.
+potential_model=Idaho_N3LO
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=none
+
+energy_input_file=CPP/Input/lab_energies_miller_gate_c.txt
+output_folder=CPP/Output/miller_gate_c_cheap
+P123_folder=CPP/Output/miller_gate_c_cheap

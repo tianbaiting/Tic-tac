@@ -1,0 +1,22 @@
+# Miller & Ekström PRC 107, 014002 (2023) Fig. 6 top panel, N3LO (red) curve.
+# Draft values from visual PDF read; accuracy ±0.01 in A_y, ±2° in theta.
+# E_Lab = 10 MeV, nd elastic, N3LO 2NF only (no 3NF).
+theta_cm_deg,Ay
+0.0,0.000
+15.0,0.010
+30.0,0.022
+45.0,0.035
+60.0,0.052
+75.0,0.077
+90.0,0.095
+100.0,0.108
+110.0,0.118
+115.0,0.122
+120.0,0.124
+125.0,0.120
+130.0,0.112
+140.0,0.092
+150.0,0.068
+160.0,0.040
+170.0,0.015
+180.0,0.000

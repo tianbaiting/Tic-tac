@@ -1,0 +1,9 @@
+# EXFOR entry:   10135
+# SUBENT:        10135006
+# TITLE:         Elastic scattering of 36.0- and 46.3-MeV neutrons from deuterium
+# AUTHORS:       (J.L.Romero,J.A.Jungerman,F.P.Brady,W.J.Knox, Y.Ishizaki)
+# REFERENCE:     (J,PR/C,2,2134,1970) #doi:10.1103/PhysRevC.2.2134 (T,ROMERO,1970)
+# REACTION:      (1-H-2(N,EL)1-H-2,,SIG)
+# DATA columns: ANG-CM[ADEG]	DATA-CM[MB/SR]	DATA-ERR[MB/SR]	[]	[]	[]
+3.600000e+01	2.030000e+02	1.300000e+01	NaN	NaN
+4.630000e+01	1.450000e+02	7.000000e+00	NaN	NaN

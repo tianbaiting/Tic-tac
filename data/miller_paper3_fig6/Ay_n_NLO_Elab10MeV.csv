@@ -1,0 +1,22 @@
+# Miller & Ekström PRC 107, 014002 (2023) Fig. 6 top panel, NLO (green) curve.
+# Draft values from visual PDF read; accuracy ±0.01 in A_y, ±2° in theta.
+# E_Lab = 10 MeV, nd elastic, NLO 2NF only.
+theta_cm_deg,Ay
+0.0,0.000
+15.0,0.004
+30.0,0.009
+45.0,0.015
+60.0,0.022
+75.0,0.032
+90.0,0.040
+100.0,0.046
+110.0,0.050
+115.0,0.051
+120.0,0.050
+125.0,0.048
+130.0,0.044
+140.0,0.035
+150.0,0.024
+160.0,0.013
+170.0,0.005
+180.0,0.000

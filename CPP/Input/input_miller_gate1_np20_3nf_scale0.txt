@@ -1,0 +1,50 @@
+# Miller Gate 1 regression: w1_scale=0 with 3NF configured ON.
+# Expected: bit-for-bit match to 2NF-only Np=20 baseline. Diagnostic for 3NF
+# code path — if this differs from 2NF-only, there is a dead-code / hidden-
+# call-path bug in the 3NF machinery.
+two_J_3N_max=1
+J_2N_max=2
+Np_WP=20
+Nq_WP=20
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=false
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=nijmegen
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=chiral_N2LO
+c_D=-0.20
+c_E=-0.205
+Lambda_3NF=500.0
+w1_scale=0.0
+
+energy_input_file=CPP/Input/lab_energies_miller_gate1.txt
+output_folder=CPP/Output/miller_gate1_np20_3nf_scale0
+P123_folder=CPP/Output/miller_gate1

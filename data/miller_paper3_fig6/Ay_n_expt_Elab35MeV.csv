@@ -1,0 +1,14 @@
+# Miller & Ekström PRC 107, 014002 (2023) Fig. 6 middle panel, experimental markers.
+# E_Lab = 35 MeV, nd elastic (Ref. [51] in Paper III — LENPIC 2016 data compilation).
+# Draft values from visual PDF read.
+theta_cm_deg,Ay,Ay_err
+30.0,0.020,0.020
+45.0,0.000,0.020
+60.0,-0.080,0.025
+75.0,-0.200,0.025
+90.0,-0.275,0.025
+105.0,-0.255,0.025
+120.0,-0.105,0.025
+135.0,0.120,0.025
+150.0,0.190,0.025
+165.0,0.070,0.030
