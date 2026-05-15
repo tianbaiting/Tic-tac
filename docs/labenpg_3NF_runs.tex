@@ -1,0 +1,471 @@
+% =====================================================================
+% labenpg_3NF_runs.tex
+% Tic-tac 3NF 在 labenpg 服务器上的运行与并行实践记录
+% 日期范围: 2026-05-12 ~ 2026-05-16
+% 编译: xelatex labenpg_3NF_runs.tex
+% =====================================================================
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[UTF8, scheme=plain, fontset=none]{ctex}
+\setCJKmainfont[
+  BoldFont = Noto Serif CJK SC Bold,
+  ItalicFont = Noto Serif CJK SC,
+]{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
+\setmainfont{TeX Gyre Termes}
+\setsansfont{TeX Gyre Heros}
+\setmonofont{DejaVu Sans Mono}[Scale=0.92]
+
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{black!4},
+  frame=single,
+  framerule=0pt,
+  rulecolor=\color{black!10},
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  keepspaces=true,
+  columns=fullflexible,
+  xleftmargin=1ex,
+  xrightmargin=1ex,
+  language=bash,
+  morekeywords={ssh,scp,nohup,renice,nice},
+  commentstyle=\color{green!50!black},
+  keywordstyle=\color{blue!70!black},
+  stringstyle=\color{red!70!black},
+}
+
+\title{Tic-tac 3NF 在 labenpg 上的运行与并行实践\\
+\large 服务器部署、build 坑、channel\_idx 并行化、宕机恢复}
+\author{}
+\date{2026-05-12 \,\textendash\, 2026-05-16}
+
+\begin{document}
+\maketitle
+
+\section{概述}
+
+本文档记录在 \texttt{labenpg} (lab.enpg.cn, 96 核 Ubuntu 24.04 GCC~13.3) 上跑
+Tic-tac 三体核力 (3NF, chiral N$^2$LO) Faddeev 求解的部署过程、并行化策略，
+以及两次机器重启之后的恢复方法，便于复现。
+
+工作背景: 之前在本地 4 核机器上跑过 $N_p=20$, $J_{3N}\le 9/2$, $J_{2N}=3$, 2NF 的
+Madison Gate~2 收敛验证 (见 \texttt{docs/gate2\_madison\_Ay\_report.md})。
+要进一步评估 3NF 对 Ay puzzle 的修正，需要在大机器上跑
+$N_p=20$ + 完整 $J_{3N}\le 9/2$ + chiral~N$^2$LO 3NF，共 10 个 ($J,\pi$) block，
+本地估算单进程 4 核 wall $\sim$5--7 天。
+
+% =========================================
+\section{labenpg 环境探测}
+
+\subsection{资源}
+
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+机器 & lab.enpg.cn (Ubuntu 24.04.1 LTS, kernel 6.17, x86\_64) \\
+CPU  & 96 核\\
+RAM  & 125 GiB \\
+Disk & 3.6 TB 单盘 (\texttt{/data} 与 \texttt{\textasciitilde{}} 同挂载) \\
+GCC & 13.3.0 (system); 14.3.0 (conda \texttt{anaroot-env}) \\
+\bottomrule
+\end{tabularx}
+
+\subsection{SSH 别名}
+
+\texttt{\textasciitilde{}/.ssh/config.local} 提供三个等效目标 (端口/Key 已配):
+
+\begin{lstlisting}
+Host labenpg                              # 直连 lab.enpg.cn:4869
+Host labenpg-hw      ProxyJump hostwinds  # 经美国 HostWinds 中转
+Host labenpg-hk      ProxyJump ENPG1-hk   # 经香港 tex.enpg.cn:14869 中转
+\end{lstlisting}
+
+实测大数据传输 (git push、scp) 经 \texttt{labenpg-hk} 比直连快 5--20$\times$
+(中国大陆外网络环境下)。\textbf{推荐所有 ssh/scp/git remote 都走 \texttt{labenpg-hk}}。
+本工作流的 git remote 设为
+\texttt{labenpg-hk:/data/tian/workspace/dpol/Tic-tac.git}。
+
+\subsection{conda 环境}
+
+\texttt{micromamba} 安装在 \texttt{/data/tian/software/micromamba/bin/}，
+\texttt{MAMBA\_ROOT\_PREFIX=/data/tian/conda}，env 名 \texttt{anaroot-env}
+(原本是 anaroot 物理分析环境，HDF5/GSL/BLAS/LAPACK/ROOT 都有)。
+本项目 build 完全依赖这个 env，必须在 build 前 export \texttt{CONDA\_PREFIX}。
+
+% =========================================
+\section{Build 编译坑 (三处)}
+
+源码 \texttt{Tic-tac/Makefile} 设计为系统 apt 包路径优先，conda env 作 fallback。
+labenpg 没装 apt 的 \texttt{libhdf5-dev}/\texttt{liblapacke-dev}，且我们也没 sudo,
+需要手动绕开三处。
+
+\subsection{HDF5 头路径 (hdf5/serial)}
+
+源文件 (\texttt{src/io/disk\_io\_routines.h} 等) 硬编码:
+\begin{lstlisting}
+#include "hdf5/serial/hdf5.h"
+\end{lstlisting}
+这是 Debian/Ubuntu 系统 \texttt{libhdf5-dev} 的子目录约定。conda env 里 HDF5 头
+直接放在 \texttt{\$CONDA\_PREFIX/include/hdf5.h}。手动建符号链接绕开:
+
+\begin{lstlisting}
+ssh labenpg-hk 'export CONDA_PREFIX=/data/tian/conda/envs/anaroot-env
+  mkdir -p $CONDA_PREFIX/include/hdf5/serial
+  ln -sf ../../hdf5.h    $CONDA_PREFIX/include/hdf5/serial/hdf5.h
+  ln -sf ../../hdf5_hl.h $CONDA_PREFIX/include/hdf5/serial/hdf5_hl.h'
+\end{lstlisting}
+
+长期修复: 在 \texttt{src/io/disk\_io\_routines.h} 改成
+\verb|#include <hdf5.h>| 同时 Makefile 加 \texttt{-I/usr/include/hdf5/serial}
+当系统包存在时。
+
+\subsection{liblapacke 与 lapack.h}
+
+env 原本 \texttt{liblapack-3.11.0=mkl} 不带 lapacke.h/lapack.h
+(MKL 用 \texttt{mkl\_lapacke.h})。conda-forge 上 \texttt{liblapacke} 的 mkl
+变种也只有 .so 没 header; netlib 变种才完整。安装 netlib 变种会附带把
+\texttt{liblapack} 从 mkl 切到 netlib (顺带牵进 pytorch 等), 但 env 仍 work:
+
+\begin{lstlisting}
+ssh labenpg-hk 'export MAMBA_ROOT_PREFIX=/data/tian/conda
+  /data/tian/software/micromamba/bin/micromamba install \
+    -y -n anaroot-env -c conda-forge --strict-channel-priority \
+    "liblapacke=*=*netlib*"'
+\end{lstlisting}
+
+\subsection{LDLIBS 缺 -lcblas}
+
+GCC 14 + netlib lapack 严格链接会要求 \texttt{libcblas.so.3} 显式列出
+(\texttt{lapack} 内部 cblas 调用)。Makefile 的 \texttt{LDLIBS :=} 是硬赋值,
+环境变量加不进, 命令行整体覆盖:
+
+\begin{lstlisting}
+ssh labenpg-hk 'cd /data/tian/workspace/dpol/Tic-tac/CPP
+  export CONDA_PREFIX=/data/tian/conda/envs/anaroot-env
+  export PATH=$CONDA_PREFIX/bin:$PATH
+  export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+  make -j32 LDLIBS="-Wl,--no-as-needed -lgomp -lgsl -lpthread -lm -ldl \
+    -lgfortran -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5 -lstdc++fs \
+    -llapacke -llapack -lcblas -lblas -lcurl"'
+\end{lstlisting}
+
+输出 \texttt{CPP/run} (\texttt{\textasciitilde}13.6 MB) 含 RPATH 指向
+\texttt{\$CONDA\_PREFIX/lib}, 运行时不需要再 export LD\_LIBRARY\_PATH。
+
+\subsection{长期修复方向 (尚未做)}
+
+\begin{enumerate}[itemsep=2pt]
+\item \verb|#include "hdf5/serial/hdf5.h"| $\to$ \verb|#include <hdf5.h>|; Makefile 探测系统/conda 路径
+\item Makefile LDLIBS 默认加 \texttt{-lcblas} (无害)
+\item README 或 build 指南补 conda env 配置最佳实践
+\end{enumerate}
+
+% =========================================
+\section{首次部署 — 单进程跑批}
+
+\subsection{git clone + 工作树位置}
+
+\begin{lstlisting}
+# labenpg 上: bare 仓库与工作副本同级 /data/tian/workspace/dpol/ 下
+/data/tian/workspace/dpol/Tic-tac.git/   # bare (push 目标)
+/data/tian/workspace/dpol/Tic-tac/       # 工作副本 (build & run)
+\end{lstlisting}
+
+本地 git remote:
+\begin{lstlisting}
+git remote add labenpg labenpg-hk:/data/tian/workspace/dpol/Tic-tac.git
+git push labenpg master
+\end{lstlisting}
+
+服务器上工作副本通过 \texttt{git clone /data/tian/workspace/dpol/Tic-tac.git Tic-tac}
+拿到, 也可以 \texttt{git clone labenpg-hk:.../Tic-tac.git} 走 SSH。
+
+\subsection{Run B 第一版 (单进程 32 OMP)}
+
+input 配置 \texttt{CPP/Output/labenpg\_3NF\_J3N9/input.txt} (关键参数):
+
+\begin{lstlisting}
+two_J_3N_max=9                  # 5 个 J: 1/2, 3/2, 5/2, 7/2, 9/2
+J_2N_max=3
+Np_WP=20
+Nq_WP=20
+P123_omp_num_threads=32
+parallel_run=false              # 单进程串行扫所有 (J,pi) block
+calculate_and_store_P123=true
+solve_faddeev=true
+potential_model=nijmegen
+three_nucleon_force=chiral_N2LO
+c_D=-0.20
+c_E=-0.205
+Lambda_3NF=500.0
+w1_scale=1.0
+energy_input_file=CPP/Input/lab_energies_miller_gate2.txt   # Tlab=10,35,67 MeV
+\end{lstlisting}
+
+启动:
+\begin{lstlisting}
+ssh labenpg-hk 'cd /data/tian/workspace/dpol/Tic-tac
+  nohup env OMP_NUM_THREADS=32 ./CPP/run \
+    CPP/Output/labenpg_3NF_J3N9/input.txt \
+    > CPP/Output/labenpg_3NF_J3N9/run.log 2>&1 &
+  echo "Run B pid=$!"'
+\end{lstlisting}
+
+实测 wall 速度 $\sim$5--7 hr/块, 总 10 块 $\to$ 估算 \textbf{2--3 天}。
+内存稳定 4--5 GB (单进程, 32 OMP)。
+
+% =========================================
+\section{并行化 — channel\_idx 多进程}
+
+\subsection{原理}
+
+Tic-tac \texttt{src/main.cpp:283--289} 遍历 \texttt{N\_chn\_3N} 个 $(J,\pi)$
+通道; 设 \texttt{parallel\_run=true} + \texttt{channel\_idx=N} 时单进程只算
+索引 N 的那一块, 其他跳过。块编号 (\texttt{src/core/state\_space/make\_pw\_symm\_states.cpp:122}):
+
+\begin{tabularx}{\linewidth}{ccX}
+\toprule
+chn & $J^\pi$ & 说明 \\
+\midrule
+0 & $1/2^-$ & 单进程主跑的起点 \\
+1 & $1/2^+$ & \\
+2 & $3/2^-$ & \\
+3 & $3/2^+$ & \\
+4 & $5/2^-$ & \\
+5 & $5/2^+$ & \\
+6 & $7/2^-$ & \\
+7 & $7/2^+$ & \\
+8 & $9/2^-$ & \\
+9 & $9/2^+$ & 最贵 ($\sim$4 通道, P123 800+ MB) \\
+\bottomrule
+\end{tabularx}
+
+通过把 chn 4..9 分给 6 个独立进程 (各自独立 \texttt{output\_folder}/
+\texttt{P123\_folder}), 把单进程 5 天压到并行 1 天。
+
+\subsection{Launch 脚本}
+
+\begin{lstlisting}[caption={launch\_3nf\_parallel.sh — 一次性启 6 个并行 chn}]
+#!/bin/bash
+set -e
+cd /data/tian/workspace/dpol/Tic-tac
+BASE=CPP/Output/labenpg_3NF_J3N9
+TEMPLATE=$BASE/input.txt
+
+for chn in 4 5 6 7 8 9; do
+    OUTDIR=CPP/Output/labenpg_3NF_J3N9_par_chn${chn}
+    mkdir -p "$OUTDIR"
+    touch "$OUTDIR/run.log"
+    sed -e "s|^output_folder=.*|output_folder=${OUTDIR}|" \
+        -e "s|^P123_folder=.*|P123_folder=${OUTDIR}|" \
+        -e "s|^parallel_run=.*|parallel_run=true|" \
+        -e "s|^channel_idx=.*|channel_idx=${chn}|" \
+        "$TEMPLATE" > "$OUTDIR/input.txt"
+
+    nohup env OMP_NUM_THREADS=14 ./CPP/run "$OUTDIR/input.txt" \
+        > "$OUTDIR/run.log" 2>&1 &
+    PID=$!
+    renice +10 -p $PID >/dev/null 2>&1
+    echo "Launched chn=${chn} pid=$PID (renice +10)"
+    sleep 1
+done
+\end{lstlisting}
+
+每进程 \texttt{OMP\_NUM\_THREADS=14}, 6 进程总 84 核 ($<$ 96), 剩 12 核给其他用户。
+\texttt{renice +10} 让别人的交互任务优先。
+
+\subsection{进度查看}
+
+\begin{lstlisting}
+ssh labenpg-hk 'cd /data/tian/workspace/dpol/Tic-tac
+  for c in 4 5 6 7 8 9; do
+    d=CPP/Output/labenpg_3NF_J3N9_par_chn$c
+    echo "chn=$c: $(ls $d/U_PW_elements_*.txt 2>/dev/null | wc -l) blocks; \
+      $(tail -1 $d/run.log | tr "\r" "\n" | tail -1 | head -c 80)"
+  done'
+\end{lstlisting}
+
+% =========================================
+\section{宕机后的恢复 — P123 cache 复用}
+
+5月14--15 之间 labenpg 重启 2 次 (重启时间不可考: 无 sudo 看 \texttt{journalctl})。
+所有 6 进程都丢, 但磁盘上的 P123 sparse h5 文件 (每进程独有, 700--820 MB)
+和 chn 0--3 在原 \texttt{labenpg\_3NF\_J3N9/} 下 4 个完整 U\_PW 都保留。
+
+恢复策略: 改 \texttt{calculate\_and\_store\_P123=false} 让进程读盘上 P123 跳过
+$\sim$30 min/chn 的 P123 build, 直接进 Padé。Stagger 启动减小冲击:
+
+\begin{lstlisting}[caption={relaunch\_3nf\_parallel.sh — 利用 P123 cache 续跑}]
+#!/bin/bash
+set -e
+cd /data/tian/workspace/dpol/Tic-tac
+
+for chn in 4 5 6 7 8 9; do
+    OUTDIR=CPP/Output/labenpg_3NF_J3N9_par_chn${chn}
+    test -f $OUTDIR/P123_sparse_JP_*_*_Np_20_Nq_20_J2max_3.h5 \
+      || { echo "missing P123 cache"; exit 1; }
+
+    sed -e 's|^calculate_and_store_P123=.*|calculate_and_store_P123=false|' \
+        -e 's|^P123_recovery=.*|P123_recovery=false|' \
+        $OUTDIR/input.txt > $OUTDIR/input_resume.txt
+
+    > $OUTDIR/run.log
+    nohup env OMP_NUM_THREADS=14 ./CPP/run $OUTDIR/input_resume.txt \
+        > $OUTDIR/run.log 2>&1 &
+    renice +10 -p $! >/dev/null 2>&1
+    echo "chn=${chn} pid=$!"
+    sleep 60                # stagger 60s 避免并发加载内存峰
+done
+\end{lstlisting}
+
+\textbf{重要: 不能用 \texttt{P123\_recovery=true}}。该路径触发
+\texttt{make\_permutation\_matrix.cpp:1310} 的 integer-truncation bug
+($\mathrm{max\_TFC} = \mathrm{mem\_check\_size\_in\_GB} / (\mathrm{threads} \times 1\,\mathrm{GB})$
+对 sub-1GB 的块取整为 0), 会把 merged h5 文件覆盖成空。已多次踩坑。
+
+% =========================================
+\section{内存诊断 — 排除 OOM}
+
+两次宕机怀疑是 6 进程并行内存超额。\textbf{本地测试 (Np=20, $J_{3N}=1/2$ 单 chn,
+chiral N$^2$LO) 排除此假设}:
+
+\begin{tabularx}{\linewidth}{lXr}
+\toprule
+阶段 & 说明 & RSS \\
+\midrule
+启动 & 进程刚 fork, 全局初始化 & $\sim$330 MB \\
+P123 build & 计算 7600 行 row-permutation & 282 MB (释放 buffer) \\
+Padé $n=0$ & 第一次 CPVC + W1 element hot path & 282 MB \\
+\textbf{Padé $n=1$ 起} & W1 cache 一次性 commit 物理内存 & \textbf{2330 MB} \\
+Padé $n=2,3,\ldots$ & dense buffer 已分配, 不再增长 & 2334 MB (\textbf{drift $<4$ MB}) \\
+\bottomrule
+\end{tabularx}
+
+15 min 内 30 次 30s 采样: 跨 $n=2$ 到 $n=5$ 五个 Padé 阶, RSS 锁死 2334 MB,
+未观察到任何内存增长趋势。
+
+\subsection{外推到 labenpg 6 进程并行}
+
+$J_{3N}=9/2$ + $J_{2N}=3$ 时 \texttt{Nalpha} 比 $J_{3N}=1/2$ 大约
+$10\times$, W1 cache $\sim N_\alpha^2 \times N_p^2 \times N_q^2$,
+保守估 5--10 GB/chn。6 进程 $\to$ \textbf{30--60 GB} 峰值。labenpg 125 GB,
+剩 60+ GB 缓冲。\textbf{OOM 几乎不可能}。
+
+\subsection{宕机更可能的原因}
+
+\begin{itemize}[itemsep=2pt]
+\item 文件系统 IO 抖动 (6 进程并发写 P123/Neumann/log) 触发 fs lockup
+\item 电网 / 系统维护重启 (我们无 sudo 看 \texttt{journalctl})
+\item 其他用户或内核升级
+\item 内核 panic (但不应单从我们的 nice +10 触发)
+\end{itemize}
+
+\textbf{结论: 不需要降并行度。维持 6 进程 OMP=14 的方案。}
+
+% =========================================
+\section{完整数据产出}
+
+\subsection{合并 chn 0--3 + chn 4--9}
+
+每个 chn 输出在独立目录, 合并时只需把 U\_PW 文件名按 JP 拷到主目录:
+
+\begin{lstlisting}
+ssh labenpg-hk 'cd /data/tian/workspace/dpol/Tic-tac
+  MAIN=CPP/Output/labenpg_3NF_J3N9
+  for c in 4 5 6 7 8 9; do
+    cp -n CPP/Output/labenpg_3NF_J3N9_par_chn$c/U_PW_elements_*.txt $MAIN/
+  done
+  ls $MAIN/U_PW_elements_*.txt | wc -l   # expect 10
+'
+\end{lstlisting}
+
+本地拉回:
+\begin{lstlisting}
+mkdir -p /tmp/run_3NF_full
+scp 'labenpg-hk:/data/tian/workspace/dpol/Tic-tac/CPP/Output/labenpg_3NF_J3N9/U_PW_elements_*.txt' \
+    'labenpg-hk:/data/tian/workspace/dpol/Tic-tac/CPP/Output/labenpg_3NF_J3N9/q_kinematics_*.txt' \
+    /tmp/run_3NF_full/
+\end{lstlisting}
+
+\subsection{Madison Ay 分析}
+
+\begin{lstlisting}
+micromamba run -n anaroot-env python3 - <<'PY'
+import sys
+sys.path.insert(0, 'examples')
+from pathlib import Path
+import pw_amplitudes as pw
+blocks = pw.parse_solver_output(Path('/tmp/run_3NF_full'))
+qk = pw.parse_q_kinematics(Path('/tmp/run_3NF_full'))
+# ... Madison Ay_n at theta_cm grid
+PY
+\end{lstlisting}
+
+参考 \texttt{examples/plot\_miller\_gate2\_convergence.py} 的 RUNS 列表
+加一个 3NF 条目, 即可得到完整 Ay puzzle 收敛 + 3NF 修正对比图。
+
+% =========================================
+\section{经验教训}
+
+\begin{enumerate}[itemsep=2pt]
+\item \textbf{git remote 永远走 \texttt{labenpg-hk}}: HK 中转对大传输是 5--20$\times$ 加速。
+\item \textbf{conda env 是 build 的事实路径}: 系统 apt 不可用就走 micromamba 装
+      \texttt{liblapacke=*=*netlib*}; 别用 mkl 变种 (没 header)。
+\item \textbf{\texttt{channel\_idx} 是免费午餐}: 不需要改代码, 启 6 进程并行
+      把 5 天压到 1 天。每进程独立 \texttt{output\_folder} 防文件锁竞争。
+\item \textbf{nice +10}: 在多用户机器上是基本礼貌, 几乎不影响完成时间。
+\item \textbf{P123\_recovery=true 永远是坑}: integer-truncation bug 已知未修。
+      用 \texttt{calculate\_and\_store\_P123=true} 计算, 后续用
+      \texttt{calculate\_and\_store\_P123=false} 读盘。
+\item \textbf{Stagger 启动}: 60s gap 减小 6 进程并发加载内存峰。
+\item \textbf{宕机不 panic}: P123 cache 在盘上即可续跑。30 min/chn $\times$ 6 = 3 hr
+      P123 重建时间省掉。
+\item \textbf{别瞎降并行度}: 内存若是 bounded, 减并行只让总时间变长, 不解决根因。
+      先本地用 30s 采样 RSS 排除 OOM 假设。
+\end{enumerate}
+
+% =========================================
+\section{下一步}
+
+待 6 个 chn 完成 (估约 1 天) 后:
+
+\begin{enumerate}[itemsep=2pt]
+\item 合并 chn 0--9 的 U\_PW 文件到 \texttt{labenpg\_3NF\_J3N9/}
+\item 与本地已有的 v4 (Np=20 $J_{3N}\le 9/2$ 2NF) 做差, 量化 3NF 对 $A_y(n)$ 的修正
+\item 把结果加入 \texttt{plot\_miller\_gate2\_convergence.py} 的对比图
+\item 若 3NF 仍无法关闭 Ay puzzle 与 Miller N$^2$LO 的差距, 考虑
+      $J_{3N}\le 13/2$ (按本工作流再 9 个并行 chn)
+\end{enumerate}
+
+% =========================================
+\appendix
+\section{相关 commits 与文件}
+
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+\texttt{a4417a9} & M($\theta$) Miller D2/D4 重写 (arxiv:2201.09600) \\
+\texttt{ae57893} & Ay(n) 接入 compare\_Ay\_experiment CSV 输出 \\
+\texttt{06fadde} & dbg/test 修不污染共享 P123 cache \\
+\texttt{50f15cf} & cache arxiv:2201.09600 TeX 源 \\
+\bottomrule
+\end{tabularx}
+
+\begin{itemize}
+\item \texttt{docs/gate2\_madison\_Ay\_report.md} — Madison Ay calculator 总报告
+\item \texttt{examples/plot\_miller\_gate2\_convergence.py} — 收敛图生成
+\item \texttt{examples/pw\_amplitudes.py} — Madison $M(\theta)$ + 6j + jj$\to$cs
+\item \texttt{docs/seanBSMiller/arxiv\_2201.09600/} — Miller PRC 106 (2022) tex 源
+\end{itemize}
+
+\end{document}
