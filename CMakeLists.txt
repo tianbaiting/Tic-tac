@@ -2,7 +2,11 @@
 # CMake 构建系统 - 重构版本
 
 cmake_minimum_required(VERSION 3.12)
-project(Tic-tac 
+
+# 生成 compile_commands.json 用于 clangd/LSP
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Generate compile_commands.json")
+
+project(Tic-tac
     VERSION 1.0.0
     DESCRIPTION "Three-body nuclear physics Faddeev equation solver"
     LANGUAGES CXX Fortran)
@@ -151,5 +155,4 @@ message(STATUS "GSL: ${GSL_FOUND}")
 message(STATUS "HDF5: ${HDF5_FOUND}")
 message(STATUS "========================")
 
-# 可选：创建编译命令数据库（用于IDE和代码补全）
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# CMAKE_EXPORT_COMPILE_COMMANDS 已在文件开头设置
