@@ -261,6 +261,74 @@ void test_golden_cE_LEC_additivity() {
     check_close("golden cE LEC additivity (2x should be 2x)", v_2x, 2.0 * v_half, 1e-12);
 }
 
+// =============================================================================
+// C_4 HARD-BLOCK TESTS (3NF audit B2)
+// =============================================================================
+// Per docs/3nf_audit_2026-06-21.md §B2, the c_4 term (Epelbaum 2002 eq. 2.2-2.3)
+// is NOT implemented. The class must NOT silently drop a non-zero c_4. Instead:
+//   - name() returns "chiral_N2LO_without_c4" when c_4 ≠ 0
+//   - c4_implemented() returns false
+//   - enabled() does NOT depend on c_4 alone
+// =============================================================================
+
+void test_c4_zero_name_unchanged() {
+    // c_4 = 0: model name should be the standard "chiral_N2LO".
+    chiral_N2LO_3NF tnf(0.0, -0.02914, 500.0, -0.81, -3.2, 0.0);
+    if (tnf.name() != "chiral_N2LO") {
+        std::printf("FAIL c4=0 name: expected 'chiral_N2LO', got '%s'\n", tnf.name().c_str());
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
+void test_c4_nonzero_renames_model() {
+    // c_4 ≠ 0: model name should reflect the dropped term.
+    chiral_N2LO_3NF tnf(-0.2, -0.02914, 500.0, -0.81, -3.2, 5.4);  // c_4 = +5.4 (Idaho)
+    if (tnf.name() != "chiral_N2LO_without_c4") {
+        std::printf("FAIL c4!=0 name: expected 'chiral_N2LO_without_c4', got '%s'\n",
+                    tnf.name().c_str());
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
+void test_c4_implemented_returns_false() {
+    chiral_N2LO_3NF tnf(0.0, 0.0, 500.0, 0.0, 0.0, 0.0);
+    if (tnf.c4_implemented()) {
+        std::printf("FAIL c4_implemented: should always return false in current build\n");
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
+void test_c4_alone_does_not_enable() {
+    // c_4 ≠ 0 alone (everything else zero) should NOT enable the model,
+    // because the c_4 contribution would be silently dropped.
+    chiral_N2LO_3NF tnf(0.0, 0.0, 500.0, 0.0, 0.0, 5.4);  // c_4 only
+    if (tnf.enabled()) {
+        std::printf("FAIL c4 alone enabled(): model would silently drop c_4\n");
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
+void test_capabilities_string_mentions_c4() {
+    chiral_N2LO_3NF tnf(-0.2, -0.02914, 500.0, -0.81, -3.2, 5.4);
+    std::string caps = tnf.capabilities();
+    if (caps.find("c_4") == std::string::npos ||
+        caps.find("NOT implemented") == std::string::npos) {
+        std::printf("FAIL capabilities string does not honestly report c_4 status: %s\n",
+                    caps.c_str());
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
 int main() {
     std::printf("=== L2: 3NF Matrix Element Tests ===\n\n");
 
@@ -277,6 +345,13 @@ int main() {
     test_golden_cE_ratio_3S1_over_1S0();
     test_golden_cE_hermiticity();
     test_golden_cE_LEC_additivity();
+
+    std::printf("\n--- c_4 hard-block tests ---\n");
+    test_c4_zero_name_unchanged();
+    test_c4_nonzero_renames_model();
+    test_c4_implemented_returns_false();
+    test_c4_alone_does_not_enable();
+    test_capabilities_string_mentions_c4();
 
     std::printf("\n%d passed, %d failed\n", g_passes, g_failures);
     return g_failures > 0 ? 1 : 0;

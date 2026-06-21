@@ -8,26 +8,35 @@
 #include "../utils/chiral_3nf_recoupling.h"
 #include "gauss_legendre.h"
 #include <cmath>
+#include <cstdio>
+#include <string>
 #include <vector>
 
 // [EN] Chiral N2LO three-nucleon force: the leading 3NF in chiral effective field theory.
 // Three contributions at this order:
-//   1. Two-pion exchange (2PE):   proportional to c₁, c₃, c₄ (inherited from 2NF)
+//   1. Two-pion exchange (2PE):   proportional to c₁, c₃ (inherited from 2NF)
 //   2. One-pion exchange contact (1PE-CT): proportional to c_D
 //   3. Three-nucleon contact (CT): proportional to c_E
 //
+// **IMPLEMENTED TERMS**: c_E, c_D, c₁, c₃. The c₄ term
+// (Epelbaum 2002 eq. 2.2-2.3, isospin τ₁·(τ₂×τ₃), momentum cross-product
+// σ·(qᵢ×qⱼ)) is **NOT implemented**. If c₄ ≠ 0 the constructor prints a strong
+// warning to stderr and name() returns "chiral_N2LO_without_c4" so downstream
+// metadata honestly records the incompleteness. See B2 in
+// docs/3nf_audit_2026-06-21.md.
+//
 // W^(1) is the spectator-1 decomposition: particle 1 is the spectator, particles 2 and 3
-// form the interacting pair. The full 3NF is recovered via W = (1+P) W^(1) where P = P₁₂₃ + P₁₃₂.
+// form the interacting pair. The full 3NF is recovered via W = (1+P+P²) W^(1) where
+// P = P₁₂₃ + P₁₃₂. The AGS KERNEL uses W^(1)·(1+P) (left W^(1), right (1+P)) —
+// see three_nucleon_force_model.h and tests/cpp/test_faddeev_operator_order.cpp.
 //
 // References:
 //   Epelbaum, Glöckle, Meissner, PRC 66 (2002) 064001
 //   Witała et al., PRC 77 (2008) 034004
-//   Hebeler et al., PRC 91 (2015) 024003
+//   Hebeler et al., PRC 91 (2015) 044001
 //
-// / [CN] 手征 N2LO 三体核力：手征有效场论中领头阶的 3NF。此阶有三项贡献：
-//   1. 双 π 交换 (2PE)：正比于 c₁, c₃, c₄（从 2NF 继承）
-//   2. 单 π 交换接触 (1PE-CT)：正比于 c_D
-//   3. 三核子接触 (CT)：正比于 c_E
+// / [CN] 手征 N2LO 三体核力：手征有效场论中领头阶的 3NF。已实现：c_E, c_D, c₁, c₃。
+// c₄ 项未实现——构造时会发警告并改名模型为 chiral_N2LO_without_c4。
 class chiral_N2LO_3NF : public three_nucleon_force_model
 {
 public:
@@ -46,7 +55,9 @@ public:
 		, m_mpi_fm(mpi / hbarc)                       // Pion mass in fm⁻¹
 		, m_c1(c1 * hbarc / 1000.0)                   // c₁ LEC: GeV⁻¹ → fm
 		, m_c3(c3 * hbarc / 1000.0)                   // c₃ LEC: GeV⁻¹ → fm
-		, m_c4(c4 * hbarc / 1000.0)                   // c₄ LEC: GeV⁻¹ → fm — reserved for tensor part
+		, m_c4(c4 * hbarc / 1000.0)                   // c₄ LEC: GeV⁻¹ → fm — NOT IMPLEMENTED, hard-blocked
+		, m_c4_input(c4)                              // raw c₄ value for warning/metadata
+		, m_c4_blocked(false)
 		, m_gl_x(N_GL)
 		, m_gl_w(N_GL)
 	{
@@ -55,10 +66,50 @@ public:
 		// The gauss() function from src/utils/gauss_legendre.h fills arrays
 		// of length N_GL with the standard GL abscissae and weights.
 		gauss(m_gl_x.data(), m_gl_w.data(), N_GL);
+
+		// [EN] c_4 hard-block (3NF audit B2). The c_4 term carries the
+		// isospin operator τ_1·(τ_2×τ_3) which is imaginary in the
+		// T_3N=½ basis and requires a 5D partial-wave projection that
+		// is not yet implemented. We do NOT silently drop it.
+		// / [CN] c_4 硬阻断（3NF 审计 B2）。c_4 项的同位旋 τ₁·(τ₂×τ₃) 在
+		// T_3N=½ 基中为虚，5D PWD 尚未实现，绝不静默丢弃。
+		if (m_c4 != 0.0) {
+			static bool warned = false;  // one-time warning
+			if (!warned) {
+				std::fprintf(stderr,
+					"*** chiral_N2LO_3NF WARNING: c4 = %.6f GeV^-1 was supplied "
+					"but the c_4 term (Epelbaum 2002 eq. 2.2-2.3, tau_1.(tau_2 x tau_3)) "
+					"is NOT IMPLEMENTED in this build. Matrix elements are computed "
+					"with c_E, c_D, c_1, c_3 only; the c_4 contribution is set to ZERO. "
+					"Model name reported as 'chiral_N2LO_without_c4'. "
+					"See docs/3nf_audit_2026-06-21.md §B2 for the implementation plan.\n",
+					c4);
+				warned = true;
+			}
+			m_c4_blocked = true;
+		}
 	}
 
-	bool enabled() const override { return m_c_D != 0.0 || m_c_E != 0.0 || m_c1 != 0.0 || m_c3 != 0.0 || m_c4 != 0.0; }
-	std::string name() const override { return "chiral_N2LO"; }
+	bool enabled() const override {
+		// c_4 alone does NOT enable the model — it would give no contribution.
+		return m_c_D != 0.0 || m_c_E != 0.0 || m_c1 != 0.0 || m_c3 != 0.0;
+	}
+
+	std::string name() const override {
+		// Honest name: when c_4 ≠ 0, reflect that it's been dropped.
+		return m_c4_blocked ? "chiral_N2LO_without_c4" : "chiral_N2LO";
+	}
+
+	// True iff every N²LO term is implemented. Currently always false because
+	// c_4 is not implemented.
+	virtual bool c4_implemented() const { return false; }
+
+	// Status string for run-metadata output.
+	virtual std::string capabilities() const {
+		return std::string("c_E=implemented, c_D=implemented, ")
+		     + "c_1=implemented, c_3=implemented, "
+		     + "c_4=" + (c4_implemented() ? "implemented" : "NOT implemented (blocked)");
+	}
 
 	void update_parameters(const double* parameters) override
 	{
@@ -107,7 +158,9 @@ private:
 	double m_mpi_fm;       // Pion mass in fm⁻¹
 	double m_c1;           // c₁ LEC in fm (converted from GeV⁻¹)
 	double m_c3;           // c₃ LEC in fm (converted from GeV⁻¹)
-	double m_c4;           // c₄ LEC in fm (converted from GeV⁻¹) — reserved for tensor part
+	double m_c4;           // c₄ LEC in fm (converted from GeV⁻¹) — NOT IMPLEMENTED, hard-blocked
+	double m_c4_input;     // Raw c₄ value (GeV⁻¹) as supplied by the user, for metadata
+	bool   m_c4_blocked;   // True iff c₄ ≠ 0 was supplied (triggers name change + warning)
 	std::vector<double> m_gl_x; // Gauss-Legendre nodes on [-1, +1]
 	std::vector<double> m_gl_w; // Gauss-Legendre weights on [-1, +1]
 
