@@ -39,14 +39,29 @@ public:
 	//   ⟨alpha_r, p_r, q_r | W^(1) | alpha_c, p_c, q_c⟩
 	// where p/q are Jacobi momenta in fm^{-1} (NOT WP bin indices). alpha_r/alpha_c are indices into
 	// pw_states arrays. W^(1) is the 3NF decomposition where particle 1 is the spectator: it is
-	// symmetric under exchange of particles 2 and 3 (the pair), and the full 3NF is recovered via
-	// W = W^(1) + W^(2) + W^(3) = (1+P+P^2) W^(1).
+	// symmetric under exchange of pair particles 2 and 3.
 	//
-	// The kernel assembler calls this on-the-fly during column computation. For a null model this
-	// returns 0.0. Concrete models (chiral_N2LO, etc.) evaluate the partial-wave-decomposed 3NF here.
+	// OPERATOR ORDERING CONVENTION (locked, see docs/treatise/chapters/15_3nf_physics.tex
+	// §operator-ordering and tests/cpp/test_faddeev_operator_order.cpp for the dense test):
 	//
-	// / [CN] 在 3N partial-wave 与 Jacobi 动量基下计算单个 W^(1) 矩阵元。p/q 为 Jacobi 动量 (fm^{-1})，
-	// 而非 WP bin 索引。null 模型返回 0.0；真实模型在此计算 partial-wave 展开后的 3NF。
+	// The full physical 3NF on the antisymmetrised 3N Hilbert space is
+	//     W = W^(1) + W^(2) + W^(3) = (1 + P_{123} + P_{132})·W^(1)
+	// which for antisymmetric bras and kets equals 3·W^(1) as a matrix element.
+	//
+	// HOWEVER, the Faddeev/AGS KERNEL acts in spectator-1 Faddeev space where the
+	// ket is a single Faddeev component. The kernel is (Witała 2008 PRC 77 034004
+	// eq. 3, Golak 2010 EPJA 43 241 §2):
+	//     K_AGS = P·V + W^(1)·(1 + P)
+	// i.e. W^(1) on the LEFT, (1+P) on the RIGHT, with P = P_{123} + P_{132}.
+	//
+	// One may NOT replace W^(1)(1+P) by (1+P)W^(1) in the kernel even though the
+	// two coincide for fully antisymmetric states — W^(1) is defined ONLY in the
+	// spectator-1 frame and is not the same object after a cyclic permutation.
+	//
+	// / [CN] 在 3N partial-wave 与 Jacobi 动量基下计算单个 W^(1) 矩阵元。p/q 为 Jacobi 动量
+	// (fm^{-1})，而非 WP bin 索引。
+	// 算符顺序约定（锁定）：AGS 核使用 W^(1)·(1+P)，W^(1) 在左、(1+P) 在右。完整的物理
+	// 3NF 在反对称化 3N 希尔伯特空间中为 W = (1+P+P²)·W^(1)，但核内不能将两者混用。
 	virtual double W1_element(int alpha_r, int alpha_c,
 							  double p_r, double q_r,
 							  double p_c, double q_c,

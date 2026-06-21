@@ -249,12 +249,27 @@ void calculate_CPVC_col(double*  col_array,
 	//std::chrono::duration<double>  time1 = timestamp_end - timestamp_start;
 	//printf("TIME PVC:  %.6f \n", time1.count()); fflush(stdout);
 
-	// [EN] 3NF contribution (Born level): add W^(1)·(1+P)·C to PVC_col buffer.
-	//   Identity part:    W^(1)·C  — direct W1×C sum over intermediate p
-	//   Permutation part: W^(1)·P·C — compute P·C column via sparse P123 loop, then apply W^(1)
-	// / [CN] 3NF 贡献（Born 级）：把 W^(1)·(1+P)·C 加到 PVC_col 缓冲区。
-	//   单位部分：W^(1)·C —— 对中间 p 直接做 W1×C 求和
-	//   置换部分：W^(1)·P·C —— 用稀疏 P123 循环计算 P·C 列，然后施加 W^(1)
+	// [EN] 3NF contribution (Born + iteration kernel): add W^(1)·(1+P)·C to PVC_col.
+	//
+	// OPERATOR ORDERING (locked, see docs/treatise/chapters/15_3nf_physics.tex
+	// §operator-ordering and tests/cpp/test_faddeev_operator_order.cpp):
+	//
+	// The AGS kernel with 3NF (Witała 2008 PRC 77 034004 eq. 3) is
+	//     K_AGS = P·V + W^(1)·(1 + P)
+	// with W^(1) on the LEFT and (1+P) on the RIGHT. This is NOT the same as
+	// (1+P)·W^(1) in the kernel, even though the two coincide as matrix elements
+	// between fully antisymmetric states. The kernel acts in spectator-1 Faddeev
+	// space where W^(1) is well-defined; left-multiplying by P would move the
+	// operator out of its definition frame.
+	//
+	// Code structure (matches the algebra above):
+	//   Identity part:    W^(1)·C  — direct sum over intermediate p_j with C-weight
+	//   Permutation part: W^(1)·P·C — sparse P applied to C column first, then W^(1)
+	//
+	// / [CN] 3NF 贡献（Born + 迭代核）：把 W^(1)·(1+P)·C 加到 PVC_col 缓冲区。
+	// 算符顺序锁定：W^(1) 在左，(1+P) 在右（Witała 2008 AGS 形式）。
+	//   单位部分：W^(1)·C —— 对中间 p_j 直接做 W1×C 求和
+	//   置换部分：W^(1)·P·C —— 用稀疏 P 先作用 C 列，再施加 W^(1)
 	if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled() && tnf_ctx.w1_scale != 0.0){
 		const three_nucleon_force_model* tnf = tnf_ctx.tnf;
 		const pw_3N_statespace& pw_st = *tnf_ctx.pw_states;

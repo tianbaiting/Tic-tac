@@ -67,6 +67,13 @@ add_executable(test_chiral_3nf_recoupling
 target_link_libraries(test_chiral_3nf_recoupling ${GSL_LIBRARIES})
 add_test(NAME chiral_3nf_recoupling COMMAND test_chiral_3nf_recoupling)
 
+# L4: Faddeev/AGS operator-ordering dense test (3NF audit B4)
+add_executable(test_faddeev_operator_order
+    test_faddeev_operator_order.cpp
+)
+target_link_libraries(test_faddeev_operator_order)
+add_test(NAME faddeev_operator_order COMMAND test_faddeev_operator_order)
+
 # Resolvent analytic Im parts
 add_executable(resolvent_im_test
     resolvent_im_test.cpp
