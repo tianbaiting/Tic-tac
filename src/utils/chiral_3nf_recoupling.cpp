@@ -15,21 +15,26 @@
 // Helper: (2*J + 1) hat-squared factor.
 static inline double two_jp1(int J) { return 2.0 * J + 1.0; }
 
-double recoupling_3nf_scalar(
+double recoupling_3nf_2pe_scalar(
     int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
     int L_1N_r, int two_J_1N_r, int two_J_3N,
     int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,
     int L_1N_c, int two_J_1N_c,
     int two_T_3N)
 {
-    // [EN] Pair-scalar operator: sigma_2.sigma_3 * tau_2.tau_3 acting on
-    // the pair (2,3) with all pair orbital/spin/isospin quantum numbers
-    // conserved and the spectator line completely untouched. The full
-    // 3N matrix element reduces to a Kronecker product of selection
-    // rules times the pair eigenvalues.
+    // [EN] 2PE c_1/c_3 rank-0 pair-scalar operator: σ_2·σ_3 × τ_2·τ_3 acting on
+    // the pair (2,3), with all pair orbital/spin/isospin quantum numbers
+    // conserved and the spectator line completely untouched. The full 3N
+    // matrix element reduces to a Kronecker product of selection rules times
+    // the pair eigenvalues.
     //
-    // / [CN] 配对标量算子：sigma_2.sigma_3 * tau_2.tau_3 作用于配对 (2,3)，
+    // **NOT for the c_E contact** — c_E is a pure spin-scalar (Epelbaum A-4)
+    // and uses recoupling_3nf_contact_cE. See docs/3nf_audit_2026-06-21.md §B1.
+    //
+    // / [CN] 2PE c_1/c_3 rank-0 配对标量算子：σ_2·σ_3 × τ_2·τ_3 作用于配对 (2,3)，
     // 保持所有配对轨道/自旋/同位旋量子数，旁观者线完全不变。
+    // 不能用于 c_E 接触项——c_E 是纯自旋标量（Epelbaum A-4），使用
+    // recoupling_3nf_contact_cE。
 
     // Selection rules — pair orbital & spin & isospin all conserved,
     // spectator completely unchanged, J_3N and T_3N already assumed equal
@@ -52,14 +57,80 @@ double recoupling_3nf_scalar(
     // Pair spin eigenvalue: sigma_2 . sigma_3 = 2 S_pair(S_pair+1) - 3
     //   S_2N = 0 -> -3   (singlet)
     //   S_2N = 1 -> +1   (triplet)
-    const double sigma_sigma = 2.0 * S_2N_r * (S_2N_r + 1) - 3.0;
+    const double sigma_sigma = 2.0 * S_2N_r * (S_2N_r + 1.0) - 3.0;
 
     // Pair isospin eigenvalue: tau_2 . tau_3 = 2 T_pair(T_pair+1) - 3
     //   T_2N = 0 -> -3   (isoscalar pair)
     //   T_2N = 1 -> +1   (isovector pair)
-    const double tau_tau = 2.0 * T_2N_r * (T_2N_r + 1) - 3.0;
+    const double tau_tau = 2.0 * T_2N_r * (T_2N_r + 1.0) - 3.0;
 
     return sigma_sigma * tau_tau;
+}
+
+double recoupling_3nf_contact_cE(
+    int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
+    int L_1N_r, int two_J_1N_r, int two_J_3N,
+    int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,
+    int L_1N_c, int two_J_1N_c,
+    int two_T_3N)
+{
+    // [EN] c_E three-nucleon contact term recoupling (Epelbaum 2002 eq. 2.10).
+    //
+    // V^(1)_cont = -E · (τ_2 · τ_3),   E = c_E / (f_π⁴ Λ_χ)
+    //
+    // The operator τ_2·τ_3 acts ONLY on the pair (2,3); the spectator (particle 1)
+    // with isospin 1/2 is a passive spectator in the strictest sense. The pair
+    // state is |(½ ½) T_2N⟩ and the spectator state is |½⟩; the total 3N isospin
+    // state is |((½ ½) T_2N, ½) T_3N⟩. Because τ_2·τ_3 acts entirely within the
+    // pair subspace, its matrix element in this basis is just the pair eigenvalue:
+    //
+    //   ⟨((½ ½) T_2N', ½) T_3N | τ_2·τ_3 | ((½ ½) T_2N, ½) T_3N⟩
+    //     = δ_{T_2N' T_2N} · (2 T_2N (T_2N+1) − 3)
+    //
+    // **No 6j symbol appears** — unlike τ_1·τ_3 (which connects spectator and
+    // pair, requiring 9j recoupling), τ_2·τ_3 is already diagonal in the
+    // (pair, spectator) coupled basis. The previous draft of this helper
+    // included a {½ ½ T_2N; ½ ½ T_3N}_6j factor; that 6j is identically zero
+    // for T_3N = 1/2 (triad (½,½,½) sums to 3/2 ≠ integer), so that form would
+    // have given A_cE = 0 for ALL doublet channels — clearly wrong. The
+    // transcription in tools/check_3nf_normalization/formula_reference.md §1.4
+    // is therefore incorrect; the correct derivation is the diagonal one above.
+    //
+    // Spin: NO σ_2·σ_3 factor. The c_E contact is a pure spin-scalar. (Bug B1
+    // in docs/3nf_audit_2026-06-21.md.)
+    //
+    // Selection rules (Epelbaum A-4):
+    //   L_2N = L_2N' = 0      (contact pair vertex: S-wave pair only)
+    //   l_1N = l_1N' = 0      (spectator S-wave)
+    //   2·j_1N = 2·j_1N' = 1  (spectator j_1N = 1/2)
+    //   J_2N = S_2N           (because L_2N = 0)
+    //   S_2N = S_2N', T_2N = T_2N'  (rank-0 in spin and isospin)
+    //
+    // / [CN] c_E 三核子接触项重耦合（Epelbaum 2002 eq. 2.10）。
+    // c_E 是纯自旋标量，τ_2·τ_3 完全作用在配对子空间内，旁观者同位旋 1/2 被动。
+    // 在 (pair T_2N, spectator 1/2) T_3N 耦合基中，τ_2·τ_3 矩阵元就是配对本征值
+    // (2 T_2N (T_2N+1) − 3)，不需要 6j 重耦合。
+
+    // --- Selection rules (Epelbaum A-4) ---
+    if (L_2N_r != 0 || L_2N_c != 0) return 0.0;   // contact pair vertex
+    if (L_1N_r != 0 || L_1N_c != 0) return 0.0;   // spectator S-wave
+    if (two_J_1N_r != 1 || two_J_1N_c != 1) return 0.0;  // j_1N = 1/2
+    if (J_2N_r != S_2N_r || J_2N_c != S_2N_c) return 0.0; // L_2N=0 ⇒ J_2N=S_2N
+    if (S_2N_r != S_2N_c) return 0.0;             // spin scalar
+    if (T_2N_r != T_2N_c) return 0.0;             // isospin scalar
+
+    // J_3N, T_3N do not enter the c_E contact: the operator is rank-0 in both.
+    // They appear in the signature for interface symmetry and are conserved
+    // (caller already enforces this).
+    (void)two_J_3N;
+    (void)two_T_3N;
+
+    // --- τ_2·τ_3 pair isospin eigenvalue ---
+    // T_2N = 0 → -3 (isoscalar pair, np pair in T_3N=1/2 doublet)
+    // T_2N = 1 → +1 (isovector pair, pp/nn pair in T_3N=1/2 doublet)
+    const double tau23 = 2.0 * T_2N_r * (T_2N_r + 1.0) - 3.0;
+
+    return tau23;
 }
 
 double recoupling_3nf_rank2(

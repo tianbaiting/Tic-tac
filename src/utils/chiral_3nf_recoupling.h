@@ -19,12 +19,23 @@
 // / [CN] 手征 N2LO 三核子力分波矩阵元的自旋-同位旋-空间重耦合系数。
 // 这些系数是解析的、通道依赖且动量无关的，因此可以从径向热循环中分离出来。
 
-// Rank-0 (scalar pair operator) 3NF recoupling coefficient.
+// Rank-0 (scalar pair operator) 3NF recoupling coefficient for the 2PE c_1/c_3
+// rank-0 piece ONLY.
 //
 // Applies to operators of the form
-//   O_scalar = (spatial scalar) * (spin scalar) * (isospin scalar)
-// acting on the pair (2,3) with the spectator (1) unchanged. The three
-// scalar factors include:
+//   O_2pe_scalar = (spatial scalar) * (σ_2·σ_3) * (τ_2·τ_3)
+// acting on the pair (2,3) with the spectator (1) unchanged. Used for the
+// rank-0 part of the 2PE c_1/c_3 term (Golak 2010 eq. 18) where the
+// decomposition (σ_2·q_2)(σ_3·q_3) → ⅓(σ_2·σ_3)(q_2·q_3) produces a genuine
+// σ_2·σ_3 factor with eigenvalue 2·S_2N·(S_2N+1) − 3.
+//
+// **DO NOT USE FOR THE c_E CONTACT** — that term is a pure spin-scalar
+// (Epelbaum 2002 eq. 2.10/A-4) and must use recoupling_3nf_contact_cE, which
+// returns only the τ_2·τ_3 piece without any σ_2·σ_3 factor. Using this helper
+// for c_E introduces a spurious (-3) factor for S_2N=0 pairs and a (+1) factor
+// for S_2N=1 pairs (see docs/3nf_audit_2026-06-21.md §B1).
+//
+// The three scalar factors here are:
 //   - spin:    sigma_2 . sigma_3      (eigenvalue 2 S_2N (S_2N+1) - 3)
 //   - isospin: tau_2 . tau_3          (eigenvalue 2 T_2N (T_2N+1) - 3)
 //   - spatial: any channel-diagonal scalar (pair orbital unchanged)
@@ -32,13 +43,14 @@
 // The returned coefficient is the Kronecker product of selection rules
 // times the pair spin and isospin eigenvalues. Since the operator is
 // scalar in every subspace, the recoupling reduces to a product of
-// delta-functions times the algebraic eigenvalues (all other recoupling
-// 6j's collapse to 1/(2J+1) normalisations absorbed into the convention).
+// delta-functions times the algebraic eigenvalues.
 //
 // This form matches A_c1_rank0 in formula_reference.md §3.4 and is also
-// the limiting case of A_cE in §1.4 and A_c3_rank0 in §4 (up to the
-// overall LEC- and momentum-kernel dependent prefactors handled by the
-// caller).
+// the limiting case of A_c3_rank0 in §4 (up to the overall LEC- and
+// momentum-kernel dependent prefactors handled by the caller).
+//
+// Renamed from recoupling_3nf_scalar on 2026-06-21 to make its physical
+// scope unambiguous (3NF audit B1/B3).
 //
 // Arguments (row = bra "r", column = ket "c"):
 //   L_2N_*, S_2N_*, J_2N_*, T_2N_* : pair partial-wave integers
@@ -47,7 +59,43 @@
 //
 // Returns: real-valued recoupling coefficient (no regulator, no LEC, no
 // momentum kernel).
-double recoupling_3nf_scalar(
+double recoupling_3nf_2pe_scalar(
+    int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
+    int L_1N_r, int two_J_1N_r, int two_J_3N,
+    int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,
+    int L_1N_c, int two_J_1N_c,
+    int two_T_3N);
+
+// c_E three-nucleon contact recoupling coefficient.
+//
+// Epelbaum 2002 eq. (2.10): the c_E 3N contact is
+//   V^(1)_cont = -E · (τ_2 · τ_3),   E = c_E / (f_π⁴ Λ_χ)
+// It is a PURE SPIN SCALAR — there is NO σ_2·σ_3 operator. The matrix element
+// depends only on the pair isospin T_2N.
+//
+// **No 6j symbol appears** — τ_2·τ_3 acts entirely within the pair subspace
+// (particles 2 and 3). The spectator (particle 1, isospin 1/2) is a passive
+// spectator: in the coupled basis |((½ ½) T_2N, ½) T_3N⟩ the operator is
+// already diagonal, with eigenvalue 2 T_2N (T_2N+1) − 3. The previous draft
+// of this helper (and the closed form in formula_reference.md §1.4) included
+// a 6j {½ ½ T_2N; ½ ½ T_3N}; that 6j is identically zero for T_3N = 1/2 by
+// triad parity (½+½+½ = 3/2 ∉ ℤ), confirming it is the wrong object.
+//
+// Selection rules (Epelbaum A-4):
+//   L_2N = L_2N' = 0   (contact pair vertex → S-wave pair)
+//   l_1N = l_1N' = 0   (spectator S-wave)
+//   2·j_1N = 2·j_1N' = 1   (spectator spin doublet, j_1N = 1/2)
+//   J_2N = S_2N  and  J_2N' = S_2N'   (because L_2N = 0)
+//   S_2N = S_2N', T_2N = T_2N'        (rank-0 in both subspaces)
+//
+// Closed form (CORRECTED on 2026-06-21 — see docs/3nf_audit_2026-06-21.md §B1):
+//   A_cE = (2 T_2N (T_2N+1) − 3)   [no 6j, no phase, no σ·σ]
+//        = -3 for T_2N = 0 (isoscalar np pair in T_3N = 1/2 doublet)
+//        = +1 for T_2N = 1 (isovector pp/nn pair)
+//
+// Returns: real-valued recoupling coefficient. Returns 0 when any selection
+// rule is violated.
+double recoupling_3nf_contact_cE(
     int L_2N_r, int S_2N_r, int J_2N_r, int T_2N_r,
     int L_1N_r, int two_J_1N_r, int two_J_3N,
     int L_2N_c, int S_2N_c, int J_2N_c, int T_2N_c,

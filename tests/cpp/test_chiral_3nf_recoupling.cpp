@@ -28,20 +28,105 @@ static void check_nonzero(const char* label, double got) {
 }
 
 // ---------------------------------------------------------------------------
-// Scalar recoupling: 3S1 diagonal channel
+// c_E contact recoupling (pure τ₂·τ₃, NO σ₂·σ₃ dependence)
+// ---------------------------------------------------------------------------
+// Per Epelbaum 2002 eq. (2.10) + (A-4) and docs/3nf_audit_2026-06-21.md §B1:
+//   V^(1)_cont = -E·(τ₂·τ₃),  E = c_E/(f_π⁴ Λ_χ)
+// The c_E contact is a SPIN SCALAR. Its matrix element must NOT depend on the
+// pair-spin eigenvalue. For pair T=1 (τ₂·τ₃ = +1) the recoupling is identical
+// whether S_2N=0 or S_2N=1, as long as T_2N, T_3N and the spectator structure match.
+//
+// We verify two independent properties:
+//   (a) For (S=0, T=1) and (S=1, T=1) at matching J_3N=3/2, T_3N=1/2:
+//       A_cE(S=0,T=1) == A_cE(S=1,T=1)   (no spin dependence).
+//   (b) For the diagonal 3S1 channel (S=1, T=0): A_cE equals the pure τ₂·τ₃
+//       eigenvalue (-3) times the standard 6j recoupling factor — NOT multiplied
+//       by σ₂·σ₃ (= +1 by accident for S=1, so the bug is invisible here).
+void test_cE_contact_S0T1_equals_S1T1() {
+    // (S=0, T=1) → J_2N=0, J_3N=1/2 (doublet), T_3N=1/2
+    double v_S0_T1 = recoupling_3nf_contact_cE(
+        /*L_2N_r=*/0, /*S_2N_r=*/0, /*J_2N_r=*/0, /*T_2N_r=*/1,
+        /*L_1N_r=*/0, /*two_J_1N_r=*/1, /*two_J_3N=*/1,
+        /*L_2N_c=*/0, /*S_2N_c=*/0, /*J_2N_c=*/0, /*T_2N_c=*/1,
+        /*L_1N_c=*/0, /*two_J_1N_c=*/1,
+        /*two_T_3N=*/1);
+    // (S=1, T=1) → J_2N=1, J_3N=3/2 (lowest doublet), T_3N=1/2
+    double v_S1_T1 = recoupling_3nf_contact_cE(
+        /*L_2N_r=*/0, /*S_2N_r=*/1, /*J_2N_r=*/1, /*T_2N_r=*/1,
+        /*L_1N_r=*/0, /*two_J_1N_r=*/1, /*two_J_3N=*/3,
+        /*L_2N_c=*/0, /*S_2N_c=*/1, /*J_2N_c=*/1, /*T_2N_c=*/1,
+        /*L_1N_c=*/0, /*two_J_1N_c=*/1,
+        /*two_T_3N=*/1);
+    // Both must give the SAME matrix element since c_E is spin-scalar.
+    check_close("cE contact: A(S=0,T=1) == A(S=1,T=1) [no spin dep]",
+                v_S0_T1, v_S1_T1);
+}
+
+// Direct numeric check: for the dominant 3S1 channel (S=1, T=0) at T_3N=1/2,
+// A_cE must equal τ₂·τ₃(T=0) = -3, with NO σ·σ factor and NO 6j recoupling.
+// (τ_2·τ_3 is diagonal in the (pair T_2N, spectator 1/2) T_3N basis — the
+//  spectator is a passive spectator; the formula_reference.md §1.4 closed
+//  form with a 6j symbol is wrong, as verified by sympy: the 6j
+//  {½½T; ½½½} violates triad parity and is identically zero.)
+void test_cE_contact_3S1_diagonal_value() {
+    double val = recoupling_3nf_contact_cE(
+        /*L_2N_r=*/0, /*S_2N_r=*/1, /*J_2N_r=*/1, /*T_2N_r=*/0,
+        /*L_1N_r=*/0, /*two_J_1N_r=*/1, /*two_J_3N=*/1,
+        /*L_2N_c=*/0, /*S_2N_c=*/1, /*J_2N_c=*/1, /*T_2N_c=*/0,
+        /*L_1N_c=*/0, /*two_J_1N_c=*/1,
+        /*two_T_3N=*/1);
+    // τ₂·τ₃(T=0) = -3, pure diagonal — no extra factors.
+    check_close("cE contact: 3S1 diagonal == -3 (pure tau.tau eigenvalue)",
+                val, -3.0);
+}
+
+// 1S0 channel (S=0, T=1) must give A_cE = +1 (NOT -3 from σ·σ × τ·τ).
+// This is the discriminating test against the old buggy implementation.
+void test_cE_contact_1S0_diagonal_value() {
+    double val = recoupling_3nf_contact_cE(
+        /*L_2N_r=*/0, /*S_2N_r=*/0, /*J_2N_r=*/0, /*T_2N_r=*/1,
+        /*L_1N_r=*/0, /*two_J_1N_r=*/1, /*two_J_3N=*/1,
+        /*L_2N_c=*/0, /*S_2N_c=*/0, /*J_2N_c=*/0, /*T_2N_c=*/1,
+        /*L_1N_c=*/0, /*two_J_1N_c=*/1,
+        /*two_T_3N=*/1);
+    // τ₂·τ₃(T=1) = +1, pure diagonal.
+    // OLD BUGGY value: σ·σ × τ·τ = (-3)(+1) = -3.
+    check_close("cE contact: 1S0 diagonal == +1 (NOT -3 from old σ·σ bug)",
+                val, +1.0);
+}
+
+// Selection rules: the c_E contact requires S-wave pair (L_2N=0) and S-wave
+// spectator (l_1N=0). Any non-zero L must return 0.
+void test_cE_contact_L_nonzero_zero() {
+    double val = recoupling_3nf_contact_cE(
+        /*L_2N_r=*/2, /*S_2N_r=*/1, /*J_2N_r=*/1, /*T_2N_r=*/0,
+        0, 1, 1,
+        0, 1, 1, 0, 0, 1, 1);
+    check_close("cE contact: L_2N_r=2 must be 0", val, 0.0);
+
+    val = recoupling_3nf_contact_cE(
+        0, 1, 1, 0, /*l=*/2, 1, 1,
+        0, 1, 1, 0, 2, 1, 1);
+    check_close("cE contact: l_1N=2 must be 0", val, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// 2PE rank-0 scalar recoupling: 3S1 diagonal channel
+// (Formerly recoupling_3nf_scalar — retained for the c_1/c_3 2PE rank-0 piece
+//  where σ₂·σ₃ × τ₂·τ₃ IS the correct operator.)
 // ---------------------------------------------------------------------------
 // alpha = { L_2N=0, S_2N=1, J_2N=1, T_2N=0, l_1N=0, 2j_1N=1, 2J_3N=1, 2T_3N=1 }
 //   sigma_2.sigma_3 (S=1)  = +1
 //   tau_2.tau_3     (T=0)  = -3
 //   scalar recoupling      = (+1) * (-3) = -3
 void test_scalar_3S1_diagonal() {
-    double val = recoupling_3nf_scalar(
+    double val = recoupling_3nf_2pe_scalar(
         /*L_2N_r=*/0, /*S_2N_r=*/1, /*J_2N_r=*/1, /*T_2N_r=*/0,
         /*L_1N_r=*/0, /*two_J_1N_r=*/1, /*two_J_3N=*/1,
         /*L_2N_c=*/0, /*S_2N_c=*/1, /*J_2N_c=*/1, /*T_2N_c=*/0,
         /*L_1N_c=*/0, /*two_J_1N_c=*/1,
         /*two_T_3N=*/1);
-    check_close("scalar 3S1 diagonal (sigma.sigma * tau.tau)", val, -3.0);
+    check_close("2pe_scalar 3S1 diagonal (sigma.sigma * tau.tau)", val, -3.0);
 }
 
 void test_scalar_1S0_diagonal() {
@@ -49,34 +134,34 @@ void test_scalar_1S0_diagonal() {
     //   sigma_2.sigma_3 (S=0) = -3
     //   tau_2.tau_3     (T=1) = +1
     //   product               = -3
-    double val = recoupling_3nf_scalar(
+    double val = recoupling_3nf_2pe_scalar(
         0, 0, 0, 1, 0, 1, 1,
         0, 0, 0, 1, 0, 1,
         1);
-    check_close("scalar 1S0 diagonal", val, -3.0);
+    check_close("2pe_scalar 1S0 diagonal", val, -3.0);
 }
 
 // ---------------------------------------------------------------------------
-// Scalar recoupling: 3S1 <-> 3D1 must be zero (ΔL=2 selection rule violation
+// 2PE rank-0 scalar: 3S1 <-> 3D1 must be zero (ΔL=2 selection rule violation
 // for a pair-scalar operator).
 // ---------------------------------------------------------------------------
 void test_scalar_3S1_3D1_zero() {
-    double val = recoupling_3nf_scalar(
+    double val = recoupling_3nf_2pe_scalar(
         /*L_2N_r=*/0, /*S_2N_r=*/1, /*J_2N_r=*/1, /*T_2N_r=*/0,
         /*L_1N_r=*/0, /*two_J_1N_r=*/1, /*two_J_3N=*/1,
         /*L_2N_c=*/2, /*S_2N_c=*/1, /*J_2N_c=*/1, /*T_2N_c=*/0,
         /*L_1N_c=*/0, /*two_J_1N_c=*/1,
         /*two_T_3N=*/1);
-    check_close("scalar 3S1<->3D1 (should be zero)", val, 0.0);
+    check_close("2pe_scalar 3S1<->3D1 (should be zero)", val, 0.0);
 }
 
 void test_scalar_spectator_mismatch_zero() {
     // Mismatched spectator l_1N should zero the scalar recoupling.
-    double val = recoupling_3nf_scalar(
+    double val = recoupling_3nf_2pe_scalar(
         0, 1, 1, 0, /*l=*/0, 1, 1,
         0, 1, 1, 0, /*l=*/2, 1,
         1);
-    check_close("scalar spectator l mismatch", val, 0.0);
+    check_close("2pe_scalar spectator l mismatch", val, 0.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -245,9 +330,15 @@ void test_1pe_ct_rank2_L2N_nonzero_returns_zero() {
 
 // ---------------------------------------------------------------------------
 int main() {
-    std::printf("=== L2: Chiral 3NF Recoupling (scalar + rank-2) ===\n\n");
+    std::printf("=== L2: Chiral 3NF Recoupling (contact cE + 2PE scalar + rank-2) ===\n\n");
 
-    std::printf("--- Scalar recoupling (pair-only operator) ---\n");
+    std::printf("--- c_E contact recoupling (pure tau.tau, spin-scalar) ---\n");
+    test_cE_contact_S0T1_equals_S1T1();
+    test_cE_contact_3S1_diagonal_value();
+    test_cE_contact_1S0_diagonal_value();
+    test_cE_contact_L_nonzero_zero();
+
+    std::printf("\n--- 2PE rank-0 scalar recoupling (sigma.sigma * tau.tau) ---\n");
     test_scalar_3S1_diagonal();
     test_scalar_1S0_diagonal();
     test_scalar_3S1_3D1_zero();

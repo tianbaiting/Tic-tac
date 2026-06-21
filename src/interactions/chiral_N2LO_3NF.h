@@ -114,23 +114,29 @@ private:
 	// [EN] 3N contact term (c_E): partial-wave matrix element assembled from
 	// the factored pieces
 	//   W^(1)_CT(α',p',q'; α,p,q)
-	//     = A_rank0(α', α)                      [recoupling_3nf_scalar]
+	//     = A_cE(α', α)                          [recoupling_3nf_contact_cE]
 	//     × [ -½ c_E / (f_π⁴ Λ_χ) ]              [kernel_contact]
-	//     × f_R(p',q') f_R(p,q)                 [regulator_gauss, squared Gaussian]
+	//     × f_R(p',q') f_R(p,q)                  [regulator_gauss, squared Gaussian]
 	//
-	// The rank-0 recoupling enforces diagonality in all pair & spectator quantum
-	// numbers and returns (σ_2·σ_3)(τ_2·τ_3) as the scalar eigenvalue product
-	// (Task 1 helper convention; see chiral_3nf_recoupling.h).  For 3S1
-	// (S_2N=1, T_2N=0) the triplet σ·σ = +1 is inert, so the c_E piece reduces
-	// to the (τ_2·τ_3) eigenvalue on top of the LEC factor and regulators.
+	// Per Epelbaum 2002 eq. (2.10)/(A-4), the c_E contact is a PURE SPIN SCALAR.
+	// Its spin-isospin recoupling A_cE depends only on the pair isospin T_2N and
+	// the spectator 1/2 ↔ T_3N coupling — NO σ_2·σ_3 factor. The previous
+	// implementation reused recoupling_3nf_scalar (now recoupling_3nf_2pe_scalar)
+	// which erroneously multiplies by σ_2·σ_3 = -3 for S_2N=0 or +1 for S_2N=1.
+	// See docs/3nf_audit_2026-06-21.md §B1 for the bug analysis.
+	//
+	// For 3S1 (S_2N=1, T_2N=0): A_cE = (+1)·(-1)·(-3)·(-1/2) = -3/2 (NEW, correct)
+	//                            old: (+1)·(-3) = -3            (BUG: extra σ·σ)
+	// For 1S0 (S_2N=0, T_2N=1): A_cE = (-1)·(+1)·(+1)·(+1/4) = -1/4 (NEW, correct)
+	//                            old: (-3)·(+1) = -3              (BUG: extra σ·σ × wrong 6j)
 	//
 	// References:
 	//   Epelbaum et al. PRC 66 (2002) 064001, eqs. (2.10), (3.19), (A-4);
 	//   tools/check_3nf_normalization/formula_reference.md §1.
 	//
-	// / [CN] 3N 接触项 (c_E)：由三部分组合的分波矩阵元——重耦合系数
-	// (Task 1, 对角选择定则 + σ·σ × τ·τ)、LEC 核 (Task 2, -½ c_E / (fπ⁴ Λ_χ))、
-	// 以及 E2002 eq. 3.19 的平方高斯正规化子。
+	// / [CN] 3N 接触项 (c_E)：由重耦合系数（Epelbaum A-4，纯 τ·τ）、LEC 核
+	// (-½ c_E/(f_π⁴ Λ_χ))、E2002 eq. 3.19 平方高斯正规化子组合而成。
+	// c_E 是纯自旋标量——不依赖 σ_2·σ_3（修复 B1）。
 	double W1_contact(int alpha_r, int alpha_c,
 					  double p_r, double q_r,
 					  double p_c, double q_c,
@@ -139,9 +145,9 @@ private:
 		// Short-circuit when the LEC is off (pure 2NF runs still build this object).
 		if (m_c_E == 0.0) return 0.0;
 
-		// Rank-0 recoupling: pair scalar (sigma2.sigma3)(tau2.tau3) with full
-		// Kronecker selection on pair and spectator quantum numbers.
-		const double recoup = recoupling_3nf_scalar(
+		// c_E contact recoupling (Epelbaum A-4): pure τ_2·τ_3 spin-scalar.
+		// NO σ_2·σ_3 factor — see docs/3nf_audit_2026-06-21.md §B1.
+		const double recoup = recoupling_3nf_contact_cE(
 			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
 			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
 			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
@@ -263,7 +269,7 @@ private:
 	//   V^(1)_2π = (gA/2fπ)² × (τ₂·τ₃) × (σ₂·q₂)(σ₃·q₃) × F₁(q₂,q₃)
 	//   F₁ = [-4c₁mπ²/fπ² + 2c₃(q₂·q₃)/fπ²] / [(q₂²+mπ²)(q₃²+mπ²)]
 	//
-	// Rank-0 recoupling: recoupling_3nf_scalar returns (σ₂·σ₃)(τ₂·τ₃) pair
+	// Rank-0 recoupling: recoupling_3nf_2pe_scalar returns (σ₂·σ₃)(τ₂·τ₃) pair
 	// eigenvalues with full channel-diagonal selection rules. The ⅓ rank-0
 	// coefficient is applied explicitly in the outer coefficient.
 	//
@@ -301,9 +307,9 @@ private:
 
 		// [EN] Rank-0 recoupling: (σ₂·σ₃)(τ₂·τ₃) pair eigenvalues, diagonal in all
 		// pair and spectator quantum numbers. Returns 0 for off-diagonal α pairs.
-		// Note: recoupling_3nf_scalar returns sigma*sigma × tau*tau WITHOUT the ⅓
+		// Note: recoupling_3nf_2pe_scalar returns sigma*sigma × tau*tau WITHOUT the ⅓
 		// rank-0 coefficient — we apply 1/3 explicitly in the overall coefficient below.
-		const double recoup0 = recoupling_3nf_scalar(
+		const double recoup0 = recoupling_3nf_2pe_scalar(
 			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
 			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
 			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
