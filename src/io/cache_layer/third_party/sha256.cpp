@@ -72,4 +72,13 @@ std::string hex_digest(const std::string& message) {
     hex[64] = 0; return std::string(hex);
 }
 
+// 3NF audit B5: hash raw bytes (for hashing binary grid arrays).
+std::string hex_digest_raw(const uint8_t* data, size_t len) {
+    Ctx ctx; init(ctx);
+    update(ctx, data, len);
+    uint8_t out[32]; finalize(ctx, out);
+    char hex[65]; for (int i = 0; i < 32; ++i) std::snprintf(hex + i*2, 3, "%02x", out[i]);
+    hex[64] = 0; return std::string(hex);
+}
+
 }  // namespace tictac::cache::sha256

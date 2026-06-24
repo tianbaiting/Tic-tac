@@ -43,7 +43,7 @@ public:
         if (blk < 0) return 0.0;
         const std::size_t idx =
             ((((std::size_t)blk * m_Nq + idx_q_r) * m_Nq + idx_q_c) * m_Np + idx_p_r) * m_Np + idx_p_c;
-        return (double)m_data[idx];
+        return m_data[idx];
     }
 
     bool        valid()       const { return !m_data.empty(); }
@@ -51,10 +51,15 @@ public:
     std::size_t Nq()          const { return m_Nq; }
     std::size_t Np()          const { return m_Np; }
     std::size_t num_blocks()  const { return m_blocks.size(); }
-    std::size_t total_bytes() const { return m_data.size() * sizeof(float); }
+    // 3NF audit B6 (2026-06-21): storage is now double (was float).
+    // 24-bit float mantissa was insufficient for cancelling 3NF contributions.
+    std::size_t total_bytes() const { return m_data.size() * sizeof(double); }
 
 private:
-    std::vector<float>                   m_data;
+    // 3NF audit B6: changed from std::vector<float> to std::vector<double>.
+    // For memory-constrained runs, the previous float storage can be restored
+    // behind an explicit compile-time flag (not currently exposed).
+    std::vector<double>                  m_data;
     std::vector<int>                     m_block_index;  // (alpha_r, alpha_c) → block id, -1 if forbidden
     std::vector<std::pair<int, int>>     m_blocks;       // block id → (alpha_r, alpha_c)
     std::size_t                          m_Nalpha = 0;

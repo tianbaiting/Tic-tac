@@ -134,7 +134,28 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
 
     const std::size_t num_blocks = m_blocks.size();
 
+    // 3NF audit B5 (2026-06-21): compute SHA-256 of the grid arrays once,
+    // outside the parallel block loop. Different grids (different boundaries,
+    // different mappings) produce different hashes, so the cache cannot
+    // wrongly reuse blocks computed on an older grid.
+    std::string p_grid_hash;
+    std::string q_grid_hash;
 #if TICTAC_USE_NEW_CACHE_LAYER
+    {
+        // Hash the binary representation: (N+1) doubles covering [0, p_max].
+        const std::size_t p_bytes = (m_Np + 1) * sizeof(double);
+        const std::size_t q_bytes = (m_Nq + 1) * sizeof(double);
+        p_grid_hash = tictac::cache::hash_full_raw(
+            reinterpret_cast<const unsigned char*>(p_WP_array), p_bytes);
+        q_grid_hash = tictac::cache::hash_full_raw(
+            reinterpret_cast<const unsigned char*>(q_WP_array), q_bytes);
+    }
+#endif
+
+#if TICTAC_USE_NEW_CACHE_LAYER
+    // 3NF audit B5 (2026-06-21): added c_1, c_3, c_4 + grid hashes to the key
+    // so caches cannot be wrongly reused across different Hamiltonians or
+    // momentum grids.
     auto build_w1_key_for_block = [&](int a_r, int a_c) {
         tictac::cache::W1Key k{};
         k.schema_version  = tictac::cache::W1_SCHEMA_VERSION;
@@ -151,6 +172,10 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         k.c_D             = run_parameters.c_D;
         k.c_E             = run_parameters.c_E;
         k.Lambda_3NF      = run_parameters.Lambda_3NF;
+        // NEW (B5): c_1, c_3, c_4 from the model itself (default 0 for null/stub).
+        k.c_1             = tnf.lec_c1_gev();
+        k.c_3             = tnf.lec_c3_gev();
+        k.c_4             = tnf.lec_c4_gev();
         // Today every supported chiral 3NF uses a Gaussian regulator; if a
         // different regulator family is added later, expose it through
         // three_nucleon_force_model and source it here instead of hardcoding.
@@ -161,6 +186,10 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
         k.Np_per_WP_W1       = Np_quad;
         k.Nq_per_WP_W1       = Nq_quad;
+        // NEW (B5): SHA-256 of the binary representation of the grid arrays.
+        // Computed once outside the block loop and captured by reference.
+        k.p_grid_hash        = p_grid_hash;
+        k.q_grid_hash        = q_grid_hash;
         return k;
     };
 #endif
@@ -169,7 +198,8 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
     for (std::size_t blk = 0; blk < num_blocks; ++blk) {
         const int a_r = m_blocks[blk].first;
         const int a_c = m_blocks[blk].second;
-        float*    slab = &m_data[blk * per_block];
+        // 3NF audit B6: storage is now double (was float).
+        double*   slab = &m_data[blk * per_block];
 
 #if TICTAC_USE_NEW_CACHE_LAYER
         tictac::cache::W1Key k = build_w1_key_for_block(a_r, a_c);
@@ -180,7 +210,7 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
             && (size_t)out_block.Np == m_Np
             && out_block.data.size() == per_block)
         {
-            std::memcpy(slab, out_block.data.data(), per_block * sizeof(float));
+            std::memcpy(slab, out_block.data.data(), per_block * sizeof(double));
             continue;
         }
 #endif
@@ -227,7 +257,7 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
 
                         const double bin_norm = inv_sqrt_dp_r * inv_sqrt_dq_r * inv_sqrt_dp_c * inv_sqrt_dq_c;
                         slab[((iqr * m_Nq + iqc) * m_Np + ipr) * m_Np + ipc]
-                            = (float)(accum * bin_norm * inv_hbarc5);
+                            = accum * bin_norm * inv_hbarc5;
                     }
                 }
             }

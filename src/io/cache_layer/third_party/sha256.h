@@ -20,4 +20,7 @@ void finalize(Ctx& ctx, uint8_t hash[32]);
 // Convenience: returns 64-char lowercase hex.
 std::string hex_digest(const std::string& message);
 
+// 3NF audit B5: hash raw bytes (for hashing binary grid arrays).
+std::string hex_digest_raw(const uint8_t* data, size_t len);
+
 }  // namespace tictac::cache::sha256

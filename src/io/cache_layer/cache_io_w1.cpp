@@ -50,8 +50,9 @@ void write_w1_h5(const std::string& path,
     hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     if (file < 0) { std::cerr << "write_w1_h5: failed " << path << "\n"; return; }
 
+    // 3NF audit B6 (2026-06-21): changed from H5T_NATIVE_FLOAT to DOUBLE.
     hsize_t dims4[4] = { (hsize_t)in.Nq, (hsize_t)in.Nq, (hsize_t)in.Np, (hsize_t)in.Np };
-    H5LTmake_dataset(file, "/data", 4, dims4, H5T_NATIVE_FLOAT, in.data.data());
+    H5LTmake_dataset(file, "/data", 4, dims4, H5T_NATIVE_DOUBLE, in.data.data());
 
     write_int_attr(file, "Nq", in.Nq);
     write_int_attr(file, "Np", in.Np);
@@ -95,8 +96,9 @@ bool read_w1_h5(const std::string& path,
     read_int_attr(file, "a_r", ar); read_int_attr(file, "a_c", ac);
     out->Nq = Nq; out->Np = Np; out->a_r = ar; out->a_c = ac;
     size_t total = (size_t)Nq * Nq * Np * Np;
-    out->data.assign(total, 0.0f);
-    if (H5LTread_dataset(file, "/data", H5T_NATIVE_FLOAT, out->data.data()) < 0) {
+    // 3NF audit B6: storage is now double.
+    out->data.assign(total, 0.0);
+    if (H5LTread_dataset(file, "/data", H5T_NATIVE_DOUBLE, out->data.data()) < 0) {
         if (miss_reason) *miss_reason = "corrupt";
         H5Fclose(file); return false;
     }

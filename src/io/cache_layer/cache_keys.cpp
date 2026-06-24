@@ -61,11 +61,16 @@ bool W1Key::operator==(const W1Key& o) const {
         && quantize_1e9(c_D) == quantize_1e9(o.c_D)
         && quantize_1e9(c_E) == quantize_1e9(o.c_E)
         && quantize_1e9(Lambda_3NF) == quantize_1e9(o.Lambda_3NF)
+        && quantize_1e9(c_1) == quantize_1e9(o.c_1)
+        && quantize_1e9(c_3) == quantize_1e9(o.c_3)
+        && quantize_1e9(c_4) == quantize_1e9(o.c_4)
         && regulator_kind == o.regulator_kind
         && quantize_1e9(chebyshev_s) == quantize_1e9(o.chebyshev_s)
         && quantize_1e9(chebyshev_t) == quantize_1e9(o.chebyshev_t)
         && tensor_force == o.tensor_force
         && isospin_breaking_1S0 == o.isospin_breaking_1S0
+        && p_grid_hash == o.p_grid_hash
+        && q_grid_hash == o.q_grid_hash
         && Np_per_WP_W1 == o.Np_per_WP_W1
         && Nq_per_WP_W1 == o.Nq_per_WP_W1;
 }
@@ -102,12 +107,17 @@ std::string canonical_json(const W1Key& k) {
        << ",\"P_3N\":" << k.P_3N
        << ",\"a_c\":" << k.a_c
        << ",\"a_r\":" << k.a_r
+       << ",\"c_1\":" << fmt_double_q(k.c_1)
+       << ",\"c_3\":" << fmt_double_q(k.c_3)
+       << ",\"c_4\":" << fmt_double_q(k.c_4)
        << ",\"c_D\":" << fmt_double_q(k.c_D)
        << ",\"c_E\":" << fmt_double_q(k.c_E)
        << ",\"chebyshev_s\":" << fmt_double_q(k.chebyshev_s)
        << ",\"chebyshev_t\":" << fmt_double_q(k.chebyshev_t)
        << ",\"isospin_breaking_1S0\":" << (k.isospin_breaking_1S0 ? "true" : "false")
+       << ",\"p_grid_hash\":" << json_escape(k.p_grid_hash)
        << ",\"potential_model\":" << json_escape(k.potential_model)
+       << ",\"q_grid_hash\":" << json_escape(k.q_grid_hash)
        << ",\"regulator_kind\":" << json_escape(k.regulator_kind)
        << ",\"schema_version\":" << k.schema_version
        << ",\"tensor_force\":" << (k.tensor_force ? "true" : "false")
@@ -120,6 +130,11 @@ std::string canonical_json(const W1Key& k) {
 
 std::string hash_full(const P123Key& k) { return sha256::hex_digest(canonical_json(k)); }
 std::string hash_full(const W1Key&   k) { return sha256::hex_digest(canonical_json(k)); }
+
+// 3NF audit B5: SHA-256 over raw bytes (for hashing grid arrays).
+std::string hash_full_raw(const unsigned char* data, std::size_t nbytes) {
+    return sha256::hex_digest_raw(data, nbytes);
+}
 
 std::string hash_short(const std::string& full_hex) {
     return full_hex.substr(0, 6);

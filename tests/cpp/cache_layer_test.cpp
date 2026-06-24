@@ -40,7 +40,7 @@ static P123Key make_p123_key() {
 
 static W1Key make_w1_key() {
     W1Key k{};
-    k.schema_version = 3;
+    k.schema_version = 4;  // B5: bumped 3 → 4
     k.potential_model = "N2LOopt";
     k.tnf_model = "chiral_N2LO";
     k.Np_WP = 30; k.Nq_WP = 30;
@@ -48,11 +48,16 @@ static W1Key make_w1_key() {
     k.two_J_3N = 1; k.P_3N = 1;
     k.c_D = -0.20; k.c_E = -0.205;
     k.Lambda_3NF = 500.0;
+    // B5: NEW fields — c_1, c_3, c_4 must be initialised (defaults break
+    // aggregator-style usage). N2LOopt values from constants.h.
+    k.c_1 = -0.86; k.c_3 = -3.40; k.c_4 = 0.0;
     k.regulator_kind = "gaussian";
     k.a_r = 0; k.a_c = 0;
     k.chebyshev_s = 1.5; k.chebyshev_t = 1.0;
     k.tensor_force = true;
     k.isospin_breaking_1S0 = false;
+    // B5: NEW grid hashes — empty disables the check (back-compat).
+    k.p_grid_hash = ""; k.q_grid_hash = "";
     k.Np_per_WP_W1 = 1; k.Nq_per_WP_W1 = 1;
     return k;
 }
@@ -343,8 +348,8 @@ void test_cache_layer_w1_roundtrip() {
     auto k = make_w1_key();
     tictac::cache::W1Block b{};
     b.Nq = 2; b.Np = 2; b.a_r = 0; b.a_c = 0;
-    b.data.assign(b.Nq*b.Nq*b.Np*b.Np, 0.0f);
-    for (size_t i = 0; i < b.data.size(); ++i) b.data[i] = (float)(i + 1);
+    b.data.assign(b.Nq*b.Nq*b.Np*b.Np, 0.0);
+    for (size_t i = 0; i < b.data.size(); ++i) b.data[i] = static_cast<double>(i + 1);
 
     tictac::cache::store_w1(k, b);
 

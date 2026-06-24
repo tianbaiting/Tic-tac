@@ -104,6 +104,12 @@ public:
 	// c_4 is not implemented.
 	virtual bool c4_implemented() const { return false; }
 
+	// LEC accessors (GeV⁻¹ units, matching run_params convention) for cache key.
+	// See three_nucleon_force_model.h for the rationale (3NF audit B5).
+	double lec_c1_gev() const override { return m_c1 * 1000.0 / hbarc; }
+	double lec_c3_gev() const override { return m_c3 * 1000.0 / hbarc; }
+	double lec_c4_gev() const override { return m_c4_input; }  // raw input value (GeV⁻¹)
+
 	// Status string for run-metadata output.
 	virtual std::string capabilities() const {
 		return std::string("c_E=implemented, c_D=implemented, ")

@@ -66,6 +66,18 @@ public:
 							  double p_r, double q_r,
 							  double p_c, double q_c,
 							  const pw_3N_statespace& pw_states) const { return 0.0; }
+
+	// [EN] LEC accessors used by W1_PW_cache to build a complete cache key
+	// (3NF audit B5: previously the cache key omitted c_1, c_3, c_4, allowing
+	// two runs with different 2NF (e.g. N2LOopt vs Idaho_N3LO) but identical
+	// c_D, c_E, Λ to wrongly reuse the cached W^(1) matrix elements).
+	// Default implementations return 0 (null/stub models). Real chiral models
+	// override these to expose their internal LECs in **GeV⁻¹** units
+	// (matching the convention used in run_params and constants.h).
+	// / [CN] LEC 访问器，供 W1_PW_cache 构造完整 cache key（3NF 审计 B5）。
+	virtual double lec_c1_gev() const { return 0.0; }
+	virtual double lec_c3_gev() const { return 0.0; }
+	virtual double lec_c4_gev() const { return 0.0; }
 };
 
 #endif // THREE_NUCLEON_FORCE_MODEL_H
