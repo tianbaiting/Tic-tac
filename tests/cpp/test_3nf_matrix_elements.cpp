@@ -264,6 +264,86 @@ void test_golden_cE_LEC_additivity() {
 }
 
 // =============================================================================
+// DIRECT SPIN-ISOSPIN BASIS ENUMERATION (Phase 2 independence requirement).
+// =============================================================================
+// Derives ⟨(½½)T | τ_2·τ_3 | (½½)T⟩ by an explicit 4×4 Pauli matrix sum,
+// INDEPENDENT of both the closed form 2T(T+1)−3 and the SymPy JSON oracle.
+// This is the "direct enumeration" the task demands: build τ_2·τ_3 in the
+// uncoupled |m_2, m_3⟩ basis, rotate to the coupled |T,T_z⟩ basis via CG, and
+// read off the eigenvalue. Then compare to the C++ recoupling_3nf_contact_cE.
+//
+// CONVENTION: τ_k are the Pauli matrices themselves (τ = σ, NOT σ/2) — this is
+// the chiral-EFT isospin convention, giving τ_i·τ_j eigenvalues -3 (T=0) and
+// +1 (T=1), matching the production closed form 2T(T+1)-3.
+// =============================================================================
+#include <complex>
+static double pauli_tau23_eigenvalue(int T_pair) {
+    // Pauli matrices τ = σ (NOT σ/2), basis |+⟩=(1,0), |−⟩=(0,1), m = ±½.
+    const std::complex<double> I(0, 1);
+    const std::complex<double> tx[2][2] = {{0,1},{1,0}};
+    const std::complex<double> ty[2][2] = {{0,-I},{I,0}};
+    const std::complex<double> tz[2][2] = {{1,0},{0,-1}};
+    // 4×4 uncoupled basis |m_2, m_3⟩, index = 2*m2 + m3 (m: 0=+½, 1=−½).
+    std::complex<double> M[4][4];
+    for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 4; ++j) {
+        int i2 = i / 2, i3 = i % 2, j2 = j / 2, j3 = j % 2;
+        M[i][j] = tx[i2][j2]*tx[i3][j3] + ty[i2][j2]*ty[i3][j3] + tz[i2][j2]*tz[i3][j3];
+    }
+    // Coupled basis |T=0,T_z=0⟩ = (|+−⟩ − |−+⟩)/√2  (indices 1, 2),
+    //            |T=1,T_z=0⟩ = (|+−⟩ + |−+⟩)/√2.
+    if (T_pair == 0) {
+        std::complex<double> psi[4] = {0, 1.0/std::sqrt(2.0), -1.0/std::sqrt(2.0), 0};
+        std::complex<double> exp(0,0);
+        for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j)
+            exp += std::conj(psi[i]) * M[i][j] * psi[j];
+        return exp.real();  // must be real
+    } else {
+        std::complex<double> psi[4] = {0, 1.0/std::sqrt(2.0), 1.0/std::sqrt(2.0), 0};
+        std::complex<double> exp(0,0);
+        for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j)
+            exp += std::conj(psi[i]) * M[i][j] * psi[j];
+        return exp.real();
+    }
+}
+
+void test_cE_direct_pauli_enumeration_3S1() {
+    // 3S1: pair T=0 (np pair in deuteron-like channel). τ_2·τ_3 must be -3.
+    double tau23 = pauli_tau23_eigenvalue(0);
+    check_close("direct Pauli τ_2·τ_3 (T_pair=0) == -3", tau23, -3.0, 1e-12);
+}
+
+void test_cE_direct_pauli_enumeration_1S0() {
+    // 1S0: pair T=1 (pp/nn pair). τ_2·τ_3 must be +1.
+    double tau23 = pauli_tau23_eigenvalue(1);
+    check_close("direct Pauli τ_2·τ_3 (T_pair=1) == +1", tau23, +1.0, 1e-12);
+}
+
+void test_cE_direct_enumeration_matches_recoupling() {
+    // The direct Pauli derivation must agree with recoupling_3nf_contact_cE
+    // for both pair isospins. This is the Jj-coupled vs direct-enumeration
+    // consistency check the task requires.
+    pw_3N_statespace pw = make_test_pw_states();
+    // 3S1: L=0,S=1,J=1,T=0,l=0,2j=1,2J3N=1,2T3N=1
+    int a_3S1 = find_alpha(pw, 0, 1, 1, 0, 0, 1, 1, 1);
+    int a_1S0 = find_alpha(pw, 0, 0, 0, 1, 0, 1, 1, 1);
+    if (a_3S1 >= 0) {
+        double r = recoupling_3nf_contact_cE(
+            0,1,1,0, 0,1,1,  0,1,1,0, 0,1, 1);
+        check_close("direct Pauli == recoupling_3nf_contact_cE (T=0)",
+                    pauli_tau23_eigenvalue(0), r, 1e-12);
+    } else { g_failures++; }
+    if (a_1S0 >= 0) {
+        double r = recoupling_3nf_contact_cE(
+            0,0,0,1, 0,1,1,  0,0,0,1, 0,1, 1);
+        check_close("direct Pauli == recoupling_3nf_contact_cE (T=1)",
+                    pauli_tau23_eigenvalue(1), r, 1e-12);
+    } else { g_failures++; }
+}
+
+// =============================================================================
 // C_4 HARD-BLOCK TESTS (3NF audit B2)
 // =============================================================================
 // Per docs/3nf_audit_2026-06-21.md §B2, the c_4 term (Epelbaum 2002 eq. 2.2-2.3)
@@ -393,6 +473,11 @@ int main() {
     test_golden_cE_ratio_3S1_over_1S0();
     test_golden_cE_hermiticity();
     test_golden_cE_LEC_additivity();
+
+    std::printf("\n--- direct Pauli-matrix enumeration (Phase 2 independence) ---\n");
+    test_cE_direct_pauli_enumeration_3S1();
+    test_cE_direct_pauli_enumeration_1S0();
+    test_cE_direct_enumeration_matches_recoupling();
 
     std::printf("\n--- c_4 hard-block tests (Phase 1 fail-closed) ---\n");
     test_name_is_approximate();
