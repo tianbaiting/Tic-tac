@@ -433,10 +433,11 @@ void show_usage(){
 			  << std::endl;
 
 	std::cout << "three_nucleon_force:      Sets which three-nucleon force (3NF) model is used.\n"
-			  << "                          Supported: none, chiral_N2LO, gaussian_stub.\n"
+			  << "                          Supported: none, chiral_N2LO_c1c3cDcE_approx, gaussian_stub.\n"
+			  << "                          ('chiral_N2LO' is rejected: c_4 is not implemented; see docs/three_nf_equation_contract.md §8.)\n"
 			  << "                          When set to \"none\", the solver reproduces the 2NF-only\n"
 			  << "                          code path exactly.\n"
-			  << "Example:                  three_nucleon_force=chiral_N2LO\n"
+			  << "Example:                  three_nucleon_force=chiral_N2LO_c1c3cDcE_approx\n"
 			  << seperationLine
 			  << std::endl;
 

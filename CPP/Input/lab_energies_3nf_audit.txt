@@ -1,0 +1,8 @@
+# Energy file for 3NF on/off apples-to-apples audit
+# 10/35/67 match the existing 3NF-on run (lab_energies_miller_gate2.txt)
+# 135/190 are extra 3NF-off points closer to the ApnGemini 190 MeV/u benchmark
+10
+35
+67
+135
+190

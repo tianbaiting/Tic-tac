@@ -6,6 +6,7 @@
 #include "spin_isospin_algebra.h"
 #include "chiral_3nf_pw_kernels.h"
 #include "../utils/chiral_3nf_recoupling.h"
+#include "../utils/error_management.h"
 #include "gauss_legendre.h"
 #include <cmath>
 #include <cstdio>
@@ -18,12 +19,20 @@
 //   2. One-pion exchange contact (1PE-CT): proportional to c_D
 //   3. Three-nucleon contact (CT): proportional to c_E
 //
-// **IMPLEMENTED TERMS**: c_E, c_D, c₁, c₃. The c₄ term
+// **IMPLEMENTED TERMS**: c_E, c_D, c₁, c₃ ONLY. The c₄ term
 // (Epelbaum 2002 eq. 2.2-2.3, isospin τ₁·(τ₂×τ₃), momentum cross-product
-// σ·(qᵢ×qⱼ)) is **NOT implemented**. If c₄ ≠ 0 the constructor prints a strong
-// warning to stderr and name() returns "chiral_N2LO_without_c4" so downstream
-// metadata honestly records the incompleteness. See B2 in
-// docs/3nf_audit_2026-06-21.md.
+// σ·(qᵢ×qⱼ)) is **NOT implemented**. The model is therefore an APPROXIMATION
+// to the full N²LO 3NF and is honestly named `chiral_N2LO_c1c3cDcE_approx`
+// (see docs/three_nf_equation_contract.md §8).
+//
+// **FAIL-CLOSED CONTRACT** (fix/3nf-physics-contract Phase 1):
+//   * The constructor REJECTS c₄ ≠ 0 by raising a fatal error. The c₄ term
+//     must NEVER be silently dropped — passing a non-zero c₄ means the user
+//     expects a full N²LO 3NF, which this model is not.
+//   * The factory `three_nucleon_force_model::fetch` rejects the string
+//     `chiral_N2LO` (which would claim a complete N²LO 3NF) and only accepts
+//     `chiral_N2LO_c1c3cDcE_approx` (plus the legacy alias `chiral_N2LO_without_c4`).
+//   * `c4_implemented()` always returns false.
 //
 // W^(1) is the spectator-1 decomposition: particle 1 is the spectator, particles 2 and 3
 // form the interacting pair. The full 3NF is recovered via W = (1+P+P²) W^(1) where
@@ -35,8 +44,9 @@
 //   Witała et al., PRC 77 (2008) 034004
 //   Hebeler et al., PRC 91 (2015) 044001
 //
-// / [CN] 手征 N2LO 三体核力：手征有效场论中领头阶的 3NF。已实现：c_E, c_D, c₁, c₃。
-// c₄ 项未实现——构造时会发警告并改名模型为 chiral_N2LO_without_c4。
+// / [CN] 手征 N2LO 三体核力。已实现：c_E, c_D, c₁, c₃（近似模型，名为
+// chiral_N2LO_c1c3cDcE_approx）。c₄ 项未实现——构造时若 c₄≠0 将抛出致命错误，
+// 绝不静默丢弃。
 class chiral_N2LO_3NF : public three_nucleon_force_model
 {
 public:
@@ -55,53 +65,50 @@ public:
 		, m_mpi_fm(mpi / hbarc)                       // Pion mass in fm⁻¹
 		, m_c1(c1 * hbarc / 1000.0)                   // c₁ LEC: GeV⁻¹ → fm
 		, m_c3(c3 * hbarc / 1000.0)                   // c₃ LEC: GeV⁻¹ → fm
-		, m_c4(c4 * hbarc / 1000.0)                   // c₄ LEC: GeV⁻¹ → fm — NOT IMPLEMENTED, hard-blocked
-		, m_c4_input(c4)                              // raw c₄ value for warning/metadata
-		, m_c4_blocked(false)
+		, m_c4(c4 * hbarc / 1000.0)                   // c₄ LEC: GeV⁻¹ → fm — NOT IMPLEMENTED
+		, m_c4_input(c4)                              // raw c₄ value (GeV⁻¹) for the error message
 		, m_gl_x(N_GL)
 		, m_gl_w(N_GL)
 	{
 		// [EN] Pre-compute Gauss-Legendre nodes and weights on [-1, +1].
-		// These are reused for every W1_1pe_contact and W1_2pe call.
-		// The gauss() function from src/utils/gauss_legendre.h fills arrays
-		// of length N_GL with the standard GL abscissae and weights.
 		gauss(m_gl_x.data(), m_gl_w.data(), N_GL);
 
-		// [EN] c_4 hard-block (3NF audit B2). The c_4 term carries the
-		// isospin operator τ_1·(τ_2×τ_3) which is imaginary in the
-		// T_3N=½ basis and requires a 5D partial-wave projection that
-		// is not yet implemented. We do NOT silently drop it.
-		// / [CN] c_4 硬阻断（3NF 审计 B2）。c_4 项的同位旋 τ₁·(τ₂×τ₃) 在
-		// T_3N=½ 基中为虚，5D PWD 尚未实现，绝不静默丢弃。
+		// [EN] FAIL-CLOSED on c₄ (Phase 1, fix/3nf-physics-contract). The c₄
+		// 2PE cross-product term (Epelbaum 2002 eq. 2.2-2.3,
+		// τ₁·(τ₂×τ₃) × σ·(qᵢ×qⱼ)) is NOT implemented in this model. A non-zero
+		// c₄ is REJECTED here — it must never be silently dropped, because the
+		// user passing c₄ ≠ 0 expects a complete N²LO 3NF that this model is
+		// not. The full c₄ PWD requires the 5D angular integral (Golak 2010)
+		// with the τ·(τ×τ) isospin recoupling and the (σ×σ)·(q×q) momentum
+		// cross-product; see docs/three_nf_equation_contract.md §8 and
+		// docs/3nf_audit_2026-06-21.md §B2 for the implementation plan.
+		// / [CN] c₄ 硬阻断：c₄ 项未实现，c₄≠0 时抛出致命错误，绝不静默丢弃。
 		if (m_c4 != 0.0) {
-			static bool warned = false;  // one-time warning
-			if (!warned) {
-				std::fprintf(stderr,
-					"*** chiral_N2LO_3NF WARNING: c4 = %.6f GeV^-1 was supplied "
-					"but the c_4 term (Epelbaum 2002 eq. 2.2-2.3, tau_1.(tau_2 x tau_3)) "
-					"is NOT IMPLEMENTED in this build. Matrix elements are computed "
-					"with c_E, c_D, c_1, c_3 only; the c_4 contribution is set to ZERO. "
-					"Model name reported as 'chiral_N2LO_without_c4'. "
-					"See docs/3nf_audit_2026-06-21.md §B2 for the implementation plan.\n",
-					c4);
-				warned = true;
-			}
-			m_c4_blocked = true;
+			std::fprintf(stderr,
+				"*** chiral_N2LO_3NF FATAL: c4 = %.6f GeV^-1 was supplied but the c_4 term "
+				"(Epelbaum 2002 eq. 2.2-2.3, tau_1.(tau_2 x tau_3) x sigma.(q_i x q_j)) "
+				"is NOT IMPLEMENTED in this model (chiral_N2LO_c1c3cDcE_approx). "
+				"Refusing to silently drop c_4 — this would produce a wrong physics result. "
+				"Either set c4=0 (and use only c_E, c_D, c_1, c_3) or implement the c_4 PWD. "
+				"See docs/three_nf_equation_contract.md §8.\n", c4);
+			raise_error("chiral_N2LO_3NF constructed with non-zero c_4 (not implemented). "
+			            "Set c4=0 for the c1/c3/cD/cE approximation; see "
+			            "docs/three_nf_equation_contract.md §8.");
 		}
 	}
 
 	bool enabled() const override {
-		// c_4 alone does NOT enable the model — it would give no contribution.
+		// c_4 is rejected at construction, so it cannot enable the model.
 		return m_c_D != 0.0 || m_c_E != 0.0 || m_c1 != 0.0 || m_c3 != 0.0;
 	}
 
 	std::string name() const override {
-		// Honest name: when c_4 ≠ 0, reflect that it's been dropped.
-		return m_c4_blocked ? "chiral_N2LO_without_c4" : "chiral_N2LO";
+		// Honest name: this is the c1/c3/cD/cE approximation, NOT the full N²LO 3NF.
+		return "chiral_N2LO_c1c3cDcE_approx";
 	}
 
 	// True iff every N²LO term is implemented. Currently always false because
-	// c_4 is not implemented.
+	// c_4 is not implemented (and rejected at construction).
 	virtual bool c4_implemented() const { return false; }
 
 	// LEC accessors (GeV⁻¹ units, matching run_params convention) for cache key.

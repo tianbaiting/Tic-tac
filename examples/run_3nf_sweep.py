@@ -7,10 +7,10 @@ Purpose:
 
 The three configurations:
   1) no_3nf     — three_nucleon_force=none (reference, must match 2NF baseline)
-  2) zero_lec   — three_nucleon_force=chiral_N2LO with c_D=c_E=0 (sanity: W^(1)
+  2) zero_lec   — three_nucleon_force=chiral_N2LO_c1c3cDcE_approx with c_D=c_E=0 (sanity: W^(1)
                   from c_i still nonzero but small; reduces to pure 2NF only when
                   the 2NF model also has c1=c3=c4=0, e.g. LO_internal)
-  3) witala     — three_nucleon_force=chiral_N2LO with Witala typical LECs
+  3) witala     — three_nucleon_force=chiral_N2LO_c1c3cDcE_approx with Witala typical LECs
                   (c_D=-0.20, c_E=-0.205, Λ_3NF=500 MeV; PRC 77 (2008) 034004)
 
 Shared P123 cache:

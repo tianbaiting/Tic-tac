@@ -39,7 +39,7 @@ parameter_file=none
 PSI_start=-1
 PSI_end=-1
 
-three_nucleon_force=chiral_N2LO
+three_nucleon_force=chiral_N2LO_c1c3cDcE_approx
 c_D=-0.20
 c_E=-0.205
 Lambda_3NF=500.0
