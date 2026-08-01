@@ -120,4 +120,38 @@ void CPVC_col_calc_test(size_t   Nalpha,
 						size_t*  P123_sparse_col_array,
 						size_t   P123_sparse_dim);
 
+// [EN] Made visible (forward-declared) for tests/cpp/test_3nf_operator_oracle.cpp —
+// the Phase 0 finite-dimensional operator oracle needs to call the production
+// column / row kernel builders directly with mock WP arrays, to verify that
+// the algebra assembled in solve_faddeev.cpp equals C^T·(P·V + W^(1)·(1+P))·C.
+// See docs/three_nf_equation_contract.md §6. / [CN] 为 Phase 0 算符级 oracle 测试前向声明，
+// 使其可用 mock WP 数组直接调用生产列/行核构造函数，验证算符代数。
+void calculate_CPVC_col(double*  col_array,
+					    int* 	 row_to_nnz_array,
+					    int* 	 nnz_to_row_array,
+					    size_t&  num_nnz,
+					    size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
+					    size_t   Nalpha,      size_t Nq_WP,   size_t Np_WP,
+					    double** CT_RM_array,
+					    double** VC_CM_array,
+					    double*  P123_val_array,
+					    int*     P123_row_array,
+					    size_t*  P123_col_array,
+					    size_t   P123_dim,
+					    const tnf_kernel_context& tnf_ctx);
+
+void calculate_all_CPVC_rows(double*  row_arrays,
+							 int*	  q_com_idx_array,	  size_t num_q_com,
+					   		 int*     deuteron_idx_array, size_t num_deuteron_states,
+							 size_t   Nalpha,
+							 size_t   Nq_WP,
+							 size_t   Np_WP,
+							 double** CT_RM_array,
+							 double** VC_CM_array,
+							 double*  P123_val_array,
+							 int*     P123_row_array,
+							 size_t*  P123_col_array,
+							 size_t   P123_dim,
+							 const tnf_kernel_context& tnf_ctx);
+
 #endif // SOLVE_FADDEEV_H
