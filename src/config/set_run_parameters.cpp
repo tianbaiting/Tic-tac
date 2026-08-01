@@ -724,10 +724,15 @@ void set_run_parameters(int& argc, char* argv[], run_params& run_parameters){
 					exit(-1);
 				}
 			}
-			else if (arg.substr(arg_size-4) == ".txt"){
-				/* Read input list and set input variables specified */
-				use_input_list(run_parameters, arg);
-			}
+			// [EN] Check key=value BEFORE the .txt-suffix test, so that an inline
+			// override like `energy_input_file=CPP/Input/lab_energies.txt` (whose
+			// value ends in .txt) is parsed as a key=value pair and not mistaken
+			// for an input-list file. A pure filename arg (no '=') like
+			// `input.txt` still falls through to the .txt branch below.
+			// (fix/3nf-physics-contract Phase 7: this unblocks the regression
+			// test, which needs to pass the energy file via inline override.)
+			// / [CN] 先检查 key=value 再检查 .txt 后缀，避免
+			// energy_input_file=...txt 被误当作输入列表文件。
 			else if (arg.find(delimiter) != std::string::npos){
 				
 				option = arg.substr(0, arg.find(delimiter));
@@ -742,6 +747,10 @@ void set_run_parameters(int& argc, char* argv[], run_params& run_parameters){
 				if (valid_option_found==false){
 					unrecognised_option(arg);
 				}
+			}
+			else if (arg_size >= 4 && arg.substr(arg_size-4) == ".txt"){
+				/* Read input list and set input variables specified */
+				use_input_list(run_parameters, arg);
 			}
 			else{
 				unrecognised_option(arg);
@@ -761,6 +770,23 @@ void set_run_parameters(int& argc, char* argv[], run_params& run_parameters){
 	}
 	if ( run_parameters.two_J_3N_max%2==0 ||  run_parameters.two_J_3N_max<=0 ){
 		raise_error("Cannot have even two_J_3N_max!");
+	}
+
+	// [EN] w1_scale debug-only guard (fix/3nf-physics-contract Phase 5).
+	// w1_scale is a DIAGNOSTIC fault-injection knob that scales the entire
+	// W^(1) 3NF contribution before adding it to the kernel. It MUST be 1.0
+	// in any production run — using it to 'fix' a normalization or tune a
+	// curve to a reference is contract-violating (see
+	// docs/three_nf_equation_contract.md §8). Print a strong warning when it
+	// is not 1.0. / [CN] w1_scale 仅为诊断注入旋钮，生产运行必须为 1.0。
+	if (run_parameters.w1_scale != 1.0) {
+		std::fprintf(stderr,
+			"*** WARNING: w1_scale = %.6f (NOT 1.0). This is a DEBUG-ONLY "
+			"fault-injection knob on the W^(1) 3NF contribution. Running with "
+			"w1_scale != 1.0 produces PHYSICALLY WRONG 3NF matrix elements and "
+			"MUST NOT be used to fit a reference curve or fix a normalization. "
+			"See docs/three_nf_equation_contract.md §8 (forbidden fixes).\n",
+			run_parameters.w1_scale);
 	}
 
 	/* Print system run parameters */
