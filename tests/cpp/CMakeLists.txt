@@ -92,6 +92,31 @@ target_include_directories(test_3nf_operator_oracle PRIVATE
 target_link_libraries(test_3nf_operator_oracle ${GSL_LIBRARIES})
 add_test(NAME 3nf_operator_oracle COMMAND test_3nf_operator_oracle)
 
+# Phase 3 oracle driver: prints production W1_element for the independent
+# Python angular oracle (tools/3nf_oracle/angular_oracle.py). NOT a test — a
+# thin wrapper around chiral_N2LO_3NF::W1_element so the oracle can compare
+# against the real production code without re-transcribing the formula.
+add_executable(print_w1_element
+    ${CMAKE_SOURCE_DIR}/tools/3nf_oracle/print_w1_element.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/three_nucleon_force_model.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/chiral_3nf_recoupling.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
+)
+target_include_directories(print_w1_element PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/interactions
+    ${CMAKE_SOURCE_DIR}/src/core/state_space
+    ${CMAKE_SOURCE_DIR}/src/utils
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(print_w1_element ${GSL_LIBRARIES})
+set_target_properties(print_w1_element PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools/3nf_oracle)
+
 # Resolvent analytic Im parts
 add_executable(resolvent_im_test
     resolvent_im_test.cpp
