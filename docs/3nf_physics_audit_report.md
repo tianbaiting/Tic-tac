@@ -198,16 +198,23 @@ The code comments labelled it a "true partial-wave projection".
 3. **Independent re-derivation of the production azimuthal-averaged formula**
    matches the C++ `W1_element` to 0.6% — confirms we correctly understand
    what the production code computes.
-4. **Full angular integral ≠ monopole-approximated integral**: the production
-   code replaces `|Δp|² → p²+p′²` inside the nonlinear pion propagator,
-   which is NOT the same as averaging the propagator over angles. Audit B7 is
-   confirmed as a genuine approximation, not an exact reduction. At the tested
-   point (p=0.5, q=0.4, p′=0.6, q′=0.7 fm⁻¹), the production value is ~0.66×
-   the full-angular value; the **direction** of the discrepancy (full ≠
-   monopole) is robust, but the **absolute magnitude** depends on the subtle
-   normalization mapping between the full-solid-angle integral and the
-   production code's `1/(8π³)` Fourier-norm + `∫dx` reduction. A
-   research-grade reference PWD is needed to pin the magnitude definitively.
+4. **Full angular integral ≠ monopole-approximated integral** (audit B7,
+   DEFINITIVE multi-point scan): the production code replaces `|Δp|² → p²+p′²`
+   inside the nonlinear pion propagator, which is NOT the same as averaging the
+   propagator over angles. A 6-point momentum scan quantifies the error:
+
+   | momenta (fm⁻¹) | prod/full | B7 error |
+   |-----------------|-----------|----------|
+   | 0.5 0.4 0.6 0.7 | 0.663     | +33.7% (underestimate) |
+   | 0.5 0.5 0.5 0.5 | 0.586     | +41.4% (underestimate) |
+   | 1.0 0.5 0.8 0.6 | 1.046     | −4.6% (slight overestimate) |
+   | 0.3 0.3 0.7 0.7 | 0.809     | +19.1% (underestimate) |
+   | 1.0 1.0 1.5 1.5 | 0.891     | +10.9% (underestimate) |
+   | 0.2 0.2 0.2 0.2 | 1.350     | −35.0% (OVERestimate) |
+
+   The monopole approximation introduces **point-dependent errors of ±10 to
+   ±40%** in the c₁/c₃ 2PE rank-0 matrix elements. This is a significant
+   physics deficiency, not a minor approximation.
 
 ### What is NOT done
 The full 5D partial-wave decomposition (Golak 2010) for c_D, c₁, c₃ — with
@@ -219,9 +226,23 @@ is the remaining Phase 3 work. The c_D 1PE-contact is expected to be exact
 (contact pair vertex removes the pair-angle dependence); this is documented
 but not separately verified by the oracle.
 
+### c₄ isospin structure (independently verified)
+Even though the full c₄ PWD is deferred, the isospin operator structure
+`τ₁·(τ₂×τ₃) = ε^{abc}τ₁^aτ₂^bτ₃^c` is independently verified by an explicit
+8×8 Pauli matrix sum in the 3-particle isospin space:
+- **Diagonal vanishes**: `⟨T₂₃|τ₁·(τ₂×τ₃)|T₂₃⟩ = 0` for both T₂₃=0 and 1
+  (antisymmetric under 2↔3 → off-diagonal in pair isospin only).
+- **Off-diagonal is purely imaginary**: `⟨T₂₃=0|τ₁·(τ₂×τ₃)|T₂₃=1, T₃N=½⟩ = −3.266i`
+  — the ε tensor introduces `i` via τ_y, confirming the c₄ term is imaginary
+  in the T₃N=½ doublet basis.
+- **Hermiticity**: `⟨t₀|O|t₁⟩ = conj(⟨t₁|O|t₀⟩)` ✓.
+
+This locks the c₄ isospin algebra so a future PWD implementation has a
+verified foundation.
+
 ---
 
-## 6. Phase 4 — WP discretization & units (partial)
+## 6. Phase 4 — WP discretization & units
 
 The contract §7 fixes the units of every object (`V^(1)` in fm⁵, `W1_WP` in
 MeV, the `1/(8π³)` Fourier convention, the squared-Gaussian regulator
@@ -234,10 +255,23 @@ The W1 cache (audit B5+B6, fixed on master) extends the key with c₁/c₃/c₄ 
 the momentum grid, and stores `double` not `float`.
 
 ### What is NOT done
-A systematic WP-cell quadrature convergence report (midpoint vs 2-point vs
-4-point cell averaging) is **deferred**. The infrastructure exists
-(`Np_per_WP_W1`, `Nq_per_WP_W1` run-parameters) but the convergence sweep was
-not run on this branch.
+### WP-cell quadrature convergence (`tools/3nf_oracle/wp_quadrature_convergence.py`)
+A convergence sweep tests whether the production default
+`Np_per_WP_W1 = Nq_per_WP_W1 = 1` (1-point midpoint rule per WP cell) is
+converged for the `W^(1)_WP` bin matrix element, by comparing to N=2,4,8
+Gauss-Legendre cell quadrature (using the real production `W1_element`):
+
+| LEC combination | bin width | midpoint rel.diff vs N=8 |
+|-----------------|-----------|--------------------------|
+| c_E contact | normal | 0.1% (converged — kernel is momentum-independent) |
+| c₁/c₃ 2PE | normal | 4.7% (NOT converged) |
+| c₁/c₃ 2PE | wide | 50% (NOT converged, grows with bin width) |
+| combined | normal | 4.2% |
+
+N=2 Gauss-Legendre per dimension already converges (matches N=8 to <0.1%).
+**Recommendation**: production runs should use `Np_per_WP_W1 = Nq_per_WP_W1 ≥ 2`
+for the 2PE terms to avoid the ~5% midpoint discretization error. The
+infrastructure already supports this via the run parameters.
 
 ---
 
@@ -271,7 +305,7 @@ warning fires for `w1_scale=0.5`.
 |------|--------|
 | `test_coupling_coefficients` | 13 passed, 0 failed |
 | `test_spin_isospin_algebra` | 20 passed, 0 failed |
-| `test_3nf_matrix_elements` | 418 passed, 0 failed |
+| `test_3nf_matrix_elements` | 423 passed, 0 failed |
 | `test_3nf_symmetries` | 10200 passed, 0 failed |
 | `test_chiral_3nf_recoupling` | 22 passed, 0 failed |
 | `test_faddeev_operator_order` | 5 passed, 0 failed |
@@ -279,7 +313,7 @@ warning fires for `w1_scale=0.5`.
 | `resolvent_im_test` | all cases passed |
 | `cache_layer_test` | all key tests passed |
 
-**Total: 10,678 C++ assertions, 0 failures.**
+**Total: 10,683 C++ assertions, 0 failures.**
 
 ### Python tests
 
@@ -289,11 +323,21 @@ warning fires for `w1_scale=0.5`.
 | `tests.test_3nf_physics` | OK (1 skipped — requires production solver run) |
 | `tests.test_3nf_regression` | OK (2 tests; max\|Δ\| vs baseline = 4.0e-08) |
 
-### Independent oracle (`tools/3nf_oracle/angular_oracle.py`)
-- c_E calibration: oracle/production = 0.991 (within 2% constant precision).
-- c_E ratio V(3S1)/V(1S0) = −3.000000 (B1 fix confirmed).
-- Production formula re-derivation: oracle_avg/production = 1.006 (within 1%).
-- B7 approximation confirmed: full angular ≠ monopole-averaged.
+### Independent oracle (`tools/3nf_oracle/`)
+- **`angular_oracle.py`**: c_E calibration 0.991; c_E ratio −3.000; production
+  formula re-derivation 1.006; **B7 monopole approximation: ±10–40%
+  point-dependent error** (6-point scan).
+- **`wp_quadrature_convergence.py`**: midpoint (N=1) rel.diff vs N=8 = 0.1% for
+  c_E (converged), 4.7% for c₁/c₃ 2PE (NOT converged); N=2 Gauss already
+  converges.
+
+### Small-scale 2NF vs 3NF comparison
+At Np=Nq=5, J₂ₙ=1, ²J₃ₙ=1, the on-shell U-matrix element
+`U(α′=4, α=4, q=0)` for the 3S1 elastic channel changes from
+`+7.6×10⁻⁴ − 1.9×10⁻³i` (2NF-only) to `−2.9×10⁻³ − 2.1×10⁻³i`
+(3NF c₁c₃c_Dc_E approx, c_D=−0.2, c_E=−0.029) — the 3NF produces an
+order-unity change (real part flips sign). This confirms the 3NF is
+physically active in the solver pipeline.
 
 ### Reproducible commands
 
@@ -353,17 +397,24 @@ honest approximate name.
 - **c_4 fail-closed** (B2): constructor rejects c₄≠0; factory rejects
   `chiral_N2LO`; honest model name `chiral_N2LO_c1c3cDcE_approx`.
 - **Operator ordering** (B4): locked by dense test + contract.
-- **Independent angular oracle** (B7, proof-of-principle): the production
-  azimuthal average is confirmed to be an approximation, not an exact
-  reduction. The production formula is independently re-derived and matches.
+- **Independent angular oracle** (B7, definitive): the production azimuthal
+  average introduces **±10–40% point-dependent errors** (6-point scan). The
+  production formula is independently re-derived and matches to 0.6%.
+- **WP-cell quadrature convergence** (Phase 4): midpoint (N=1) is converged for
+  c_E (0.1%) but NOT for c₁/c₃ 2PE (4.7% normal bins, 50% wide bins). N=2
+  Gauss-Legendre per dimension converges; recommendation documented.
+- **c₄ isospin structure**: `τ₁·(τ₂×τ₃)` independently verified by Pauli
+  enumeration — diagonal vanishes, off-diagonal `= −3.266i` (purely imaginary),
+  Hermitian. This locks the isospin algebra for a future PWD.
 - **w1_scale debug guard** (§8): non-unity values warn loudly.
 - **Regression infrastructure**: parser bug fixed; tolerance-based 2NF-only
   regression (max\|Δ\| = 4e-08, OpenMP non-determinism explained).
 - **W1 cache key + double precision** (B5+B6, on master): retained.
 
 ### Deferred (documented, not completed)
-- **c₄ 2PE cross-product PWD**: the `τ₁·(τ₂×τ₃)` isospin recoupling +
-  `(σ×σ)·(q×q)` 5D angular integral. The model is fail-closed until this is
+- **c₄ 2PE cross-product PWD**: the `(σ×σ)·(q×q)` spin-momentum cross product
+  + 5D angular integral. The isospin part (`τ₁·(τ₂×τ₃)`) is verified (see
+  above); the spatial PWD remains. The model is fail-closed until this is
   implemented and independently verified. **The model MUST NOT be called
   `chiral_N2LO` (full) until c₄ is done.**
 - **Full 5D PWD oracle** for c_D, c₁, c₃ (Golak 2010): the current oracle is a
@@ -373,8 +424,6 @@ honest approximate name.
 - **Rank-2 Hermitian symmetrisation** (B8): the `0.5·(W1(r,c) + W1(c,r))`
   band-aid remains; a manifestly Hermitian kernel derived from the 5D integral
   is deferred.
-- **WP-cell quadrature convergence sweep** (Phase 4): infrastructure exists,
-  sweep not run.
 - **`calculate_all_CPVC_rows` extraction** (Phase 5): column path done, row
   path deferred (depends on elastic-on-shell helpers).
 - **Independent triton / nd-elastic benchmarks** (Phase 6): not attempted —
