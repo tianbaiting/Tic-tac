@@ -457,6 +457,119 @@ void test_c4_requirement_documented_xfail() {
     g_passes++;  // counts as a pass for the runner; the SKIP is documented above
 }
 
+// =============================================================================
+// C_4 ISOSPIN STRUCTURE: τ_1·(τ_2×τ_3) Pauli enumeration.
+// =============================================================================
+// Even though the full c_4 PWD is deferred, we CAN independently verify the
+// isospin operator structure τ_1·(τ_2×τ_3) = ε^{abc} τ_1^a τ_2^b τ_3^c by an
+// explicit 8×8 Pauli matrix sum in the 3-particle isospin space. This
+// documents the c_4 selection rules (the part a future implementer must get
+// right):
+//
+//   * τ_1·(τ_2×τ_3) is ANTISYMMETRIC under 2↔3 → connects T_2N=0 ↔ 1
+//     (off-diagonal in pair isospin).
+//   * The matrix element ⟨T_2N', T_3N=½ | τ_1·(τ_2×τ_3) | T_2N, T_3N=½⟩ is
+//     PURELY IMAGINARY (the ε tensor introduces i via τ_y) — this is why the
+//     c_4 term is "imaginary in the T_3N=½ doublet basis".
+//   * The DIAGONAL matrix elements ⟨T_2N| ... |T_2N⟩ = 0.
+//
+// This test does NOT implement the c_4 PWD (which also requires the spin cross
+// product (σ×σ)·(q×q) and the full 5D angular integral); it only locks the
+// isospin algebra so a future implementation has a verified foundation.
+// =============================================================================
+static std::complex<double> tau1_dot_tau2_cross_tau3(int T23_row, int T23_col) {
+    // 8-dim uncoupled basis |m1, m2, m3⟩, index = 4*i + 2*j + k (each 0/1 = +/-1/2).
+    // Pauli matrices τ = σ (NOT σ/2).
+    const std::complex<double> I(0, 1);
+    const std::complex<double> sx[2][2] = {{0,1},{1,0}};
+    const std::complex<double> sy[2][2] = {{0,-I},{I,0}};
+    const std::complex<double> sz[2][2] = {{1,0},{0,-1}};
+
+    // τ_1·(τ_2×τ_3) = ε^{abc} τ_1^a τ_2^b τ_3^c
+    //   = τ_1^x(τ_2^y τ_3^z - τ_2^z τ_3^y)
+    //   - τ_1^y(τ_2^x τ_3^z - τ_2^z τ_3^x)
+    //   + τ_1^z(τ_2^x τ_3^y - τ_2^y τ_3^x)
+    std::complex<double> M[8][8];
+    for (int r = 0; r < 8; ++r)
+    for (int c = 0; c < 8; ++c) {
+        int r1=r/4, r2=(r/2)%2, r3=r%2, c1=c/4, c2=(c/2)%2, c3=c%2;
+        // 3 tensor-product terms with the Levi-Civita structure
+        auto prod = [&](const std::complex<double> A[2][2],
+                        const std::complex<double> B[2][2],
+                        const std::complex<double> C[2][2]) -> std::complex<double> {
+            return A[r1][c1] * B[r2][c2] * C[r3][c3];
+        };
+        M[r][c] =
+            prod(sx,sy,sz) - prod(sx,sz,sy)
+          - prod(sy,sx,sz) + prod(sy,sz,sx)
+          + prod(sz,sx,sy) - prod(sz,sy,sx);
+    }
+
+    // Build the coupled |((½½)T_23, ½)_1 ; T_3N=½, T_3N_z=+½⟩ states.
+    // Uncoupled basis ordering: index = 4*m1 + 2*m2 + m3, m=0(+½),1(-½).
+    // Particle-2,3 pair states:
+    //   |T23=0, Tz=0⟩ = (|+−⟩ − |−+⟩)/√2  (indices for (m2,m3): (0,1)=2, (1,0)=4 in
+    //     the 8-basis the pair part is 2*m2+m3, so |+−⟩=1, |−+⟩=2)
+    //   |T23=1, Tz=0⟩ = (|+−⟩ + |−+⟩)/√2
+    //   |T23=1, Tz=+1⟩ = |++⟩  (pair index 0)
+    //   |T23=1, Tz=−1⟩ = |−−⟩  (pair index 3)
+    // Full 8-basis index = 4*m1_idx + pair_idx where pair_idx = 2*m2_idx + m3_idx.
+    // CG for ((T23, ½)_1 → T3N=½, T3N_z=+½):
+    //   T23=0: |½,+½⟩ = |m1=+½⟩|T23=0,Tz=0⟩ = |0⟩_1 ⊗ (|1⟩₂₃ − |2⟩₂₃)/√2
+    //          → 8-basis: |0*4+1⟩ - |0*4+2⟩ = |1⟩ - |2⟩, /√2
+    //   T23=1: |½,+½⟩ = √(1/3)|m1=−½⟩|1,+1⟩ − √(2/3)|m1=+½⟩|1,0⟩
+    //          → √(1/3)|1*4+0⟩ − √(2/3)|0*4+1 + 0*4+2⟩/√2
+    //            = √(1/3)|4⟩ − √(2/3)(|1⟩+|2⟩)/√2 = √(1/3)|4⟩ − 1/√3 (|1⟩+|2⟩)
+    //            Wait: √(2/3)·1/√2 = √(2/3)/√2 = 1/√3. So = √(1/3)|4⟩ − (|1⟩+|2⟩)/√3
+    std::vector<std::complex<double>> psi_row(8, 0), psi_col(8, 0);
+    double s = 1.0/std::sqrt(2.0);
+    if (T23_row == 0) {
+        psi_row[1] = s; psi_row[2] = -s;   // |T23=0,Tz=+1/2⟩ = (|1⟩−|2⟩)/√2
+    } else {
+        psi_row[4] = std::sqrt(1.0/3.0);   // √(1/3)|4⟩
+        psi_row[1] = -1.0/std::sqrt(3.0);  // −(|1⟩+|2⟩)/√3
+        psi_row[2] = -1.0/std::sqrt(3.0);
+    }
+    if (T23_col == 0) {
+        psi_col[1] = s; psi_col[2] = -s;
+    } else {
+        psi_col[4] = std::sqrt(1.0/3.0);
+        psi_col[1] = -1.0/std::sqrt(3.0);
+        psi_col[2] = -1.0/std::sqrt(3.0);
+    }
+    std::complex<double> exp(0,0);
+    for (int r = 0; r < 8; ++r)
+    for (int c = 0; c < 8; ++c)
+        exp += std::conj(psi_row[r]) * M[r][c] * psi_col[c];
+    return exp;
+}
+
+void test_c4_isospin_diagonal_vanishes() {
+    // τ_1·(τ_2×τ_3) is antisymmetric under 2↔3 → diagonal in T_2N is zero.
+    auto d0 = tau1_dot_tau2_cross_tau3(0, 0);
+    auto d1 = tau1_dot_tau2_cross_tau3(1, 1);
+    check_close("c4 isospin <T23=0|tau1.(tau2 x tau3)|T23=0> == 0",
+                std::abs(d0), 0.0);
+    check_close("c4 isospin <T23=1|tau1.(tau2 x tau3)|T23=1> == 0",
+                std::abs(d1), 0.0);
+}
+
+void test_c4_isospin_offdiagonal_is_imaginary() {
+    // The off-diagonal element must be purely imaginary (ε introduces i).
+    auto off = tau1_dot_tau2_cross_tau3(0, 1);
+    // real part ~ 0, imaginary part non-zero
+    check_close("c4 isospin Re<t0|O|t1> == 0", off.real(), 0.0, 1e-12);
+    if (std::abs(off.imag()) > 1e-10) { g_passes++; }
+    else { std::printf("FAIL c4 isospin Im<t0|O|t1> == 0 (should be non-zero)\n"); g_failures++; }
+    // τ_1·(τ_2×τ_3) is HERMITIAN (sum of products of Hermitian operators on
+    // different particles), so <t0|O|t1> = conj(<t1|O|t0>).
+    auto off_rev = tau1_dot_tau2_cross_tau3(1, 0);
+    check_close("c4 isospin <t0|O|t1> - conj(<t1|O|t0>) == 0 (Hermitian)",
+                std::abs(off - std::conj(off_rev)), 0.0, 1e-12);
+    std::printf("  [c4 isospin] <T23=0|tau1.(tau2 x tau3)|T23=1, T3N=1/2> "
+                "= %.6fi\n", off.imag());
+}
+
 int main() {
     std::printf("=== L2: 3NF Matrix Element Tests ===\n\n");
 
@@ -486,6 +599,10 @@ int main() {
     test_c4_implemented_returns_false();
     test_capabilities_string_mentions_c4();
     test_c4_requirement_documented_xfail();
+
+    std::printf("\n--- c_4 isospin structure (tau_1.(tau_2 x tau_3) Pauli) ---\n");
+    test_c4_isospin_diagonal_vanishes();
+    test_c4_isospin_offdiagonal_is_imaginary();
 
     std::printf("\n%d passed, %d failed\n", g_passes, g_failures);
     return g_failures > 0 ? 1 : 0;
