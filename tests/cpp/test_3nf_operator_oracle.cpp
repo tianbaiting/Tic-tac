@@ -30,6 +30,7 @@
 #include "type_defs.h"
 #include "make_pw_symm_states.h"
 #include "solve_faddeev.h"
+#include "coupled_channel_transform.h"
 #include "pade_approximant.h"
 #include "three_nucleon_force_model.h"
 #include "w1_pw_cache.h"
@@ -462,6 +463,63 @@ static void test_pointer_table_layout(const DenseMock& m) {
     check_close("VC_CM[a,b][i,j] == (V*C)[bj,ai]: #mismatches",
                 (double)vc_mismatches, 0.0, 0.5);
     check_close("VC_CM layout: max|diff|", vc_max_diff, 0.0);
+}
+
+// =============================================================================
+// Test 2: the production coupled-channel block transform for an actual
+// 3S1--3D1 pair obeys CT_RM[a,b][i,j] = C[b,j; a,i].  The deliberately
+// non-symmetric full C matrix makes the wrong, untransposed orientation fail.
+// =============================================================================
+static void test_real_3S1_3D1_CT_storage() {
+    constexpr int pair_dim = 2 * N_P;
+    const int L[N_ALPHA] = {0, 2};
+    constexpr int J = 1;
+
+    std::vector<double> C(pair_dim * pair_dim);
+    for (int row = 0; row < pair_dim; ++row)
+    for (int col = 0; col < pair_dim; ++col)
+        C[row * pair_dim + col] = 10.0 * (row + 1) + 0.7 * (col + 1)
+                                      + 0.03 * row * col;
+
+    std::vector<double> CT_blocks = C;
+    for (int row = 0; row < pair_dim; ++row)
+    for (int col = row + 1; col < pair_dim; ++col)
+        std::swap(CT_blocks[row * pair_dim + col],
+                  CT_blocks[col * pair_dim + row]);
+    restructure_coupled_matrix_blocks(CT_blocks.data(), N_P);
+
+    int mismatches = 0;
+    int wrong_orientation_coincidences = 0;
+    double max_diff = 0.0;
+    for (int alpha_r = 0; alpha_r < N_ALPHA; ++alpha_r)
+    for (int alpha_c = 0; alpha_c < N_ALPHA; ++alpha_c) {
+        const bool row_is_D = L[alpha_r] > J;
+        const bool col_is_D = L[alpha_c] > J;
+        const std::size_t block
+            = coupled_matrix_block_index(row_is_D, col_is_D);
+        const double* stored = CT_blocks.data() + block * N_P * N_P;
+        for (int p_r = 0; p_r < N_P; ++p_r)
+        for (int p_c = 0; p_c < N_P; ++p_c) {
+            const int full_r = alpha_r * N_P + p_r;
+            const int full_c = alpha_c * N_P + p_c;
+            const double got = stored[p_r * N_P + p_c];
+            const double expected = C[full_c * pair_dim + full_r];
+            const double wrong = C[full_r * pair_dim + full_c];
+            const double diff = std::abs(got - expected);
+            if (diff > TOL) {
+                mismatches++;
+                max_diff = std::max(max_diff, diff);
+            }
+            if (full_r != full_c && std::abs(got - wrong) <= TOL)
+                wrong_orientation_coincidences++;
+        }
+    }
+
+    check_close("real 3S1-3D1 CT storage: #mismatches",
+                static_cast<double>(mismatches), 0.0, 0.5);
+    check_close("real 3S1-3D1 CT storage: max|diff|", max_diff, 0.0);
+    check_close("real 3S1-3D1 rejects C-for-CT orientation",
+                static_cast<double>(wrong_orientation_coincidences), 0.0, 0.5);
 }
 
 // =============================================================================
@@ -978,6 +1036,7 @@ int main() {
 
     std::printf("=== Phase 0 operator-level oracle (DIM=%d) ===\n", DIM);
     test_pointer_table_layout(m);
+    test_real_3S1_3D1_CT_storage();
     test_coupled_alpha_W1C(m);
     test_CPVC_col_matches_math(m, M_math);
     test_CPVC_rows_share_algebra(m, M_math);

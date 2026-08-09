@@ -80,6 +80,7 @@ add_test(NAME faddeev_operator_order COMMAND test_faddeev_operator_order)
 add_executable(test_3nf_operator_oracle
     test_3nf_operator_oracle.cpp
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/cpvc_kernel.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/coupled_channel_transform.cpp
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/pade_approximant.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/matrix_routines.cpp

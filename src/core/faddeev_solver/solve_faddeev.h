@@ -66,10 +66,6 @@ void create_CT_row_maj_3N_pointer_array(double** CT_RM_array,
 										pw_3N_statespace pw_states,
 					         			run_params run_parameters);
 
-/* Restructures NN coupled matrix as 4 seperate matrices
- * !!! WARNING: COLUMN-MAJOR ALGORITHM !!! */
-void restructure_coupled_VC_product(double* VC_product, size_t Np_WP);
-
 /* Create array of pointers to VC-product matrices for product (C^T)PVC in column-major format*/
 void create_VC_col_maj_3N_pointer_array(double** VC_CM_array,
 										double*  C_WP_unco_array,

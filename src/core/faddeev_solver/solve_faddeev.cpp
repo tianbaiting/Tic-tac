@@ -1,5 +1,6 @@
 #include "solve_faddeev.h"
 #include "cpvc_kernel.h"
+#include "coupled_channel_transform.h"
 #include "pade_approximant.h"
 #include "interactions/three_nucleon_force_model.h"
 #include "interactions/w1_pw_cache.h"
@@ -1687,8 +1688,8 @@ void create_CT_row_maj_3N_pointer_array(double** CT_RM_array,
 		/* Transpose C to get C^T */
 		simple_transpose_matrix_routine(CT_subarray, 2*Np_WP);
 
-		/* Restucture coupled matrix array into 4 seperate arrays */
-		restructure_coupled_VC_product(CT_subarray, Np_WP);
+		/* Restructure coupled matrix array into four separate arrays. */
+		restructure_coupled_matrix_blocks(CT_subarray, Np_WP);
 	}
 	
 	/* Row state */
@@ -1739,21 +1740,12 @@ void create_CT_row_maj_3N_pointer_array(double** CT_RM_array,
 				if (coupled_matrix){
 					size_t idx_chn_coup       = (size_t) unique_2N_idx(L_2N_r, S_2N_r, J_2N_r, T_2N_r, coupled_matrix, run_parameters);
 					size_t idx_2N_mat_WP_coup = idx_chn_coup*4*Np_WP*Np_WP;
-					if ( (coupled_via_L_2N && L_2N_r<L_2N_c) || (coupled_via_T_3N && two_T_3N_r<two_T_3N_c) ){       // L_r=J_r-1, L_c=J_r+1 OR (for 1S0) two_T_3N_r==1/2, two_T_3N_c==3/2
-						CT_subarray = &CT_coup_array[idx_2N_mat_WP_coup + 1*Np_WP*Np_WP];
-					}
-					else if ( (coupled_via_L_2N && L_2N_r>L_2N_c) || (coupled_via_T_3N && two_T_3N_r>two_T_3N_c) ){  // L_r=J_r+1, L_c=J_r-1 OR (for 1S0) two_T_3N_r==3/2, two_T_3N_c==1/2
-						CT_subarray = &CT_coup_array[idx_2N_mat_WP_coup + 2*Np_WP*Np_WP];
-					}
-					else if ( (coupled_via_L_2N && L_2N_r<J_2N_c) || (coupled_via_T_3N && two_T_3N_r==1) ){ 		 // L_r=J_r-1, L_c=J_r-1 OR (for 1S0) two_T_3N_r==1/2, two_T_3N_c==1/2
-						CT_subarray = &CT_coup_array[idx_2N_mat_WP_coup + 0*Np_WP*Np_WP];
-					}
-					else if ( (coupled_via_L_2N && L_2N_r>J_2N_c) || (coupled_via_T_3N && two_T_3N_r==3) ){  		 // L_r=J_r+1, L_c=J_r+1 OR (for 1S0) two_T_3N_r==3/2, two_T_3N_c==3/2
-						CT_subarray = &CT_coup_array[idx_2N_mat_WP_coup + 3*Np_WP*Np_WP];
-					}
-					else{
-						raise_error("Unknown 2N coupled-matrix requested in CT-array setup.");
-					}
+					const bool row_is_upper = coupled_via_L_2N ? (L_2N_r > J_2N_r)
+					                                                   : (two_T_3N_r == 3);
+					const bool col_is_upper = coupled_via_L_2N ? (L_2N_c > J_2N_c)
+					                                                   : (two_T_3N_c == 3);
+					const size_t block = coupled_matrix_block_index(row_is_upper, col_is_upper);
+					CT_subarray = &CT_coup_array[idx_2N_mat_WP_coup + block*Np_WP*Np_WP];
 				}
 				else{
 					size_t idx_chn_unco       = (size_t) unique_2N_idx(L_2N_r, S_2N_r, J_2N_r, T_2N_r, coupled_matrix, run_parameters);
@@ -1771,35 +1763,6 @@ void create_CT_row_maj_3N_pointer_array(double** CT_RM_array,
 		}
 	}
 	
-}
-
-/* Restructures NN coupled matrix as 4 seperate matrices
- * !!! WARNING: COLUMN-MAJOR ALGORITHM !!! */
-void restructure_coupled_VC_product(double* VC_product, size_t Np_WP){
-	double* VC_product_temp = new double [4*Np_WP*Np_WP];
-
-	for (size_t col_block=0; col_block<2; col_block++){
-		for (size_t row_block=0; row_block<2; row_block++){
-
-			size_t idx_block = col_block*2*Np_WP*Np_WP + row_block*Np_WP*Np_WP;
-
-			for (size_t col=0; col<Np_WP; col++){
-				for (size_t row=0; row<Np_WP; row++){
-					size_t prestructure_col_idx = (col + Np_WP*col_block)*2*Np_WP;
-					size_t prestructure_row_idx =  row + Np_WP*row_block;
-
-					VC_product_temp[idx_block + col*Np_WP+row] = VC_product[prestructure_col_idx + prestructure_row_idx];
-				}
-			}
-
-		}
-	}
-
-	/* Copy from temp array */
-	std::copy(VC_product_temp, VC_product_temp + 4*Np_WP*Np_WP, VC_product);
-
-	/* Delete temporary array */
-	delete [] VC_product_temp;
 }
 
 /* Create array of pointers to VC-product matrices for product (C^T)PVC in column-major format*/
@@ -1865,8 +1828,8 @@ void create_VC_col_maj_3N_pointer_array(double** VC_CM_array,
 		dot_MM(V_subarray, C_subarray, VC_product, 2*Np_WP, 2*Np_WP, 2*Np_WP);
 		/* Transpose VC-product to get column-major format */
 		simple_transpose_matrix_routine(VC_product, 2*Np_WP);
-		/* Restucture coupled matrix array into 4 seperate arrays */
-		restructure_coupled_VC_product(VC_product, Np_WP);
+		/* Restructure coupled matrix array into four separate arrays. */
+		restructure_coupled_matrix_blocks(VC_product, Np_WP);
 	}
 
 	/* Row state */
@@ -1917,21 +1880,12 @@ void create_VC_col_maj_3N_pointer_array(double** VC_CM_array,
 				if (coupled_matrix){
 					size_t idx_chn_coup       = (size_t) unique_2N_idx(L_2N_r, S_2N_r, J_2N_r, T_2N_r, coupled_matrix, run_parameters);
 					size_t idx_2N_mat_WP_coup = idx_chn_coup*4*Np_WP*Np_WP;
-					if ( (coupled_via_L_2N && L_2N_r<L_2N_c) || (coupled_via_T_3N && two_T_3N_r<two_T_3N_c) ){       // L_r=J_r-1, L_c=J_r+1 OR (for 1S0) two_T_3N_r==1/2, two_T_3N_c==3/2
-						VC_product = &VC_coup_array[idx_2N_mat_WP_coup + 1*Np_WP*Np_WP];
-					}
-					else if ( (coupled_via_L_2N && L_2N_r>L_2N_c) || (coupled_via_T_3N && two_T_3N_r>two_T_3N_c) ){  // L_r=J_r+1, L_c=J_r-1 OR (for 1S0) two_T_3N_r==3/2, two_T_3N_c==1/2
-						VC_product = &VC_coup_array[idx_2N_mat_WP_coup + 2*Np_WP*Np_WP];
-					}
-					else if ( (coupled_via_L_2N && L_2N_r<J_2N_c) || (coupled_via_T_3N && two_T_3N_r==1) ){ 		 // L_r=J_r-1, L_c=J_r-1 OR (for 1S0) two_T_3N_r==1/2, two_T_3N_c==1/2
-						VC_product = &VC_coup_array[idx_2N_mat_WP_coup + 0*Np_WP*Np_WP];
-					}
-					else if ( (coupled_via_L_2N && L_2N_r>J_2N_c) || (coupled_via_T_3N && two_T_3N_r==3) ){  		 // L_r=J_r+1, L_c=J_r+1 OR (for 1S0) two_T_3N_r==3/2, two_T_3N_c==3/2
-						VC_product = &VC_coup_array[idx_2N_mat_WP_coup + 3*Np_WP*Np_WP];
-					}
-					else{
-						raise_error("Unknown 2N coupled-matrix requested in VC-array setup.");
-					}
+					const bool row_is_upper = coupled_via_L_2N ? (L_2N_r > J_2N_r)
+					                                                   : (two_T_3N_r == 3);
+					const bool col_is_upper = coupled_via_L_2N ? (L_2N_c > J_2N_c)
+					                                                   : (two_T_3N_c == 3);
+					const size_t block = coupled_matrix_block_index(row_is_upper, col_is_upper);
+					VC_product = &VC_coup_array[idx_2N_mat_WP_coup + block*Np_WP*Np_WP];
 				}
 				else{
 					size_t idx_chn_unco       = (size_t) unique_2N_idx(L_2N_r, S_2N_r, J_2N_r, T_2N_r, coupled_matrix, run_parameters);
