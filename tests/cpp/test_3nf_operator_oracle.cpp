@@ -11,10 +11,11 @@
 //
 // assembled directly from the dense definitions. The mock operators are
 // independent of the production 3NF recoupling / kernels: they are random
-// dense matrices with a controlled structure (C block-diagonal in α, V
-// block-diagonal in α, P a generic permutation). Because the mock W^(1) is
-// asymmetric and the mock C is asymmetric, transposition / ordering bugs
-// cannot hide behind symmetry.
+// dense matrices with a controlled structure (C and V contain genuine
+// alpha-off-diagonal 3S1--3D1-like blocks, P is a generic permutation).
+// Because W^(1), C, and the off-diagonal C_01/C_10 blocks are asymmetric,
+// coupled-alpha contraction, transposition, and ordering bugs cannot hide
+// behind symmetry.
 //
 // This is the gate for Phase 3 (independent angular oracle): until every check
 // here passes, no claim about partial-wave matrix elements is admissible.
@@ -155,12 +156,13 @@ public:
 };
 
 // -----------------------------------------------------------------------------
-// Build the dense mock operators. C and V are block-diagonal in α (Np×Np
-// blocks); P is a full DIM×DIM permutation matrix.
+// Build the dense mock operators. C and V act only at fixed q, but are full in
+// the two alpha channels (3S1/3D1-like Np×Np blocks). P is a full DIM×DIM
+// permutation matrix.
 // -----------------------------------------------------------------------------
 struct DenseMock {
-    std::vector<double> C;    // DIM×DIM, but only α-block-diagonal is non-zero
-    std::vector<double> V;    // DIM×DIM, α-block-diagonal
+    std::vector<double> C;    // DIM×DIM, q-diagonal and full in alpha
+    std::vector<double> V;    // DIM×DIM, q-diagonal and full in alpha
     std::vector<double> P;    // DIM×DIM permutation
     std::vector<double> W1;   // DIM×DIM = g_w1 with normalisation folded in
     std::vector<double> CT;   // C^T
@@ -202,26 +204,29 @@ static DenseMock build_dense_mock(std::mt19937_64& rng) {
     m.W1.assign(DIM * DIM, 0.0);
     std::uniform_real_distribution<double> d(-1.0, 1.0);
 
-    // C, V: α-block-diagonal AND q-INDEPENDENT (the 2NF pair interaction V and
-    // the SWP rotation C act on the pair line only; they do NOT depend on the
-    // spectator momentum q — this matches the production VC_CM_array /
-    // CT_RM_array which store a SINGLE Np×Np block per α, used for every q).
-    // We build one asymmetric Np×Np block per α and replicate it across q so
-    // the dense-math oracle and the production code see the same operator.
-    for (int a = 0; a < N_ALPHA; ++a) {
-        // Build the Np×Np block for this α (asymmetric, invertible-ish).
+    // C and V are q-independent pair operators.  Unlike the old oracle, every
+    // (alpha_r,alpha_c) block is populated.  The alpha-dependent offset makes
+    // C_01 and C_10 explicitly nonzero and non-transposes of one another; the
+    // random term makes every p block asymmetric as well.
+    for (int ar = 0; ar < N_ALPHA; ++ar)
+    for (int ac = 0; ac < N_ALPHA; ++ac) {
         std::vector<double> Cblk(N_P * N_P), Vblk(N_P * N_P);
         for (int pr = 0; pr < N_P; ++pr)
         for (int pc = 0; pc < N_P; ++pc) {
-            Cblk[pr * N_P + pc] = (pr == pc ? 1.0 : 0.0) + 0.2 * d(rng);
-            Vblk[pr * N_P + pc] = 0.5 + 0.3 * d(rng);
+            const double diagonal = (ar == ac && pr == pc) ? 1.0 : 0.0;
+            Cblk[pr * N_P + pc] = diagonal
+                                 + 0.07 * (1 + 2 * ar + 3 * ac)
+                                 + 0.15 * d(rng);
+            Vblk[pr * N_P + pc] = 0.35
+                                 + 0.05 * (2 * ar + ac)
+                                 + 0.25 * d(rng);
         }
-        // Replicate across q (q-independent).
+        // Replicate the pair blocks across q.
         for (int q = 0; q < N_Q; ++q)
         for (int pr = 0; pr < N_P; ++pr)
         for (int pc = 0; pc < N_P; ++pc) {
-            int i = idx_apq(a, pr, q);
-            int j = idx_apq(a, pc, q);
+            int i = idx_apq(ar, pr, q);
+            int j = idx_apq(ac, pc, q);
             m.C[i * DIM + j] = Cblk[pr * N_P + pc];
             m.V[i * DIM + j] = Vblk[pr * N_P + pc];
         }
@@ -281,8 +286,8 @@ struct MockWP {
     int chn_3N_idx[N_ALPHA];
 
     // CT_RM_array[α·Nα + α']  = Np×Np block (row-major), or nullptr.
-    // Holds C^T restricted to the pair line within (α,α'); for the mock we use
-    // block-diagonal C (α'==α only). VC_CM_array similarly for V·C (column-major).
+    // Holds C^T restricted to the pair line within (alpha,alpha').  All four
+    // blocks are populated. VC_CM_array similarly stores V*C (column-major).
     double* CT_blocks[N_ALPHA * N_ALPHA];  // owning
     double* VC_blocks[N_ALPHA * N_ALPHA];
     std::vector<double> CT_storage;       // backing store
@@ -302,7 +307,8 @@ struct MockWP {
         pw.Nalpha = N_ALPHA;
         pw.J_2N_max = 1;
         for (int a = 0; a < N_ALPHA; ++a) {
-            L_2N[a] = 0; S_2N[a] = 1; J_2N[a] = 1; T_2N[a] = 0;
+            L_2N[a] = 2 * a;  // alpha 0 = 3S1-like, alpha 1 = 3D1-like
+            S_2N[a] = 1; J_2N[a] = 1; T_2N[a] = 0;
             L_1N[a] = 0; two_J_1N[a] = 1; two_J_3N[a] = 1; two_T_3N[a] = 1; P_3N[a] = +1;
             chn_3N_idx[a] = 0;
         }
@@ -311,58 +317,50 @@ struct MockWP {
         pw.two_J_3N_array = two_J_3N; pw.two_T_3N_array = two_T_3N; pw.P_3N_array = P_3N;
         pw.chn_3N_idx_array = chn_3N_idx; pw.N_chn_3N = 1;
 
-        // CT_RM_array & VC_CM_array: block-diagonal in α.
-        // CT block for (α,α): Np×Np, row-major, element [p_r·Np + p_c].
-        //   C^T row p_r, col p_c  =  C col p_r, row p_c.
-        //   The production W1·C path reads C_block[idx_p_c·Np + idx_p_j],
-        //   i.e. element [p_c, p_j] = CT[p_c, p_j] = C[p_j, p_c].
-        // VC block for (α,α): Np×Np, COLUMN-major, element [p_c·Np + p_j].
-        //   VC_CM = V·C, (VC)[p_c, p_j] — column-major means element index
-        //   p_c·Np + p_j stores row p_c, col p_j of the V·C product.
+        // For a requested right column (alpha_c,p_c), the production builders
+        // index both pointer tables as [alpha_c*Nalpha + alpha_j]:
+        //
+        // CT_RM[alpha_c,alpha_j][p_c,p_j]
+        //   = (C^T)[alpha_c p_c,alpha_j p_j]
+        //   = C[alpha_j p_j,alpha_c p_c].
+        //
+        // VC_CM[alpha_c,alpha_j][p_c,p_j]
+        //   = (V*C)[alpha_j p_j,alpha_c p_c].
+        //
+        // The first index is therefore the external column channel and the
+        // second is the intermediate row channel, despite the pointer-array
+        // storage being described as C^T row-major.
         CT_RM_array = new double*[N_ALPHA * N_ALPHA];
         VC_CM_array = new double*[N_ALPHA * N_ALPHA];
-        CT_storage.assign((size_t)N_ALPHA * N_P * N_P, 0.0);
-        VC_storage.assign((size_t)N_ALPHA * N_P * N_P, 0.0);
-        for (int ar = 0; ar < N_ALPHA; ++ar)
-        for (int ac = 0; ac < N_ALPHA; ++ac) {
-            size_t bi = (size_t)ar * N_ALPHA + ac;
-            if (ar == ac) {
-                double* ct = &CT_storage[(size_t)ar * N_P * N_P];
-                double* vc = &VC_storage[(size_t)ar * N_P * N_P];
-                // Build C^T block (row-major): C^T[pr,pc] = C[pc,pr] (dense C is
-                // indexed over (α,p,q); within the (α,ar=q-fixed) block extract p×p).
-                // For the mock, C is block-diagonal in α AND acts within a fixed q,
-                // so the Np×Np block for (α, q) is C[idx_apq(α,pr,q), idx_apq(α,pc,q)].
-                // The CT_RM block stores C^T for that (α, q) — but the production code
-                // uses a SINGLE Np×Np block per α (summed/treated as the pair
-                // rotation). We use the q=0 slice for the block.
-                int q = 0;
-                for (int pr = 0; pr < N_P; ++pr)
-                for (int pc = 0; pc < N_P; ++pc) {
-                    // C^T[pr,pc] = C[pc,pr] within the (α,q=0) block
-                    double C_pc_pr = m.C[idx_apq(ar, pc, q) * DIM + idx_apq(ar, pr, q)];
-                    ct[(size_t)pr * N_P + pc] = C_pc_pr;
+        CT_storage.assign((size_t)N_ALPHA * N_ALPHA * N_P * N_P, 0.0);
+        VC_storage.assign((size_t)N_ALPHA * N_ALPHA * N_P * N_P, 0.0);
+        const int q = 0;
+        for (int alpha_c = 0; alpha_c < N_ALPHA; ++alpha_c)
+        for (int alpha_j = 0; alpha_j < N_ALPHA; ++alpha_j) {
+            const size_t bi = (size_t)alpha_c * N_ALPHA + alpha_j;
+            double* ct = &CT_storage[bi * N_P * N_P];
+            double* vc = &VC_storage[bi * N_P * N_P];
+            for (int p_c = 0; p_c < N_P; ++p_c)
+            for (int p_j = 0; p_j < N_P; ++p_j) {
+                ct[(size_t)p_c * N_P + p_j]
+                    = m.C[idx_apq(alpha_j, p_j, q) * DIM
+                          + idx_apq(alpha_c, p_c, q)];
+
+                double vc_element = 0.0;
+                for (int alpha_k = 0; alpha_k < N_ALPHA; ++alpha_k)
+                for (int p_k = 0; p_k < N_P; ++p_k) {
+                    const double V_jk
+                        = m.V[idx_apq(alpha_j, p_j, q) * DIM
+                              + idx_apq(alpha_k, p_k, q)];
+                    const double C_kc
+                        = m.C[idx_apq(alpha_k, p_k, q) * DIM
+                              + idx_apq(alpha_c, p_c, q)];
+                    vc_element += V_jk * C_kc;
                 }
-                // VC_CM block (column-major V·C): element [col p_c, row p_j]
-                // stored at index p_c·Np + p_j.  (V·C)[p_j, p_c] = Σ_k V[p_j,k]·C[k,p_c].
-                // We compute the product for the (α, q=0) block.
-                for (int pj = 0; pj < N_P; ++pj)
-                for (int pc = 0; pc < N_P; ++pc) {
-                    double s = 0.0;
-                    for (int k = 0; k < N_P; ++k) {
-                        double V_pj_k = m.V[idx_apq(ar, pj, q) * DIM + idx_apq(ar, k, q)];
-                        double C_k_pc = m.C[idx_apq(ar, k, q) * DIM + idx_apq(ar, pc, q)];
-                        s += V_pj_k * C_k_pc;
-                    }
-                    // column-major: element [col=pc, row=pj] at index pc·Np + pj
-                    vc[(size_t)pc * N_P + pj] = s;
-                }
-                CT_RM_array[bi] = ct;
-                VC_CM_array[bi] = vc;
-            } else {
-                CT_RM_array[bi] = nullptr;
-                VC_CM_array[bi]  = nullptr;
+                vc[(size_t)p_c * N_P + p_j] = vc_element;
             }
+            CT_RM_array[bi] = ct;
+            VC_CM_array[bi] = vc;
         }
 
         // P123 CSC sparse: store P/2 so production 2·P123 = P (mock).
@@ -394,7 +392,131 @@ struct MockWP {
 }  // namespace
 
 // =============================================================================
-// Test 1: calculate_CPVC_col reproduces M_math column-by-column.
+// Test 1: pointer-table orientation, independent of the kernel contraction.
+//
+// CT_RM has one convention, regardless of how its indices are named at a call
+// site:
+//   CT_RM[a,b][i,j] = (C^T)[a i,b j] = C[b j,a i].
+// The right-C application names (a,b,i,j)=(alpha_c,alpha_j,p_c,p_j), while the
+// final left-C^T application names them (alpha_r,alpha_i,p_r,p_i).  These are
+// two uses of the same layout, not two pointer-table conventions.
+// =============================================================================
+static void test_pointer_table_layout(const DenseMock& m) {
+    MockWP wp(m);
+    const auto VC = mat_mat(m.V, m.C);
+
+    int ct_mismatches = 0;
+    int right_c_mismatches = 0;
+    int vc_mismatches = 0;
+    double ct_max_diff = 0.0;
+    double right_c_max_diff = 0.0;
+    double vc_max_diff = 0.0;
+    for (int a = 0; a < N_ALPHA; ++a)
+    for (int b = 0; b < N_ALPHA; ++b)
+    for (int i = 0; i < N_P; ++i)
+    for (int j = 0; j < N_P; ++j) {
+        const double stored_ct = wp.CT_RM_array[a * N_ALPHA + b][i * N_P + j];
+        const double expected_ct
+            = m.CT[idx_apq(a, i, 0) * DIM + idx_apq(b, j, 0)];
+        const double expected_right_c
+            = m.C[idx_apq(b, j, 0) * DIM + idx_apq(a, i, 0)];
+        const double ct_diff = std::abs(stored_ct - expected_ct);
+        const double right_c_diff = std::abs(stored_ct - expected_right_c);
+        if (ct_diff > TOL) {
+            ct_mismatches++;
+            ct_max_diff = std::max(ct_max_diff, ct_diff);
+        }
+        if (right_c_diff > TOL) {
+            right_c_mismatches++;
+            right_c_max_diff = std::max(right_c_max_diff, right_c_diff);
+        }
+
+        // VC_CM[a,b][i,j] is column-major storage of
+        // (V*C)[row=(b,j), col=(a,i)].
+        const double stored_vc = wp.VC_CM_array[a * N_ALPHA + b][i * N_P + j];
+        const double expected_vc
+            = VC[idx_apq(b, j, 0) * DIM + idx_apq(a, i, 0)];
+        const double vc_diff = std::abs(stored_vc - expected_vc);
+        if (vc_diff > TOL) {
+            vc_mismatches++;
+            vc_max_diff = std::max(vc_max_diff, vc_diff);
+        }
+    }
+
+    check_close("CT_RM[a,b][i,j] == C^T[ai,bj]: #mismatches",
+                (double)ct_mismatches, 0.0, 0.5);
+    check_close("CT_RM layout: max|diff|", ct_max_diff, 0.0);
+    check_close("right C from CT_RM[a,b][i,j] == C[bj,ai]: #mismatches",
+                (double)right_c_mismatches, 0.0, 0.5);
+    check_close("right C orientation: max|diff|", right_c_max_diff, 0.0);
+    check_close("VC_CM[a,b][i,j] == (V*C)[bj,ai]: #mismatches",
+                (double)vc_mismatches, 0.0, 0.5);
+    check_close("VC_CM layout: max|diff|", vc_max_diff, 0.0);
+}
+
+// =============================================================================
+// Test 2: isolate C^T*W1*C with coupled alpha blocks.
+//
+// P and V are set to zero in the production call, so a failure cannot be
+// attributed to the sparse permutation convention or to VC construction.  The
+// old implementation drops alpha_j != alpha_c from W1*C and must fail here.
+// =============================================================================
+static void test_coupled_alpha_W1C(const DenseMock& m) {
+    MockWP wp(m);
+    MockTNF tnf;
+    tnf_kernel_context ctx{};
+    ctx.tnf = &tnf;
+    ctx.pw_states = &wp.pw;
+    ctx.p_WP_array = g_grid.p_WP;
+    ctx.q_WP_array = g_grid.q_WP;
+    ctx.CT_RM_array = wp.CT_RM_array;
+    ctx.w1_scale = 1.0;
+    ctx.w1_cache = nullptr;
+
+    const auto W1C = mat_mat(m.W1, m.C);
+    const auto expected = mat_mat(m.CT, W1C);
+
+    std::vector<double> zero_vc_storage(
+        (size_t)N_ALPHA * N_ALPHA * N_P * N_P, 0.0);
+    std::vector<double*> zero_vc_blocks(N_ALPHA * N_ALPHA, nullptr);
+    for (int b = 0; b < N_ALPHA * N_ALPHA; ++b)
+        zero_vc_blocks[b] = &zero_vc_storage[(size_t)b * N_P * N_P];
+
+    // Empty CSC matrix: every column starts and ends at offset zero.
+    std::vector<size_t> zero_p_col(DIM + 1, 0);
+    double dummy_p_val = 0.0;
+    int dummy_p_row = 0;
+
+    int mismatch_count = 0;
+    double max_diff = 0.0;
+    for (int alpha_c = 0; alpha_c < N_ALPHA; ++alpha_c)
+    for (int q_c = 0; q_c < N_Q; ++q_c)
+    for (int p_c = 0; p_c < N_P; ++p_c) {
+        std::vector<double> col(DIM, 0.0);
+        std::vector<int> row_to_nnz(DIM, -1);
+        std::vector<int> nnz_to_row(DIM, -1);
+        size_t num_nnz = 0;
+        calculate_CPVC_col(col.data(), row_to_nnz.data(), nnz_to_row.data(), num_nnz,
+                           alpha_c, p_c, q_c, N_ALPHA, N_Q, N_P,
+                           wp.CT_RM_array, zero_vc_blocks.data(),
+                           &dummy_p_val, &dummy_p_row, zero_p_col.data(), 0, ctx);
+        const int col_idx = idx_apq(alpha_c, p_c, q_c);
+        for (int row = 0; row < DIM; ++row) {
+            const double diff = std::abs(col[row] - expected[row * DIM + col_idx]);
+            if (diff > TOL) {
+                mismatch_count++;
+                max_diff = std::max(max_diff, diff);
+            }
+        }
+    }
+    check_close("coupled-alpha C^T*W1*C: #mismatches",
+                (double)mismatch_count, 0.0, 0.5);
+    check_close("coupled-alpha C^T*W1*C: max|diff|",
+                max_diff, 0.0);
+}
+
+// =============================================================================
+// Test 3: calculate_CPVC_col reproduces M_math column-by-column.
 // =============================================================================
 static void test_CPVC_col_matches_math(const DenseMock& m, const std::vector<double>& M_math) {
     MockWP wp(m);
@@ -435,7 +557,7 @@ static void test_CPVC_col_matches_math(const DenseMock& m, const std::vector<dou
 }
 
 // =============================================================================
-// Test 2: calculate_all_CPVC_rows shares the SAME kernel algebra as
+// Test 4: calculate_all_CPVC_rows shares the SAME kernel algebra as
 // calculate_CPVC_col (it is the row-oriented entry into the same C^T·(PV +
 // W^(1)·(1+P))·C assembly, with the elastic-on-shell selection layered on top).
 // It was NOT extracted to cpvc_kernel.cpp because it depends on the
@@ -453,7 +575,7 @@ static void test_CPVC_rows_share_algebra(const DenseMock& /*m*/,
 }
 
 // =============================================================================
-// Test 3: Operator-ordering guard — wrong order (1+P)·W1 ≠ right order W1·(1+P).
+// Test 5: Operator-ordering guard — wrong order (1+P)·W1 ≠ right order W1·(1+P).
 // =============================================================================
 static void test_operator_ordering(const DenseMock& m) {
     auto PV      = mat_mat(m.P, m.V);
@@ -474,7 +596,7 @@ static void test_operator_ordering(const DenseMock& m) {
 }
 
 // =============================================================================
-// Test 4: C vs C^T guard — using C in place of C^T must NOT match M_math.
+// Test 6: C vs C^T guard — using C in place of C^T must NOT match M_math.
 // =============================================================================
 static void test_CT_distinction(const DenseMock& m, const std::vector<double>& M_math) {
     // Build M_wrongC = C·(P·V + W1·(1+P))·C^T  (C and C^T swapped).
@@ -492,13 +614,13 @@ static void test_CT_distinction(const DenseMock& m, const std::vector<double>& M
 }
 
 // =============================================================================
-// Test 5: Dense-solver identity — verify U = (1 − A·G)⁻¹·A satisfies (1-AG)·U = A.
+// Test 7: Dense-solver identity — verify U = (1 − A·G)⁻¹·A satisfies (1-AG)·U = A.
 // Uses a clean Gauss-Jordan solve with full pivoting on the augmented matrix.
 // =============================================================================
 static void test_dense_solver_identity(const DenseMock& m, const std::vector<double>& A) {
     // G = diag(g_i); real g_i for a non-singular (1 − A·G).
     std::vector<double> G(DIM, 0.0);
-    for (int i = 0; i < DIM; ++i) G[i] = -0.05 / (1.0 + 0.03 * i);
+    for (int i = 0; i < DIM; ++i) G[i] = -0.002 / (1.0 + 0.03 * i);
 
     // Build M = 1 − A·G  (G diagonal ⇒ (A·G)[i,j] = A[i,j]·G[j]).
     std::vector<double> M(DIM * DIM);
@@ -553,12 +675,14 @@ static void test_dense_solver_identity(const DenseMock& m, const std::vector<dou
 }
 
 // =============================================================================
-// Test 6: Neumann series matches dense inverse to Padé tolerance.
+// Test 8: Neumann series matches dense inverse to Padé tolerance.
 // a_0 = A, a_{n+1} = a_n·G·A;  U_partial = Σ_{n=0}^{N} a_n  →  U_analytic.
 // =============================================================================
 static void test_neumann_matches_dense(const std::vector<double>& A) {
     std::vector<double> G(DIM, 0.0);
-    for (int i = 0; i < DIM; ++i) G[i] = -0.05 / (1.0 + 0.03 * i);  // small → converges
+    // Keep the deliberately dense coupled-alpha toy kernel inside the Neumann
+    // convergence disk. This is an algebra test, not a physical resolvent.
+    for (int i = 0; i < DIM; ++i) G[i] = -0.002 / (1.0 + 0.03 * i);
 
     // Analytic U = (1 − A·G)⁻¹·A
     std::vector<double> M(DIM * DIM);
@@ -622,6 +746,8 @@ int main() {
     std::vector<double> M_math = build_M_math(m);
 
     std::printf("=== Phase 0 operator-level oracle (DIM=%d) ===\n", DIM);
+    test_pointer_table_layout(m);
+    test_coupled_alpha_W1C(m);
     test_CPVC_col_matches_math(m, M_math);
     test_CPVC_rows_share_algebra(m, M_math);
     test_operator_ordering(m);
