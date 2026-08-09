@@ -30,7 +30,9 @@
 #include "type_defs.h"
 #include "make_pw_symm_states.h"
 #include "solve_faddeev.h"
+#include "pade_approximant.h"
 #include "three_nucleon_force_model.h"
+#include "w1_pw_cache.h"
 
 namespace {
 
@@ -153,6 +155,14 @@ public:
         return g_w1.v[alpha_r][alpha_c][pr][qr][pc][qc]
                / (w1_unit * wp_r * wq_r * wp_c * wq_c);
     }
+};
+
+class ZeroTNF : public three_nucleon_force_model {
+public:
+    bool enabled() const override { return true; }
+    std::string name() const override { return "zero_oracle_W1"; }
+    double W1_element(int, int, double, double, double, double,
+                      const pw_3N_statespace&) const override { return 0.0; }
 };
 
 // -----------------------------------------------------------------------------
@@ -557,25 +567,199 @@ static void test_CPVC_col_matches_math(const DenseMock& m, const std::vector<dou
 }
 
 // =============================================================================
-// Test 4: calculate_all_CPVC_rows shares the SAME kernel algebra as
-// calculate_CPVC_col (it is the row-oriented entry into the same C^T·(PV +
-// W^(1)·(1+P))·C assembly, with the elastic-on-shell selection layered on top).
-// It was NOT extracted to cpvc_kernel.cpp because it depends on the
-// elastic_on_shell_index helpers that are tightly coupled to the full solver.
-// Its kernel-algebra correctness is therefore fully covered by Test 1
-// (column path) plus the existing test_faddeev_operator_order dense test.
-// A future Phase 5 refactor will extract it too and re-enable an explicit
-// row-path check here.
+// Test 4: production row path equals both the production column path and the
+// independent dense matrix for every selected elastic row and every column.
 // =============================================================================
-static void test_CPVC_rows_share_algebra(const DenseMock& /*m*/,
-                                         const std::vector<double>& /*M_math*/) {
-    // Placeholder: documented in the contract (§6) that the row path's algebra
-    // is the same as the column path. Test 1 is the binding check.
-    g_passes++;
+static void test_CPVC_rows_share_algebra(const DenseMock& m,
+                                         const std::vector<double>& M_math) {
+    MockWP wp(m);
+    MockTNF tnf;
+    tnf_kernel_context ctx{};
+    ctx.tnf = &tnf;
+    ctx.pw_states = &wp.pw;
+    ctx.p_WP_array = g_grid.p_WP;
+    ctx.q_WP_array = g_grid.q_WP;
+    ctx.CT_RM_array = wp.CT_RM_array;
+    ctx.w1_scale = 1.0;
+    ctx.w1_cache = nullptr;
+
+    int q_com_idx[N_Q] = {0, 1};
+    int deuteron_idx[N_ALPHA] = {0, 1};
+    constexpr int N_SELECTED_ROWS = N_ALPHA * N_Q;
+    std::vector<double> rows(N_SELECTED_ROWS * DIM, 0.0);
+    calculate_all_CPVC_rows(rows.data(),
+                            q_com_idx, N_Q,
+                            deuteron_idx, N_ALPHA,
+                            N_ALPHA, N_Q, N_P,
+                            wp.CT_RM_array, wp.VC_CM_array,
+                            wp.P_val.data(), wp.P_row.data(), wp.P_col.data(), wp.P_dim,
+                            ctx);
+
+    int math_mismatches = 0;
+    int column_mismatches = 0;
+    double max_math_diff = 0.0;
+    double max_column_diff = 0.0;
+    for (int alpha_r = 0; alpha_r < N_ALPHA; ++alpha_r)
+    for (int q_r = 0; q_r < N_Q; ++q_r) {
+        const int selected_row = alpha_r * N_Q + q_r;
+        const int dense_row = idx_apq(alpha_r, 0, q_r);
+        for (int alpha_c = 0; alpha_c < N_ALPHA; ++alpha_c)
+        for (int q_c = 0; q_c < N_Q; ++q_c)
+        for (int p_c = 0; p_c < N_P; ++p_c) {
+            const int col_idx = idx_apq(alpha_c, p_c, q_c);
+            const double row_value = rows[selected_row * DIM + col_idx];
+            const double math_diff = std::abs(row_value - M_math[dense_row * DIM + col_idx]);
+            if (math_diff > TOL) {
+                math_mismatches++;
+                max_math_diff = std::max(max_math_diff, math_diff);
+            }
+
+            std::vector<double> col(DIM, 0.0);
+            std::vector<int> row_to_nnz(DIM, -1);
+            std::vector<int> nnz_to_row(DIM, -1);
+            size_t num_nnz = 0;
+            calculate_CPVC_col(col.data(), row_to_nnz.data(), nnz_to_row.data(), num_nnz,
+                               alpha_c, p_c, q_c, N_ALPHA, N_Q, N_P,
+                               wp.CT_RM_array, wp.VC_CM_array,
+                               wp.P_val.data(), wp.P_row.data(), wp.P_col.data(), wp.P_dim,
+                               ctx);
+            const double column_diff = std::abs(row_value - col[dense_row]);
+            if (column_diff > TOL) {
+                column_mismatches++;
+                max_column_diff = std::max(max_column_diff, column_diff);
+            }
+        }
+    }
+
+    check_close("CPVC_rows: #mismatches vs dense math", (double)math_mismatches, 0.0, 0.5);
+    check_close("CPVC_rows: max|diff| vs dense math", max_math_diff, 0.0);
+    check_close("CPVC_rows: #mismatches vs CPVC_col", (double)column_mismatches, 0.0, 0.5);
+    check_close("CPVC_rows: max|diff| vs CPVC_col", max_column_diff, 0.0);
 }
 
 // =============================================================================
-// Test 5: Operator-ordering guard — wrong order (1+P)·W1 ≠ right order W1·(1+P).
+// Test 5: all disabled/zero-strength 3NF routes reproduce the pure-2NF kernel.
+// This covers a null context, the diagnostic w1_scale=0 path, and an enabled
+// model whose W1_element is identically zero.
+// =============================================================================
+static void test_zero_W1_reproduces_2NF(const DenseMock& m) {
+    MockWP wp(m);
+    MockTNF mock_tnf;
+    ZeroTNF zero_tnf;
+
+    const auto two_nf_math = mat_mat(m.CT, mat_mat(mat_mat(m.P, m.V), m.C));
+    tnf_kernel_context contexts[3]{};
+    contexts[0].tnf = nullptr;
+    contexts[0].w1_scale = 1.0;
+    contexts[1].tnf = &mock_tnf;
+    contexts[1].w1_scale = 0.0;
+    contexts[2].tnf = &zero_tnf;
+    contexts[2].w1_scale = 1.0;
+    for (auto& ctx : contexts) {
+        ctx.pw_states = &wp.pw;
+        ctx.p_WP_array = g_grid.p_WP;
+        ctx.q_WP_array = g_grid.q_WP;
+        ctx.CT_RM_array = wp.CT_RM_array;
+        ctx.w1_cache = nullptr;
+    }
+
+    int mismatches = 0;
+    double max_diff = 0.0;
+    for (const auto& ctx : contexts)
+    for (int alpha_c = 0; alpha_c < N_ALPHA; ++alpha_c)
+    for (int q_c = 0; q_c < N_Q; ++q_c)
+    for (int p_c = 0; p_c < N_P; ++p_c) {
+        std::vector<double> col(DIM, 0.0);
+        std::vector<int> row_to_nnz(DIM, -1);
+        std::vector<int> nnz_to_row(DIM, -1);
+        size_t num_nnz = 0;
+        calculate_CPVC_col(col.data(), row_to_nnz.data(), nnz_to_row.data(), num_nnz,
+                           alpha_c, p_c, q_c, N_ALPHA, N_Q, N_P,
+                           wp.CT_RM_array, wp.VC_CM_array,
+                           wp.P_val.data(), wp.P_row.data(), wp.P_col.data(), wp.P_dim,
+                           ctx);
+        const int col_idx = idx_apq(alpha_c, p_c, q_c);
+        for (int row = 0; row < DIM; ++row) {
+            const double diff = std::abs(col[row] - two_nf_math[row * DIM + col_idx]);
+            if (diff > TOL) {
+                mismatches++;
+                max_diff = std::max(max_diff, diff);
+            }
+        }
+    }
+    check_close("W1=0/disabled: #mismatches vs 2NF", (double)mismatches, 0.0, 0.5);
+    check_close("W1=0/disabled: max|diff| vs 2NF", max_diff, 0.0);
+}
+
+// =============================================================================
+// Test 6: the real W1_PW_cache consumer path and the direct W1_element fallback
+// agree element-by-element. Np=Nq=1 quadrature is intentional here: it makes
+// the cache and fallback evaluate the identical midpoint matrix element, so
+// this test isolates cache indexing (including the intermediate alpha_j).
+// =============================================================================
+static void test_W1_cache_matches_fallback(const DenseMock& m) {
+    MockWP wp(m);
+    MockTNF tnf;
+    run_params params{};
+    params.Np_WP = N_P;
+    params.Nq_WP = N_Q;
+    params.Np_per_WP_W1 = 1;
+    params.Nq_per_WP_W1 = 1;
+    params.potential_model = "mock_2NF";
+    params.three_nucleon_force = tnf.name();
+    params.c_D = 0.0;
+    params.c_E = 0.0;
+    params.Lambda_3NF = 500.0;
+
+    W1_PW_cache cache;
+    cache.build(tnf, g_grid.p_WP, N_P, g_grid.q_WP, N_Q, wp.pw, params);
+
+    tnf_kernel_context direct_ctx{};
+    direct_ctx.tnf = &tnf;
+    direct_ctx.pw_states = &wp.pw;
+    direct_ctx.p_WP_array = g_grid.p_WP;
+    direct_ctx.q_WP_array = g_grid.q_WP;
+    direct_ctx.CT_RM_array = wp.CT_RM_array;
+    direct_ctx.w1_scale = 0.37;
+    direct_ctx.w1_cache = nullptr;
+    tnf_kernel_context cache_ctx = direct_ctx;
+    cache_ctx.w1_cache = &cache;
+
+    int mismatches = 0;
+    double max_diff = 0.0;
+    for (int alpha_c = 0; alpha_c < N_ALPHA; ++alpha_c)
+    for (int q_c = 0; q_c < N_Q; ++q_c)
+    for (int p_c = 0; p_c < N_P; ++p_c) {
+        std::vector<double> direct_col(DIM, 0.0), cached_col(DIM, 0.0);
+        std::vector<int> row_to_nnz(DIM, -1), nnz_to_row(DIM, -1);
+        size_t direct_nnz = 0;
+        calculate_CPVC_col(direct_col.data(), row_to_nnz.data(), nnz_to_row.data(), direct_nnz,
+                           alpha_c, p_c, q_c, N_ALPHA, N_Q, N_P,
+                           wp.CT_RM_array, wp.VC_CM_array,
+                           wp.P_val.data(), wp.P_row.data(), wp.P_col.data(), wp.P_dim,
+                           direct_ctx);
+        std::fill(row_to_nnz.begin(), row_to_nnz.end(), -1);
+        std::fill(nnz_to_row.begin(), nnz_to_row.end(), -1);
+        size_t cached_nnz = 0;
+        calculate_CPVC_col(cached_col.data(), row_to_nnz.data(), nnz_to_row.data(), cached_nnz,
+                           alpha_c, p_c, q_c, N_ALPHA, N_Q, N_P,
+                           wp.CT_RM_array, wp.VC_CM_array,
+                           wp.P_val.data(), wp.P_row.data(), wp.P_col.data(), wp.P_dim,
+                           cache_ctx);
+        for (int row = 0; row < DIM; ++row) {
+            const double diff = std::abs(cached_col[row] - direct_col[row]);
+            if (diff > TOL) {
+                mismatches++;
+                max_diff = std::max(max_diff, diff);
+            }
+        }
+    }
+    check_close("W1 cache/fallback: #mismatches", (double)mismatches, 0.0, 0.5);
+    check_close("W1 cache/fallback: max|diff|", max_diff, 0.0);
+}
+
+// =============================================================================
+// Test 7: Operator-ordering guard — wrong order (1+P)·W1 ≠ right order W1·(1+P).
 // =============================================================================
 static void test_operator_ordering(const DenseMock& m) {
     auto PV      = mat_mat(m.P, m.V);
@@ -738,6 +922,53 @@ static void test_neumann_matches_dense(const std::vector<double>& A) {
     check_close("Neumann vs dense (1-AG)^-1·A", max_diff, 0.0, 1e-4);
 }
 
+// =============================================================================
+// Test 11: production Padé routine vs an independent dense direct solve for a
+// two-channel non-symmetric toy kernel. Both off-diagonal alpha couplings are
+// nonzero. The scalar Neumann coefficients are generated by matrix recursion,
+// not from the Padé implementation.
+// =============================================================================
+static void test_production_pade_matches_dense_toy() {
+    constexpr int D = 2;
+    const cdouble A[D * D] = {
+        {0.70,  0.05}, {-0.23, 0.11},
+        {0.41, -0.07}, { 0.52, 0.03}
+    };
+    const cdouble G[D] = {{0.31, 0.04}, {-0.27, 0.02}};
+
+    // Direct inverse of M = 1-A*G, followed by U=M^{-1}A.
+    const cdouble m00 = 1.0 - A[0] * G[0];
+    const cdouble m01 =     - A[1] * G[1];
+    const cdouble m10 =     - A[2] * G[0];
+    const cdouble m11 = 1.0 - A[3] * G[1];
+    const cdouble det = m00 * m11 - m01 * m10;
+    cdouble U_dense[D * D];
+    U_dense[0] = ( m11 * A[0] - m01 * A[2]) / det;
+    U_dense[1] = ( m11 * A[1] - m01 * A[3]) / det;
+    U_dense[2] = (-m10 * A[0] + m00 * A[2]) / det;
+    U_dense[3] = (-m10 * A[1] + m00 * A[3]) / det;
+
+    // a_0=A; a_(n+1)=a_n*G*A. A 2x2 transfer matrix gives a rational
+    // denominator of degree at most two, so [2/2] has enough information.
+    cdouble terms[5][D * D]{};
+    for (int i = 0; i < D * D; ++i) terms[0][i] = A[i];
+    for (int n = 1; n < 5; ++n) {
+        for (int i = 0; i < D; ++i)
+        for (int j = 0; j < D; ++j)
+        for (int k = 0; k < D; ++k)
+            terms[n][i * D + j] += terms[n - 1][i * D + k] * G[k] * A[k * D + j];
+    }
+
+    double max_diff = 0.0;
+    for (int element = 0; element < D * D; ++element) {
+        cdouble coefficients[5];
+        for (int n = 0; n < 5; ++n) coefficients[n] = terms[n][element];
+        const cdouble U_pade = pade_approximant(coefficients, 2, 2, 1.0);
+        max_diff = std::max(max_diff, std::abs(U_pade - U_dense[element]));
+    }
+    check_close("production Pade[2/2] vs dense two-alpha solve", max_diff, 0.0, 1e-11);
+}
+
 int main() {
     g_grid.init();
     std::mt19937_64 rng(0xC0FFEEULL);  // fixed seed → reproducible
@@ -750,10 +981,13 @@ int main() {
     test_coupled_alpha_W1C(m);
     test_CPVC_col_matches_math(m, M_math);
     test_CPVC_rows_share_algebra(m, M_math);
+    test_zero_W1_reproduces_2NF(m);
+    test_W1_cache_matches_fallback(m);
     test_operator_ordering(m);
     test_CT_distinction(m, M_math);
     test_dense_solver_identity(m, M_math);
     test_neumann_matches_dense(M_math);
+    test_production_pade_matches_dense_toy();
 
     std::printf("\n=== Phase 0 oracle summary ===\n");
     std::printf("  passes:    %d\n", g_passes);

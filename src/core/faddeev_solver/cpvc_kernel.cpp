@@ -2,6 +2,7 @@
 #include "constants.h"
 #include "interactions/three_nucleon_force_model.h"
 #include "interactions/w1_pw_cache.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -318,4 +319,84 @@ void calculate_CPVC_col(double*  col_array,
 	//timestamp_end = std::chrono::system_clock::now();
 	//std::chrono::duration<double>  time2 = timestamp_end - timestamp_start;
 	//printf("TIME CPVC:  %.6f \n", time2.count()); fflush(stdout);
+}
+
+// Only elastic on-shell rows are required by the Padé/Neumann path.  Keep this
+// row-oriented production entry in the same translation unit as the full
+// column builder so both paths are covered by the same operator oracle.
+void calculate_all_CPVC_rows(double*  row_arrays,
+							 int*     q_com_idx_array,      size_t num_q_com,
+							 int*     deuteron_idx_array,   size_t num_deuteron_states,
+							 size_t   Nalpha,
+							 size_t   Nq_WP,
+							 size_t   Np_WP,
+							 double** CT_RM_array,
+							 double** VC_CM_array,
+							 double*  P123_val_array,
+							 int*     P123_row_array,
+							 size_t*  P123_col_array,
+							 size_t   P123_dim,
+							 const tnf_kernel_context& tnf_ctx){
+
+	const size_t dense_dim = Nalpha * Nq_WP * Np_WP;
+	constexpr size_t elastic_bound_packet_index = 0;
+
+	#pragma omp parallel
+	{
+		std::vector<double> right_kernel_col(dense_dim, 0.0);
+
+		#pragma omp for
+		for (size_t idx_alpha_c = 0; idx_alpha_c < Nalpha; idx_alpha_c++){
+			for (size_t idx_q_c = 0; idx_q_c < Nq_WP; idx_q_c++){
+				for (size_t idx_p_c = 0; idx_p_c < Np_WP; idx_p_c++){
+					std::fill(right_kernel_col.begin(), right_kernel_col.end(), 0.0);
+
+					calculate_PVC_col(right_kernel_col.data(),
+									  idx_alpha_c, idx_p_c, idx_q_c,
+									  Nalpha, Nq_WP, Np_WP,
+									  VC_CM_array,
+									  P123_val_array,
+									  P123_row_array,
+									  P123_col_array,
+									  P123_dim);
+
+					add_W1_one_plus_P_C_col(right_kernel_col.data(),
+									 idx_alpha_c, idx_p_c, idx_q_c,
+									 Nalpha, Nq_WP, Np_WP,
+									 CT_RM_array,
+									 P123_val_array,
+									 P123_row_array,
+									 P123_col_array,
+									 P123_dim,
+									 tnf_ctx);
+
+					const size_t col_idx = idx_alpha_c * Nq_WP * Np_WP
+									 + idx_q_c * Np_WP + idx_p_c;
+
+					for (size_t idx_d_row = 0; idx_d_row < num_deuteron_states; idx_d_row++){
+						const size_t idx_alpha_r = (size_t)deuteron_idx_array[idx_d_row];
+						for (size_t idx_q_com = 0; idx_q_com < num_q_com; idx_q_com++){
+							const size_t idx_q_r = (size_t)q_com_idx_array[idx_q_com];
+							double value = 0.0;
+
+							for (size_t idx_alpha_i = 0; idx_alpha_i < Nalpha; idx_alpha_i++){
+								double* CT_block = CT_RM_array[idx_alpha_r * Nalpha + idx_alpha_i];
+								if (CT_block == nullptr) continue;
+
+								const double* CT_row = &CT_block[elastic_bound_packet_index * Np_WP];
+								const double* kernel_subcol = &right_kernel_col[
+									idx_alpha_i * Nq_WP * Np_WP + idx_q_r * Np_WP];
+								for (size_t idx_p_i = 0; idx_p_i < Np_WP; idx_p_i++){
+									value += CT_row[idx_p_i] * kernel_subcol[idx_p_i];
+								}
+							}
+
+							const size_t row_storage_idx = idx_d_row * num_q_com + idx_q_com;
+							row_arrays[row_storage_idx * dense_dim + col_idx] = value;
+						}
+					}
+				}
+			}
+		}
+	}
 }

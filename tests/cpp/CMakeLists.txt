@@ -80,6 +80,16 @@ add_test(NAME faddeev_operator_order COMMAND test_faddeev_operator_order)
 add_executable(test_3nf_operator_oracle
     test_3nf_operator_oracle.cpp
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/cpvc_kernel.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/pade_approximant.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/matrix_routines.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_p123.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_w1.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_layer.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
 )
 target_include_directories(test_3nf_operator_oracle PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -87,9 +97,21 @@ target_include_directories(test_3nf_operator_oracle PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver
     ${CMAKE_SOURCE_DIR}/src/interactions
     ${CMAKE_SOURCE_DIR}/src/utils
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party
     ${CMAKE_SOURCE_DIR}/include
+    ${HDF5_INCLUDE_DIRS}
 )
-target_link_libraries(test_3nf_operator_oracle ${GSL_LIBRARIES})
+target_link_libraries(test_3nf_operator_oracle
+    OpenMP::OpenMP_CXX
+    ${GSL_LIBRARIES}
+    ${HDF5_CXX_LIBRARIES}
+    ${HDF5_LIBRARIES}
+    ${HDF5_HL_LIBRARIES}
+    ${LAPACKE_LIB}
+    ${LAPACK_LIB}
+    ${BLAS_LIB}
+)
 add_test(NAME 3nf_operator_oracle COMMAND test_3nf_operator_oracle)
 
 # Phase 3 oracle driver: prints production W1_element for the independent

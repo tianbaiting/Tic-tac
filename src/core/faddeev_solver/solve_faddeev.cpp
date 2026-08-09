@@ -1,5 +1,6 @@
 #include "solve_faddeev.h"
 #include "cpvc_kernel.h"
+#include "pade_approximant.h"
 #include "interactions/three_nucleon_force_model.h"
 #include "interactions/w1_pw_cache.h"
 #include <gsl/gsl_cblas.h>
@@ -167,141 +168,9 @@ void inplace_transpose(double* A, int rows, int cols) {
 // (Phase 0/5 extraction — behaviour identical, translation-unit boundary only).
 // / [CN] calculate_PVC_col 与 calculate_CPVC_col 已移至 cpvc_kernel.cpp（行为一致）。
 
-// [EN] Only on-shell rows are ever observed in the elastic output, so the initial driving term A is assembled only
-// for those rows. This is the first major WPCD reduction compared with a full dense solve. / [CN] 最终弹性输出只会用到
-// on-shell 行，因此初始驱动项 A 也只为这些行构造；这是相对于完整稠密求解的第一层 WPCD 降维。
-void calculate_all_CPVC_rows(double*  row_arrays,
-							 int*	  q_com_idx_array,	  size_t num_q_com,
-					   		 int*     deuteron_idx_array, size_t num_deuteron_states,
-							 size_t   Nalpha,
-							 size_t   Nq_WP,
-							 size_t   Np_WP,
-							 double** CT_RM_array,
-							 double** VC_CM_array,
-							 double*  P123_val_array,
-							 int*     P123_row_array,
-							 size_t*  P123_col_array,
-							 size_t   P123_dim,
-							 const tnf_kernel_context& tnf_ctx){
-	
-	size_t dense_dim = Nalpha*Nq_WP*Np_WP;
-
-	/* Loop over cols of row */
-	#pragma omp parallel
-	{
-	/* Generate PVC-column */
-	std::vector<double> PVC_col(dense_dim);
-	/* Generate (C^T x PVC)-column */
-	double* CT_subarray     = NULL;
-	double* CT_subarray_row = NULL;
-	#pragma omp for
-	for (size_t idx_alpha_c=0; idx_alpha_c<Nalpha; idx_alpha_c++){
-		for (size_t idx_q_c=0; idx_q_c<Nq_WP; idx_q_c++){
-			for (size_t idx_p_c=0; idx_p_c<Np_WP; idx_p_c++){
-
-				/* Ensure PVC_col contains only zeroes */
-				for (size_t idx=0; idx<dense_dim; idx++){
-					PVC_col[idx] = 0;
-				}
-				
-				/* Calculate PVC-column for alpha_i, p_i, q_r */
-				calculate_PVC_col(PVC_col.data(),
-								  idx_alpha_c, idx_p_c, idx_q_c,
-								  Nalpha,      Nq_WP,   Np_WP,
-								  VC_CM_array,
-								  P123_val_array,
-								  P123_row_array,
-								  P123_col_array,
-								  P123_dim);
-
-				// Shared with calculate_CPVC_col: W^(1)·(1+P)·C, including
-				// the complete tensor-coupled intermediate-alpha contraction.
-				add_W1_one_plus_P_C_col(PVC_col.data(),
-									 idx_alpha_c, idx_p_c, idx_q_c,
-									 Nalpha, Nq_WP, Np_WP,
-									 CT_RM_array,
-									 P123_val_array,
-									 P123_row_array,
-									 P123_col_array,
-									 P123_dim,
-									 tnf_ctx);
-
-				/* Re-use PVC-column in all relevant calculations */
-				for (size_t i=0; i<num_deuteron_states; i++){
-					for (size_t j=0; j<num_q_com; j++){
-						const elastic_on_shell_index ndos = make_elastic_on_shell_index(i,
-																						 0,
-																						 j,
-																						 deuteron_idx_array,
-																						 q_com_idx_array,
-																						 num_deuteron_states,
-																						 num_q_com,
-																						 Nq_WP,
-																						 Np_WP);
-
-						double inner_product_CPVC = 0;
-						/* Beginning of inner-product loops (index "i") */
-						for (size_t idx_alpha_i=0; idx_alpha_i<Nalpha; idx_alpha_i++){
-							
-							CT_subarray = CT_RM_array[ndos.alpha_row*Nalpha + idx_alpha_i];
-		
-							/* Only do inner-product if CT is not zero due to conservation laws */
-							if (CT_subarray!=NULL){
-								CT_subarray_row = &CT_subarray[elastic_bound_packet_index*Np_WP];
-		
-								for (size_t idx_p_i=0; idx_p_i<Np_WP; idx_p_i++){
-								
-									size_t idx_PVC     = dense_packet_index(idx_alpha_i,
-																			ndos.q_idx,
-																			idx_p_i,
-																			Nq_WP,
-																			Np_WP);
-									double PVC_element = PVC_col[idx_PVC];
-		
-									/* I'm not sure if this is the fastest ordering of the loops */
-									double CT_element  = CT_subarray_row[idx_p_i];
-		
-									inner_product_CPVC += CT_element * PVC_element;
-								}
-							}
-						}
-				
-						size_t idx_CPVC = dense_packet_index(idx_alpha_c, idx_q_c, idx_p_c, Nq_WP, Np_WP);
-						row_arrays[ndos.row_storage_idx*dense_dim + idx_CPVC] = inner_product_CPVC;
-					}
-				}
-			}
-		}
-	}
-	}
-}
-
-cdouble pade_approximant(cdouble* a_coeff_array, size_t N, size_t M, cdouble z){
-
-	/* a_coeff_array must have length N+M+1 */
-	cdouble P_array [(M+1)*(M+1)];
-	cdouble Q_array [(M+1)*(M+1)];
-
-	for (size_t row_idx=0; row_idx<M; row_idx++){
-		for (size_t col_idx=0; col_idx<M+1; col_idx++){
-			P_array[row_idx*(M+1) + col_idx] = a_coeff_array[N-M+1 + row_idx + col_idx];
-			Q_array[row_idx*(M+1) + col_idx] = a_coeff_array[N-M+1 + row_idx + col_idx];
-		}
-	}
-
-	for (size_t col_idx=0; col_idx<M+1; col_idx++){
-		Q_array[M*(M+1) + col_idx] = std::pow(z, M-col_idx);
-		P_array[M*(M+1) + col_idx] = 0;
-		for (size_t j=M-col_idx; j<N+1; j++){
-			P_array[M*(M+1) + col_idx] += a_coeff_array[j - (M-col_idx)] * std::pow(z, j);
-		}
-	}
-
-	cdouble P_det = determinant(P_array, M+1);
-	cdouble Q_det = determinant(Q_array, M+1);
-
-	return P_det/Q_det;
-}
+// calculate_all_CPVC_rows moved to cpvc_kernel.cpp so its complete production
+// row path can be compared directly with calculate_CPVC_col in the finite-
+// dimensional operator oracle.
 
 /* Solves the Faddeev equations
  * U = P*V + P*V*G*U
