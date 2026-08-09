@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cmath>
+#include <array>
 #include "chiral_3nf_recoupling.h"
 #include "coupling_coefficients.h"
 
@@ -25,6 +26,48 @@ static void check_nonzero(const char* label, double got) {
         std::printf("  PASS %s = %.10f (nonzero)\n", label, got);
         g_passes++;
     }
+}
+
+// Explicit three-particle m-scheme oracle in the |m1,m2,m3> basis. For two
+// spin-1/2 particles, sigma_1.sigma_3 = 2 P_13 - 1. The same identity holds
+// for isospin. No Wigner helper or production recoupling code enters here.
+using three_half_state = std::array<double, 8>;
+
+static int swap_particles_1_and_3(int basis) {
+    const int b1 = (basis >> 2) & 1;
+    const int b2 = (basis >> 1) & 1;
+    const int b3 = basis & 1;
+    return (b3 << 2) | (b2 << 1) | b1;
+}
+
+static double pauli_1_dot_pauli_3(const three_half_state& bra,
+                                  const three_half_state& ket) {
+    double value = 0.0;
+    for (int i = 0; i < 8; ++i)
+        value += bra[i] * (2.0 * ket[swap_particles_1_and_3(i)] - ket[i]);
+    return value;
+}
+
+static double explicit_cD_scalar_recoupling() {
+    // Pair-(23) singlet, spectator up: |S23=0; total 1/2, M=1/2>.
+    three_half_state pair_singlet{};
+    pair_singlet[6] =  1.0 / std::sqrt(2.0); // |up up down>
+    pair_singlet[5] = -1.0 / std::sqrt(2.0); // |up down up>
+
+    // Pair triplet coupled to spectator 1/2 with Condon-Shortley CGs:
+    // -|m23=0,m1=up>/sqrt(3) + sqrt(2/3)|m23=1,m1=down>.
+    three_half_state pair_triplet{};
+    pair_triplet[6] = -1.0 / std::sqrt(6.0);
+    pair_triplet[5] = -1.0 / std::sqrt(6.0);
+    pair_triplet[3] =  std::sqrt(2.0 / 3.0);
+
+    const double sig_01 = pauli_1_dot_pauli_3(pair_singlet, pair_triplet);
+    const double tau_10 = pauli_1_dot_pauli_3(pair_triplet, pair_singlet);
+    check_close("m-scheme <S23=0|sigma1.sigma3|S23=1>",
+                sig_01, std::sqrt(3.0));
+    check_close("m-scheme <T23=1|tau1.tau3|T23=0>",
+                tau_10, std::sqrt(3.0));
+    return (1.0 / 3.0) * sig_01 * tau_10;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,9 +327,7 @@ void test_1pe_ct_scalar_1S0_diagonal() {
         0, 0, 0, 1, 0, 1, 1,
         0, 0, 0, 1, 0, 1,
         1);
-    // This may be zero or nonzero depending on sigma1.sigma3 for S_r=S_c=0.
-    std::printf("  1pe_ct_scalar 1S0 diagonal = %.10f\n", val);
-    g_passes++;   // Just print; exact value requires separate oracle
+    check_close("1pe_ct_scalar 1S0 diagonal", val, 0.0);
 }
 
 // Off-diagonal channel: bra=(L=0,S=0,J=0,T=1) x ket=(L=0,S=1,J=1,T=0)
@@ -297,8 +338,8 @@ void test_1pe_ct_scalar_offdiag_1S0_to_3S1_nonzero() {
         /*bra: L=0,S=0,J=0,T=1,l=0,2j=1*/ 0, 0, 0, 1, 0, 1, 1,
         /*ket: L=0,S=1,J=1,T=0,l=0,2j=1*/ 0, 1, 1, 0, 0, 1,
         1);
-    check_nonzero("1pe_ct_scalar off-diag 1S0->3S1(T=0)", val);
-    std::printf("  value = %.10f  (expected ~ -1.0)\n", val);
+    const double expected = explicit_cD_scalar_recoupling();
+    check_close("1pe_ct_scalar off-diag 1S0->3S1(T=0)", val, expected);
 }
 
 // Selection rule: nonzero L_2N must return 0 (contact pair vertex restriction)
@@ -344,7 +385,7 @@ int main() {
     test_scalar_3S1_3D1_zero();
     test_scalar_spectator_mismatch_zero();
 
-    std::printf("\n--- Rank-2 recoupling (pair-only operator) ---\n");
+    std::printf("\n--- Candidate pair rank-2 recoupling (NOT production c1/c3) ---\n");
     test_rank2_3S1_3D1_nonzero();
     test_rank2_singlet_zero();
     test_rank2_T_mismatch_zero();
@@ -358,7 +399,7 @@ int main() {
     test_1pe_ct_scalar_offdiag_1S0_to_3S1_nonzero();
     test_1pe_ct_scalar_L2N_nonzero_zero();
 
-    std::printf("\n--- c_D 1PE-CT: rank-2 [sigma1 x sigma3]_2 . Y_2(q_hat) ---\n");
+    std::printf("\n--- Candidate c_D rank-2 selection helper (NOT production) ---\n");
     test_1pe_ct_rank2_l_zero_returns_zero();
     test_1pe_ct_rank2_L2N_nonzero_returns_zero();
 

@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cmath>
+#include <algorithm>
 #include <unistd.h>
 #include <sys/wait.h>
 #include "chiral_N2LO_3NF.h"
@@ -107,6 +108,75 @@ void test_1pe_ct_nonzero_when_cD_set() {
     } else {
         g_passes++;
     }
+}
+
+void test_golden_cD_rank0_1S0_to_3S1() {
+    // Independent oracle for the only enabled c_D sector. The spin/isospin
+    // coefficient is +1 from explicit 8-state Pauli enumeration:
+    // (1/3)<S23=0|sigma1.sigma3|S23=1>
+    //      *<T23=1|tau1.tau3|T23=0> = (1/3)*sqrt(3)*sqrt(3).
+    constexpr double cD = -0.2;
+    constexpr double cutoff_MeV = 500.0;
+    constexpr double p_r = 0.43, q_r = 0.37;
+    constexpr double p_c = 0.82, q_c = 0.61;
+    chiral_N2LO_3NF tnf(cD, 0.0, cutoff_MeV, 0.0, 0.0, 0.0);
+    pw_3N_statespace pw = make_test_pw_states();
+    const int a_1S0 = find_alpha(pw, 0, 0, 0, 1, 0, 1, 1, 1);
+    const int a_3S1 = find_alpha(pw, 0, 1, 1, 0, 0, 1, 1, 1);
+    if (a_1S0 < 0 || a_3S1 < 0) {
+        std::printf("FAIL cD golden: 1S0/3S1 channels not found\n");
+        g_failures++;
+        return;
+    }
+
+    const double cutoff = cutoff_MeV / hbarc;
+    const double mpi_fm = mpi / hbarc;
+    const double fpi_fm = fpi / hbarc;
+    const double lambda_chi = 700.0 / hbarc;
+    const auto regulator = [cutoff](double p, double q) {
+        const double a = (4.0*p*p + 3.0*q*q) / (4.0*cutoff*cutoff);
+        return std::exp(-a*a);
+    };
+    // Closed form of integral_{-1}^{1} dx/[q^2+q'^2-2qq'x+m_pi^2].
+    const double integral = std::log(
+        ((q_r + q_c)*(q_r + q_c) + mpi_fm*mpi_fm)
+      / ((q_r - q_c)*(q_r - q_c) + mpi_fm*mpi_fm)) / (2.0*q_r*q_c);
+    const double fourier_norm = 1.0 / (8.0*M_PI*M_PI*M_PI);
+    const double coeff = -gA*cD / (8.0*std::pow(fpi_fm, 4)*lambda_chi) * 2.0;
+    const double expected = coeff * regulator(p_r, q_r) * regulator(p_c, q_c)
+                          * fourier_norm * integral; // explicit recoupling = +1
+    const double got = tnf.W1_element(a_1S0, a_3S1, p_r, q_r, p_c, q_c, pw);
+    const double got_reverse = tnf.W1_element(a_3S1, a_1S0, p_c, q_c, p_r, q_r, pw);
+    check_close("cD rank0 Pauli+analytic oracle 1S0->3S1", got, expected, 2e-12);
+    check_close("cD rank0 Hermitian reverse", got_reverse, expected, 2e-12);
+}
+
+void test_cD_higher_l_and_rank2_fail_closed() {
+    chiral_N2LO_3NF tnf(-0.2, 0.0, 500.0, 0.0, 0.0, 0.0);
+    pw_3N_statespace pw = make_test_pw_states();
+    int candidates = 0;
+    int nonzero = 0;
+    double max_abs = 0.0;
+    for (int a = 0; a < pw.Nalpha; ++a)
+    for (int b = 0; b < pw.Nalpha; ++b) {
+        if (pw.L_2N_array[a] != 0 || pw.L_2N_array[b] != 0) continue;
+        if (pw.L_1N_array[a] == 0 && pw.L_1N_array[b] == 0) continue;
+        if (pw.two_J_3N_array[a] != pw.two_J_3N_array[b]) continue;
+        if (pw.two_T_3N_array[a] != pw.two_T_3N_array[b]) continue;
+        if (pw.P_3N_array[a] != pw.P_3N_array[b]) continue;
+        candidates++;
+        const double value = tnf.W1_element(a, b, 0.47, 0.39, 0.83, 0.68, pw);
+        max_abs = std::max(max_abs, std::abs(value));
+        if (value != 0.0) nonzero++;
+    }
+    if (candidates == 0) {
+        std::printf("FAIL cD fail-closed: no higher-l candidate channels found\n");
+        g_failures++;
+        return;
+    }
+    check_close("cD higher-l/rank2 fail-closed: #nonzero",
+                static_cast<double>(nonzero), 0.0, 0.0);
+    check_close("cD higher-l/rank2 fail-closed: max|W1|", max_abs, 0.0, 0.0);
 }
 
 void test_2pe_zero_when_c1c3c4_zero() {
@@ -452,6 +522,16 @@ void test_c1c3_rank2_implemented_returns_false() {
     }
 }
 
+void test_cD_rank2_implemented_returns_false() {
+    chiral_N2LO_3NF tnf(-0.2, 0.0, 500.0, 0.0, 0.0, 0.0);
+    if (tnf.cD_rank2_implemented()) {
+        std::printf("FAIL cD_rank2_implemented: unverified projection must be blocked\n");
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
 void test_capabilities_string_mentions_c4() {
     chiral_N2LO_3NF tnf(-0.2, -0.02914, 500.0, -0.81, -3.2, 0.0);
     std::string caps = tnf.capabilities();
@@ -606,9 +686,11 @@ int main() {
     test_contact_diagonal();
     test_1pe_ct_zero_when_cD_zero();
     test_1pe_ct_nonzero_when_cD_set();
+    test_golden_cD_rank0_1S0_to_3S1();
+    test_cD_higher_l_and_rank2_fail_closed();
     test_2pe_zero_when_c1c3c4_zero();
     test_2pe_nonzero_when_c1c3_set();
-	test_2pe_rank2_fail_closed_3S1_3D1();
+    test_2pe_rank2_fail_closed_3S1_3D1();
 
     std::printf("\n--- Golden value tests (independent SymPy oracle) ---\n");
     test_golden_cE_3S1_diagonal();
@@ -627,7 +709,8 @@ int main() {
     test_c4_nonzero_construction_throws();
     test_c4_small_nonzero_construction_throws();
     test_c4_implemented_returns_false();
-	test_c1c3_rank2_implemented_returns_false();
+    test_c1c3_rank2_implemented_returns_false();
+    test_cD_rank2_implemented_returns_false();
     test_capabilities_string_mentions_c4();
     test_c4_requirement_documented_xfail();
 

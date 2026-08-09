@@ -13,9 +13,10 @@ What this oracle checks
    here (the only angular dependence is the regulator, which factors out).
    This is the calibration check — the oracle MUST reproduce the production
    value to machine precision.
-2. c_D 1PE-contact: the pair vertex is a contact (L_2N=0), so the only angular
-   integral is over the spectator direction (x = cos q.q'). The production code
-   does this exactly. Another calibration check.
+2. c_D 1PE-contact, spectator S wave: the pair vertex is a contact (L_2N=0),
+   and for l=l'=0 the only angular integral is over the spectator direction
+   (x = cos q.q'). The enabled production sector does this exactly. Higher-l
+   and rank-2 pieces remain fail-closed.
 3. c_1/c_3 2PE rank-0: the operator depends on q_2, q_3 which involve BOTH the
    pair (p) and spectator (q) momentum transfers. The production code averages
    over the pair azimuth phi_{p'}, replacing |Delta p|^2 -> p^2 + p'^2 and
@@ -54,9 +55,9 @@ DRIVER = REPO / "build" / "tools" / "3nf_oracle" / "print_w1_element"
 # Physical constants — MUST match include/constants.h for a like-for-like
 # comparison. Values taken from include/constants.h.
 HBARC = 197.327               # MeV fm
-MPI_MEV = 138.0               # pion mass [MeV]  (constants.h: mpi=138.0)
-FPI_MEV = 92.4                # f_pi [MeV]       (constants.h: fpi=92.4)
-GA = 1.29                     # g_A              (constants.h: gA=1.29)
+MPI_MEV = 138.039             # pion mass [MeV]  (include/constants.h)
+FPI_MEV = 92.2                # f_pi [MeV]       (include/constants.h)
+GA = 1.289                    # g_A              (include/constants.h)
 LAMBDA_CHI_MEV = 700.0        # chiral breaking scale [MeV]
 
 # fm units
@@ -143,32 +144,24 @@ def oracle_cE(cE, Lambda, p, q, pp, qp, S_pair, T_pair):
 # depends only on q, q'. The integral is over the spectator direction x = cos(q.q').
 # This should be EXACT (the production code does the same integral).
 # -----------------------------------------------------------------------------
-def oracle_cD_rank0(cD, Lambda, p, q, pp, qp, S_pair, T_pair, two_T3N=1, n_gl=48):
-    """c_D 1PE-contact rank-0 via full spectator x-quadrature.
+def oracle_cD_rank0_swave(cD, Lambda, p, q, pp, qp):
+    """Independent c_D 1S0->3S1 spectator-S-wave matrix element.
 
-    Uses the SPECTATOR momentum transfer Q^2 = |Delta q|^2 = q^2 + q'^2 - 2 q q' x
-    (E2002 eq. A-2). Pair vertex is contact, so no pair-angle dependence.
+    Explicit Pauli-basis states give
+      <S23=0|sigma1.sigma3|S23=1> = sqrt(3),
+      <T23=1|tau1.tau3|T23=0>     = sqrt(3),
+    hence the rank-0 recoupling is +1 after the factor 1/3. The spectator
+    integral is evaluated in closed form, independently of production GL.
     """
-    # Isospin tau1.tau3 matrix element in the coupled |(T_pair, 1/2) T_3N> basis.
-    # tau1.tau3 = (1/2)[T_3N(T_3N+1) - T_pair(T_pair+1) - 3/4]*2 - ... use the
-    # standard result: <(T 1/2)T3 | tau1.tau3 | (T 1/2)T3> connects T_pair to
-    # 1-T_pair (off-diagonal in T_pair for tau1.tau3). For the S-wave spectator
-    # j_1N=1/2 doublet (T_3N=1/2), tau1.tau3 has BOTH diagonal and off-diagonal
-    # pieces. The production recoupling_3nf_1pe_ct_scalar handles this via
-    # tau1_dot_tau3(T_r, T_c, two_T3N). To keep the oracle INDEPENDENT and
-    # focused on the SPATIAL integral (which is the calibration point here),
-    # we compute only the SPATIAL part and let the spin-isospin factor be
-    # supplied by the caller / compared via the ratio.
-    # Spatial integral: int dx 1/(Q^2 + m_pi^2), Q^2 = q^2 + q'^2 - 2 q q' x.
-    xs, ws = gauss_legendre(n_gl, -1.0, 1.0)
-    integ = 0.0
-    for x, w in zip(xs, ws):
-        Q2 = q*q + qp*qp - 2.0*q*qp*x
-        integ += w * 1.0 / (Q2 + MPI*MPI)
-    # The production kernel_1pe_contact returns fourier_norm / (Q2 + m_pi^2)
-    # and the caller multiplies by the spin-isospin recoupling and the
-    # overall coeff -gA cD / (8 fpi^4 Lambda_chi) * 2.
-    return integ  # spatial integral only (spin-isospin factored out)
+    if q <= 0.0 or qp <= 0.0:
+        raise ValueError("closed-form cD oracle requires q,q' > 0")
+    numerator = (q + qp) ** 2 + MPI ** 2
+    denominator = (q - qp) ** 2 + MPI ** 2
+    integ = math.log(numerator / denominator) / (2.0 * q * qp)
+    coeff = -GA * cD / (8.0 * FPI**4 * LAMBDA_CHI) * 2.0
+    fR = regulator_gauss(p, q, Lambda) * regulator_gauss(pp, qp, Lambda)
+    recoupling = (math.sqrt(3.0) * math.sqrt(3.0)) / 3.0
+    return coeff * fR * recoupling * FOURIER_NORM * integ
 
 
 # -----------------------------------------------------------------------------
@@ -356,8 +349,9 @@ def run():
     c1_fm = c1_gev * HBARC / 1000.0
     c3_fm = c3_gev * HBARC / 1000.0
     a_3S1 = resolve_channel(cE, 0, 0, 0, Lambda, 0,1,1,0, 0,1, 1,1)
-    if a_3S1 is None:
-        print("[oracle] 3S1 channel not found; aborting"); return
+    a_1S0 = resolve_channel(cE, 0, 0, 0, Lambda, 0,0,0,1, 0,1, 1,1)
+    if a_3S1 is None or a_1S0 is None:
+        print("[oracle] 1S0/3S1 channel not found; aborting"); return
 
     # =========================================================================
     # CALIBRATION 1: c_E (closed-form, no angular integral).
@@ -378,28 +372,16 @@ def run():
     # x-integral with NO pair-angle dependence) MUST match production.
     # This is the decisive normalization calibration.
     # =========================================================================
-    print("--- calibration 2: c_D 1PE-contact (spatial integral, must match) ---")
-    cD_gev = -1.0  # arbitrary; we compare the spatial integral ratio
-    # The c_D spatial integral is int dx 1/(Q^2+m_pi^2), Q^2=q^2+q'^2-2qq'x.
-    # Oracle computes this directly; production kernel_1pe_contact does the same.
-    xs, ws = gauss_legendre(48, -1.0, 1.0)
+    print("--- calibration 2: c_D rank-0 1S0->3S1 (Pauli + closed form) ---")
+    cD = -0.2
     for (p, q, pp, qp) in [(0.5,0.4,0.6,0.7), (1.0,1.0,1.0,1.0), (0.3,0.8,0.5,0.3)]:
-        integ_oracle = sum(w * 1.0/((q*q+qp*qp-2*q*qp*x) + MPI*MPI) for x,w in zip(xs,ws))
-        # production kernel_1pe_contact returns fourier_norm/(Q2+mp2); the W1_1pe_contact
-        # caller multiplies by coeff, recoupling, fR. We compare the bare spatial integral
-        # by extracting it from the production value: V_prod = coeff*recoup*fR*fourier_norm*integ
-        v_prod_cD = get_production_w1(0.0, cD_gev, 0.0, 0.0, Lambda, (a_3S1, a_3S1), (p,q,pp,qp))
-        if v_prod_cD and abs(v_prod_cD) > 1e-30:
-            # reverse-engineer the production spatial integral
-            # V_prod_cD = (-gA*cD/(8*fpi^4*Lambda_chi))*2 * recoup_1pe * fR * fourier_norm * integ_prod
-            # We can't easily separate recoup_1pe; instead compare the ratio
-            # of the c_D matrix element to the c_E matrix element (same channel,
-            # same momenta) to cancel common factors. Simpler: just confirm c_D
-            # is NON-ZERO and the oracle spatial integral is finite.
-            print(f"  p={p} q={q} p'={pp} q'={qp}: c_D prod W1={v_prod_cD:.6e}, "
-                  f"oracle spatial int={integ_oracle:.6e} (both non-zero: calibration OK)")
-        else:
-            print(f"  p={p} q={q} p'={pp} q'={qp}: c_D prod zero or None (recoupling may vanish)")
+        v_prod_cD = get_production_w1(0.0, cD, 0.0, 0.0, Lambda,
+                                     (a_1S0, a_3S1), (p,q,pp,qp))
+        v_oracle_cD = oracle_cD_rank0_swave(cD, Lambda_fm, p,q,pp,qp)
+        ratio = v_prod_cD / v_oracle_cD if v_prod_cD is not None else float('nan')
+        verdict = "PASS" if abs(ratio - 1.0) < 2e-6 else "FAIL"
+        print(f"  p={p} q={q} p'={pp} q'={qp}: prod={v_prod_cD:.6e} "
+              f"oracle={v_oracle_cD:.6e} prod/oracle={ratio:.8f} {verdict}")
     print()
 
     # =========================================================================

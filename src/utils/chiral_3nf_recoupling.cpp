@@ -261,6 +261,9 @@ double recoupling_3nf_1pe_ct_rank2(
     int L_1N_c, int two_J_1N_c,
     int two_T_3N)
 {
+    // Candidate algebra retained for future derivation work only. It is NOT
+    // called by the production 3NF model: the complete E2002 A-1/Golak angular
+    // projection and an independent phase/normalization oracle are still absent.
     // [EN] Rank-2 [sigma_1 ⊗ sigma_3]_2 . Y_2(q_hat) recoupling coefficient
     // for the c_D 1PE-contact term (spectator-1 picture, E2002 eq. A-1).
     //

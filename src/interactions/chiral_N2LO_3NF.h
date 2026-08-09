@@ -19,9 +19,10 @@
 //   2. One-pion exchange contact (1PE-CT): proportional to c_D
 //   3. Three-nucleon contact (CT): proportional to c_E
 //
-// **IMPLEMENTED TERMS**: c_E; provisional c_D rank-0/rank-2; and the
-// explicitly approximate c₁/c₃ rank-0 monopole projection. The c₁/c₃ rank-2
-// tensor and c₄ term are NOT implemented in the production matrix element.
+// **IMPLEMENTED TERMS**: c_E; independently checked c_D rank-0 for an
+// S-wave spectator; and the explicitly approximate c₁/c₃ rank-0 monopole
+// projection. The c_D rank-2, c_D higher-spectator-wave projection, c₁/c₃
+// rank-2 tensor, and c₄ term are NOT implemented in the production matrix element.
 // The earlier c₁/c₃ rank-2 expression was removed because it was not derived
 // from a full angular projection and required post-hoc Hermitian averaging.
 // The c₄ term
@@ -112,6 +113,17 @@ public:
 				warned_c1c3_approximation = true;
 			}
 		}
+
+		if (m_c_D != 0.0) {
+			static bool warned_cD_approximation = false;
+			if (!warned_cD_approximation) {
+				std::fprintf(stderr,
+					"[chiral_N2LO_c1c3cDcE_approx] WARNING: cD is implemented only "
+					"for the independently checked rank-0 spectator S wave. The "
+					"higher-l and rank-2 projections are fail-closed (zero).\n");
+				warned_cD_approximation = true;
+			}
+		}
 	}
 
 	bool enabled() const override {
@@ -127,6 +139,7 @@ public:
 	// True iff every N²LO term is implemented. Currently always false because
 	// c_4 is not implemented (and rejected at construction).
 	virtual bool c4_implemented() const { return false; }
+	virtual bool cD_rank2_implemented() const { return false; }
 	virtual bool c1c3_rank2_implemented() const { return false; }
 
 	// LEC accessors (GeV⁻¹ units, matching run_params convention) for cache key.
@@ -138,7 +151,7 @@ public:
 	// Status string for run-metadata output.
 	virtual std::string capabilities() const {
 		return std::string("c_E=implemented+independently-verified, ")
-		     + "c_D=provisional(rank-0+rank-2; no full angular oracle), "
+		     + "c_D=rank-0 spectator-S-wave verified; higher-l/rank-2 blocked, "
 		     + "c_1/c_3=rank-0 monopole approximation, "
 		     + "c_1/c_3 rank-2="
 		     + (c1c3_rank2_implemented() ? "implemented" : "NOT implemented (blocked)")
@@ -157,7 +170,7 @@ public:
 	// [EN] Evaluate the W^(1) matrix element in the partial-wave Jacobi-momentum basis.
 	// Evaluates the explicitly limited c1/c3/cD/cE approximation:
 	//   - 3N contact term (c_E): diagonal in alpha, proportional to τ₂·τ₃
-	//   - 1PE-CT (c_D): provisional rank-0 + rank-2 x-quadrature
+	//   - 1PE-CT (c_D): rank-0 spectator S wave only
 	//   - 2PE (c₁, c₃): rank-0 monopole/azimuthal approximation only
 	// The c₁/c₃ rank-2 tensor is fail-closed because no independently verified
 	// full angular projection exists and the previous expression was made
@@ -165,8 +178,8 @@ public:
 	// The c₄ cross-product term (isospin τ₁·(τ₂×τ₃)) is deferred.
 	//
 	// / [CN] 计算 partial-wave Jacobi 动量基下的 W^(1) 矩阵元。当前仅包含：
-	// c_E 接触项、暂定的 c_D rank-0/rank-2，以及 c₁/c₃ rank-0 单极近似。
-	// c₁/c₃ rank-2 和 c₄ 均保持关闭。
+	// c_E 接触项、已独立核查的 c_D 旁观者 S 波 rank-0，以及 c₁/c₃ rank-0 单极近似。
+	// c_D 高 l/rank-2、c₁/c₃ rank-2 和 c₄ 均保持关闭。
 	double W1_element(int alpha_r, int alpha_c,
 					  double p_r, double q_r,
 					  double p_c, double q_c,
@@ -260,7 +273,8 @@ private:
 	// [EN] 1PE-CT term (c_D): one-pion exchange between spectator (particle 1) and pair
 	// particle 3, with a contact interaction in the pair (2,3).
 	//
-	// Implements a provisional rank-0 + rank-2 decomposition
+	// Production currently retains only the independently checked rank-0
+	// spectator-S-wave part of the decomposition
 	// of (σ₁·q̂₃)(σ₃·q̂₃):
 	//   (σ₁·q̂)(σ₃·q̂) = ⅓(σ₁·σ₃)            [rank-0]
 	//                   + [σ₁⊗σ₃]₂·[q̂⊗q̂]₂   [rank-2]
@@ -274,26 +288,23 @@ private:
 	//
 	// Selection rules from E2002 eq. A-1 (contact pair vertex):
 	//   L_2N = L_2N' = 0   (contact pair vertex → S-wave pair only)
-	//   L_1N = L_1N'        (σ operators preserve spectator orbital, enforced by recoupling)
+	//   L_1N = L_1N' = 0    (only the verified spectator S-wave projection is enabled)
 	//
 	// Angular integration: 24-point Gauss-Legendre quadrature for x ∈ [−1, +1].
-	//   rank-0: ∫dx (1/(8π³)) × 1/(Q²+m_π²)           [P_0(x)=1 weight]
-	//   rank-2: ∫dx (1/(8π³)) × P_2(x)/(Q²+m_π²)      [P_2(x)=(3x²−1)/2 weight]
-	//           Note: rank-2 vanishes for l_1N=l_1N'=0 by CG(0,0;2,0|0,0)=0.
+	//   rank-0, l=l'=0: ∫dx (1/(8π³))/(Q²+m_π²)
 	//
-	// Note on sign: the coeff carries a minus sign from E2002 eq. (2.10). For the
-	// sign of the final matrix element vs reference: same convention issue as c_E
-	// (sign may be flipped; see Task 3 discussion). Do not fix here.
-	//
-	// A full independent angular/normalization oracle is still missing, so this
-	// term is not labelled verified even though it is manifestly evaluated (no
-	// post-hoc Hermitian averaging is applied).
+	// The l=l'=0 scalar phase and normalization are checked against an explicit
+	// Pauli-basis recoupling plus the analytic x integral. Higher spectator waves
+	// require their proper Legendre projection, while rank-2 requires the full
+	// E2002 A-1/Golak recoupling. Both are fail-closed until verified.
 	double W1_1pe_contact(int alpha_r, int alpha_c,
 						  double p_r, double q_r,
 						  double p_c, double q_c,
 						  const pw_3N_statespace& pw_states) const
 	{
 		if (m_c_D == 0.0) return 0.0;
+		if (pw_states.L_1N_array[alpha_r] != 0
+		 || pw_states.L_1N_array[alpha_c] != 0) return 0.0;
 
 		// Rank-0 recoupling: (1/3)(σ₁·σ₃)(τ₁·τ₃) in 3N Jj basis.
 		// Selection rules: L_2N=L_2N'=0, L_1N=L_1N' (enforced inside helper).
@@ -307,19 +318,7 @@ private:
 			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
 			pw_states.two_T_3N_array[alpha_r]);
 
-		// Rank-2 recoupling: [σ₁⊗σ₃]₂·Y₂(q̂) coefficient.
-		// For l_1N=0 channels (dominant triton configs): returns 0 by CG selection rule.
-		const double recoup2 = recoupling_3nf_1pe_ct_rank2(
-			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
-			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
-			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
-			pw_states.two_J_3N_array[alpha_r],
-			pw_states.L_2N_array[alpha_c], pw_states.S_2N_array[alpha_c],
-			pw_states.J_2N_array[alpha_c], pw_states.T_2N_array[alpha_c],
-			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
-			pw_states.two_T_3N_array[alpha_r]);
-
-		if (recoup0 == 0.0 && recoup2 == 0.0) return 0.0;
+		if (recoup0 == 0.0) return 0.0;
 
 		// Squared-Gaussian regulator per E2002 eq. (3.19).
 		const double f_bra = chiral_3nf::regulator_gauss(p_r, q_r, m_Lambda);
@@ -327,23 +326,21 @@ private:
 
 		// Gauss-Legendre x-integration for the 1PE pion propagator.
 		// Q²(x) = q² + q'² − 2qq'x  (|Δq|²  per E2002 eq. A-2)
-		// rank-0 weight: P_0(x) = 1
-		// rank-2 weight: P_2(x) = (3x²−1)/2
-		double integ0 = 0.0, integ2 = 0.0;
+		// rank-0 S-wave weight: P_0(x) = 1
+		double integ0 = 0.0;
 		for (int ix = 0; ix < N_GL; ++ix) {
 			const double x  = m_gl_x[ix];
 			const double wx = m_gl_w[ix];
 			const double k  = chiral_3nf::kernel_1pe_contact(p_r, q_r, p_c, q_c,
 			                                                  x, m_mpi_fm);
-			if (recoup0 != 0.0) integ0 += wx * k;               // P_0 = 1
-			if (recoup2 != 0.0) integ2 += wx * k * (1.5*x*x - 0.5); // P_2(x)
+			integ0 += wx * k;
 		}
 
 		// Overall coefficient: −g_A c_D / (8 f_π⁴ Λ_χ) × 2
 		// (factor of 2 from summing j=2 and j=3 in the operator).
 		const double coeff = -m_gA * m_c_D / (8.0 * m_fpi4 * m_Lambda_chi) * 2.0;
 
-		return coeff * f_bra * f_ket * (recoup0 * integ0 + recoup2 * integ2);
+		return coeff * f_bra * f_ket * recoup0 * integ0;
 	}
 
 	// [EN] 2PE term (c₁, c₃): two-pion exchange between pair particles 2,3 via
