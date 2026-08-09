@@ -9,8 +9,9 @@ Nphi=48
 Nx=48
 Np_per_WP=8
 Nq_per_WP=8
-Np_per_WP_W1=1
-Nq_per_WP_W1=1
+# Keep the same converged-baseline quadrature metadata as the paired 3NF run.
+Np_per_WP_W1=2
+Nq_per_WP_W1=2
 chebyshev_s=100
 chebyshev_t=1
 p_grid_type=chebyshev

@@ -3,8 +3,8 @@
 tools/3nf_oracle/wp_quadrature_convergence.py — Phase 4 WP-cell quadrature
 convergence report.
 
-Tests whether the legacy 1-point midpoint rule (Np_per_WP_W1 = Nq_per_WP_W1 = 1,
-the production default) is converged for the W^(1) bin matrix element, by
+Tests whether the legacy 1-point midpoint rule (Np_per_WP_W1 = Nq_per_WP_W1 = 1)
+is converged for the W^(1) bin matrix element, by
 comparing it to higher-order Gauss-Legendre cell quadrature (N=2,4,8 points per
 bin per dimension).
 
@@ -94,7 +94,7 @@ def convergence_table(cE, cD, c1, c3, Lambda, bin_bounds, label):
     print(f"    {'N':>3} {'W1_WP [MeV]':>16} {'rel. diff vs N=8':>18}")
     for N in [1, 2, 4, 8]:
         rdiff = abs(vals[N] - ref) / abs(ref) if abs(ref) > 0 else float('nan')
-        tag = " (midpoint, production default)" if N == 1 else ""
+        tag = " (legacy midpoint diagnostic)" if N == 1 else ""
         print(f"    {N:3d} {vals[N]:16.8e} {rdiff:18.2e}{tag}")
     return ref
 
@@ -132,10 +132,12 @@ def run():
 
     print("\n" + "=" * 72)
     print("Interpretation:")
-    print("  rel. diff vs N=8 < 1e-3 : midpoint (N=1) is converged — production OK")
-    print("  rel. diff vs N=8 > 1e-2  : midpoint NOT converged — the production")
-    print("                              default Np_per_WP_W1=Nq_per_WP_W1=1 introduces")
+    print("  rel. diff vs N=8 < 1e-3 : midpoint (N=1) is converged for this cell")
+    print("  rel. diff vs N=8 > 1e-2  : midpoint is NOT converged; the legacy")
+    print("                              Np_per_WP_W1=Nq_per_WP_W1=1 setting introduces")
     print("                              a discretization error that grows with bin width.")
+    print("  Default N=2 is a safer baseline, not a universal convergence certificate;")
+    print("  wide bins in this report require N=4 for 1e-3-level convergence.")
     print("=" * 72)
 
 

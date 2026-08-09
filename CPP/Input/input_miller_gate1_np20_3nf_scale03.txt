@@ -1,5 +1,5 @@
-# Miller Gate 1 3NF sensitivity with w1_scale=0.3 (approximating 3× correction
-# to the diagnosed c_D/c_1/c_3 overstrength — "effective" physical strength).
+# Miller Gate 1 diagnostic fault injection with w1_scale=0.3.
+# NOT a physical normalization and not valid for benchmark/data comparison.
 two_J_3N_max=1
 J_2N_max=2
 Np_WP=20

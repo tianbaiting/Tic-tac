@@ -5,6 +5,7 @@
 #include "gauss_legendre.h"
 
 #include <cmath>
+#include <cstdio>
 #include <omp.h>
 
 #if TICTAC_USE_NEW_CACHE_LAYER
@@ -104,7 +105,7 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
     // 1/hbarc^5 converts the W^(1) output (fm^5) to MeV^{-5} so the bin matrix
     // element comes out in MeV, matching V_WP's MeV convention.
     //
-    // For Np_per_WP_W1 = Nq_per_WP_W1 = 1 (default) the integral collapses to the
+    // For Np_per_WP_W1 = Nq_per_WP_W1 = 1 (legacy diagnostic) the integral collapses to the
     // single-point rule and the value reduces bit-for-bit to:
     //   p_r·q_r·p_c·q_c · sqrt(Δp_r·Δq_r·Δp_c·Δq_c) · W^(1)(midpoints) / hbarc^5
     // which is what the consumer in solve_faddeev.cpp used to compute inline,
@@ -119,6 +120,14 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
 
     const int Np_quad = std::max(1, run_parameters.Np_per_WP_W1);
     const int Nq_quad = std::max(1, run_parameters.Nq_per_WP_W1);
+    if (Np_quad == 1 || Nq_quad == 1) {
+        std::fprintf(stderr,
+            "[3NF quadrature] WARNING: Np_per_WP_W1=%d, Nq_per_WP_W1=%d uses "
+            "the legacy midpoint rule in at least one dimension. This is a "
+            "diagnostic/reproducibility setting, not evidence of a converged "
+            "physical 3NF result. Compare at least N=2 and N=4.\n",
+            Np_quad, Nq_quad);
+    }
 
     // Per-bin Gauss nodes/weights in MeV (consumer convention).
     std::vector<double> p_nodes_MeV, p_w_MeV, q_nodes_MeV, q_w_MeV;

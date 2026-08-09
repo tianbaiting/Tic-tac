@@ -112,11 +112,14 @@ typedef struct run_params{
 	int         Np_per_WP;
 	int         Nq_per_WP;
 	// [EN] Quadrature points per WP cell when building the W^(1) bin matrix elements
-	// (3NF cache). Default 1 reproduces the legacy midpoint approximation bit-for-bit.
-	// Set to >=2 to upgrade W^(1)_WP to a proper cell-averaged matrix element via
+	// (3NF cache). Default 2 is a substantially safer baseline than the midpoint,
+	// but production grids still require an explicit N=2 versus N=4 convergence check.
+	// Set to 1 only to reproduce the legacy midpoint approximation.
+	// Values >=2 evaluate W^(1)_WP as a cell-averaged matrix element via
 	// Gauss-Legendre quadrature, matching the convention V_WP already uses with Np_per_WP.
-	// / [CN] 构建 W^(1) WP bin 矩阵元（3NF 缓存）时每个 cell 的 Gauss 积分点数。默认 1
-	// 等价于现行 midpoint 近似，逐比特复现旧结果；>=2 时升级为 cell-averaged 矩阵元，
+	// / [CN] 构建 W^(1) WP bin 矩阵元（3NF 缓存）时每个 cell 的 Gauss 积分点数。默认 2
+	// 作为比 midpoint 更安全的基线；生产网格仍须显式比较 N=2 与 N=4。
+	// 1 仅用于逐比特复现旧 midpoint 结果，
 	// 与 V_WP 已使用 Np_per_WP 的约定保持一致。
 	int         Np_per_WP_W1;
 	int         Nq_per_WP_W1;
@@ -160,10 +163,10 @@ typedef struct run_params{
 	double      c_D;
 	double      c_E;
 	double      Lambda_3NF;
-	// Diagnostic knob: scale the entire W^(1) contribution by this factor before adding to the kernel.
-	// Default 1.0 = physical strength. Used to empirically locate the normalization that makes the
-	// Padé-accelerated Neumann iteration converge while preserving the relative structure of the
-	// 3NF contribution across LECs. / [CN] 诊断用标度：在加入核之前对整个 W^(1) 乘以此系数。
+	// Diagnostic/fault-injection knob: scale the entire W^(1) contribution.
+	// Default 1.0 is mandatory for physics runs; non-unity values must never be
+	// used to infer a missing normalization or fit data. / [CN] 诊断/故障注入标度；
+	// 物理运行必须为 1.0，禁止用非 1 值修补归一化或拟合数据。
 	double      w1_scale;
 	std::string subfolder;
 	std::string p_grid_type;

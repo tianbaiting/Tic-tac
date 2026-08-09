@@ -14,10 +14,10 @@ Nx=48
 Np_per_WP=8
 Nq_per_WP=8
 
-# Default 1x1 W^(1) cache (legacy bit-for-bit). Cell-averaged 4x4
-# would help convergence per Step 3, but adds ~16x cache-build cost.
-Np_per_WP_W1=1
-Nq_per_WP_W1=1
+# Cell-averaged W^(1) cache. N=2 is the safer baseline; compare against N=4
+# before treating a physical result as quadrature-converged.
+Np_per_WP_W1=2
+Nq_per_WP_W1=2
 
 chebyshev_s=150
 chebyshev_t=1

@@ -662,8 +662,8 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.chebyshev_s		        = 100;
 	run_parameters.Np_per_WP	 	        = 8;
 	run_parameters.Nq_per_WP	 	        = 8;
-	run_parameters.Np_per_WP_W1             = 1;  // 1 = legacy midpoint W^(1); >=2 = Gauss cell-averaged
-	run_parameters.Nq_per_WP_W1             = 1;
+	run_parameters.Np_per_WP_W1             = 2;  // safer baseline; production must check N=2 vs N=4
+	run_parameters.Nq_per_WP_W1             = 2;
 	run_parameters.channel_idx		        = -1;
 	run_parameters.parallel_run		        = false;
 	run_parameters.potential_model	        = "LO_internal";
