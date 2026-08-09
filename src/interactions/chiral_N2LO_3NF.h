@@ -19,7 +19,12 @@
 //   2. One-pion exchange contact (1PE-CT): proportional to c_D
 //   3. Three-nucleon contact (CT): proportional to c_E
 //
-// **IMPLEMENTED TERMS**: c_E, c_D, c₁, c₃ ONLY. The c₄ term
+// **IMPLEMENTED TERMS**: c_E; provisional c_D rank-0/rank-2; and the
+// explicitly approximate c₁/c₃ rank-0 monopole projection. The c₁/c₃ rank-2
+// tensor and c₄ term are NOT implemented in the production matrix element.
+// The earlier c₁/c₃ rank-2 expression was removed because it was not derived
+// from a full angular projection and required post-hoc Hermitian averaging.
+// The c₄ term
 // (Epelbaum 2002 eq. 2.2-2.3, isospin τ₁·(τ₂×τ₃), momentum cross-product
 // σ·(qᵢ×qⱼ)) is **NOT implemented**. The model is therefore an APPROXIMATION
 // to the full N²LO 3NF and is honestly named `chiral_N2LO_c1c3cDcE_approx`
@@ -95,6 +100,18 @@ public:
 			            "Set c4=0 for the c1/c3/cD/cE approximation; see "
 			            "docs/three_nf_equation_contract.md §8.");
 		}
+
+		if (m_c1 != 0.0 || m_c3 != 0.0) {
+			static bool warned_c1c3_approximation = false;
+			if (!warned_c1c3_approximation) {
+				std::fprintf(stderr,
+					"[chiral_N2LO_c1c3cDcE_approx] WARNING: c1/c3 are evaluated only "
+					"with the rank-0 monopole/azimuthal approximation. The unverified "
+					"rank-2 tensor contribution is fail-closed (zero), and c4 is not "
+					"implemented. This is not a full N2LO partial-wave projection.\n");
+				warned_c1c3_approximation = true;
+			}
+		}
 	}
 
 	bool enabled() const override {
@@ -110,6 +127,7 @@ public:
 	// True iff every N²LO term is implemented. Currently always false because
 	// c_4 is not implemented (and rejected at construction).
 	virtual bool c4_implemented() const { return false; }
+	virtual bool c1c3_rank2_implemented() const { return false; }
 
 	// LEC accessors (GeV⁻¹ units, matching run_params convention) for cache key.
 	// See three_nucleon_force_model.h for the rationale (3NF audit B5).
@@ -119,9 +137,12 @@ public:
 
 	// Status string for run-metadata output.
 	virtual std::string capabilities() const {
-		return std::string("c_E=implemented, c_D=implemented, ")
-		     + "c_1=implemented, c_3=implemented, "
-		     + "c_4=" + (c4_implemented() ? "implemented" : "NOT implemented (blocked)");
+		return std::string("c_E=implemented+independently-verified, ")
+		     + "c_D=provisional(rank-0+rank-2; no full angular oracle), "
+		     + "c_1/c_3=rank-0 monopole approximation, "
+		     + "c_1/c_3 rank-2="
+		     + (c1c3_rank2_implemented() ? "implemented" : "NOT implemented (blocked)")
+		     + ", c_4=" + (c4_implemented() ? "implemented" : "NOT implemented (blocked)");
 	}
 
 	void update_parameters(const double* parameters) override
@@ -134,16 +155,18 @@ public:
 	}
 
 	// [EN] Evaluate the W^(1) matrix element in the partial-wave Jacobi-momentum basis.
-	// Implements all three N2LO 3NF contributions with true partial-wave projection:
+	// Evaluates the explicitly limited c1/c3/cD/cE approximation:
 	//   - 3N contact term (c_E): diagonal in alpha, proportional to τ₂·τ₃
-	//   - 1PE-CT (c_D): rank-0 + rank-2 decomposition of (σ₁·q̂)(σ₃·q̂), x-quadrature
-	//   - 2PE (c₁, c₃): rank-0 + rank-2 decomposition of (σ₂·q₂)(σ₃·q₃), x-quadrature;
-	//     off-diagonal α_r ≠ α_c (e.g. 3S1↔3D1) are now included via the rank-2 tensor.
+	//   - 1PE-CT (c_D): provisional rank-0 + rank-2 x-quadrature
+	//   - 2PE (c₁, c₃): rank-0 monopole/azimuthal approximation only
+	// The c₁/c₃ rank-2 tensor is fail-closed because no independently verified
+	// full angular projection exists and the previous expression was made
+	// Hermitian by an impermissible post-hoc average.
 	// The c₄ cross-product term (isospin τ₁·(τ₂×τ₃)) is deferred.
 	//
-	// / [CN] 计算 partial-wave Jacobi 动量基下的 W^(1) 矩阵元。包含所有三项 N2LO 3NF：
-	// c_E 接触项、c_D 1PE-CT (rank-0+rank-2)、c₁/c₃ 2PE (rank-0+rank-2+off-diagonal)。
-	// c₄ 叉积项推迟实现。
+	// / [CN] 计算 partial-wave Jacobi 动量基下的 W^(1) 矩阵元。当前仅包含：
+	// c_E 接触项、暂定的 c_D rank-0/rank-2，以及 c₁/c₃ rank-0 单极近似。
+	// c₁/c₃ rank-2 和 c₄ 均保持关闭。
 	double W1_element(int alpha_r, int alpha_c,
 					  double p_r, double q_r,
 					  double p_c, double q_c,
@@ -237,7 +260,7 @@ private:
 	// [EN] 1PE-CT term (c_D): one-pion exchange between spectator (particle 1) and pair
 	// particle 3, with a contact interaction in the pair (2,3).
 	//
-	// Implements the true partial-wave matrix element via rank-0 + rank-2 decomposition
+	// Implements a provisional rank-0 + rank-2 decomposition
 	// of (σ₁·q̂₃)(σ₃·q̂₃):
 	//   (σ₁·q̂)(σ₃·q̂) = ⅓(σ₁·σ₃)            [rank-0]
 	//                   + [σ₁⊗σ₃]₂·[q̂⊗q̂]₂   [rank-2]
@@ -262,8 +285,9 @@ private:
 	// sign of the final matrix element vs reference: same convention issue as c_E
 	// (sign may be flipped; see Task 3 discussion). Do not fix here.
 	//
-	// / [CN] 1PE-CT 项 (c_D)：真实分波矩阵元，包含 rank-0 和 rank-2 分解
-	// 以及24点 Gauss-Legendre x 积分。选择定则：L_2N=0（接触配对顶点）。
+	// A full independent angular/normalization oracle is still missing, so this
+	// term is not labelled verified even though it is manifestly evaluated (no
+	// post-hoc Hermitian averaging is applied).
 	double W1_1pe_contact(int alpha_r, int alpha_c,
 						  double p_r, double q_r,
 						  double p_c, double q_c,
@@ -323,8 +347,8 @@ private:
 	}
 
 	// [EN] 2PE term (c₁, c₃): two-pion exchange between pair particles 2,3 via
-	// spectator 1. Implements the TRUE partial-wave matrix element via rank-0 + rank-2
-	// decomposition of (σ₂·q₂)(σ₃·q₃):
+	// spectator 1. The current production model retains only the rank-0
+	// monopole/azimuthal approximation to this operator:
 	//
 	//   (σ₂·q₂)(σ₃·q₃) = ⅓(σ₂·σ₃)(q₂·q₃)         [rank-0, scalar]
 	//                   + [σ₂⊗σ₃]₂·[q₂⊗q₃]₂         [rank-2, tensor]
@@ -339,19 +363,16 @@ private:
 	// eigenvalues with full channel-diagonal selection rules. The ⅓ rank-0
 	// coefficient is applied explicitly in the outer coefficient.
 	//
-	// Rank-2 recoupling: recoupling_3nf_rank2 returns τ₂·τ₃ × √30 × hat × 9j × CG
-	// (pair-only operator, opens L_2N=0 ↔ L_2N=2 transitions). Combined with
-	// kernel_2pe_c1c3_rank2 (which supplies the spatial factor 2/√30 × pp²/prop²),
-	// the total rank-2 contribution is τ₂·τ₃ × 2 × hat × 9j × CG × lec × pp²/prop².
-	//
-	// Key change from legacy: the α_r != α_c early-exit is REMOVED because the rank-2
-	// tensor couples L_2N=0 ↔ L_2N=2 (e.g. 3S1 ↔ 3D1 in the pair), introducing
-	// off-diagonal elements that were previously dropped. These off-diagonal matrix
-	// elements are the primary cause of the sign flip in the 3NF normalization check.
+	// The exact rank-2 tensor would open L_2N=0 ↔ L_2N=2 transitions, but it
+	// requires the full angular projection. The former pp²-only ansatz was not
+	// independently derived and was explicitly averaged with its transpose to
+	// hide its non-Hermiticity. That contribution is therefore fail-closed.
 	//
 	// Angular integration: 24-point Gauss-Legendre quadrature over x=cos(q̂·q̂')∈[-1,+1].
 	//   rank-0: ∫dx kernel_2pe_c1c3(p_r,q_r,p_c,q_c,x,...)  [1/(8π³) included in kernel]
-	//   rank-2: ∫dx kernel_2pe_c1c3_rank2(p_r,q_r,p_c,q_c,x,...) [spatial p_c² factor]
+	// This 1D integral is not an exact PWD: the nonlinear pion propagators use
+	// azimuthally averaged momentum squares. The independent oracle finds
+	// point-dependent errors of roughly 10--40%.
 	//
 	// Overall prefactor: (gA/2fπ)² = gA²/(4fπ²). Note: fπ in fm⁻¹, so fπ² = fm⁻²
 	// and (gA/2fπ)² has units fm². The fπ² is NOT fπ⁴ — see kernel_2pe_c1c3 which
@@ -361,9 +382,8 @@ private:
 	// flip signs to make X positive; the sign conventions for c_1 and c_3 follow
 	// [G2010] eq. (18) with no additional adjustments.
 	//
-	// / [CN] 2PE 项 (c₁, c₃)：真实分波矩阵元，包含 rank-0 和 rank-2 分解以及
-	// 24点 Gauss-Legendre x 积分。关键：删除 alpha_r != alpha_c 早退，因为
-	// rank-2 张量耦合 L_2N=0 ↔ L_2N=2（如 3S1↔3D1），引入非对角矩阵元。
+	// / [CN] 2PE 项 (c₁, c₃)：仅保留 rank-0 单极/方位角平均近似；未经完整
+	// 角投影验证的 rank-2 张量项关闭。
 	double W1_2pe(int alpha_r, int alpha_c,
 				  double p_r, double q_r,
 				  double p_c, double q_c,
@@ -385,20 +405,7 @@ private:
 			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
 			pw_states.two_T_3N_array[alpha_r]);
 
-		// [EN] Rank-2 recoupling: (τ₂·τ₃) × √30 × hat × 9j × CG(L_c,0;2,0|L_r,0).
-		// Non-zero for L_r - L_c = ±2 with S_r=S_c=1 (triplet pairs only).
-		// Enables 3S1 ↔ 3D1 coupling and the associated sign flip.
-		const double recoup2 = recoupling_3nf_rank2(
-			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
-			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
-			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
-			pw_states.two_J_3N_array[alpha_r],
-			pw_states.L_2N_array[alpha_c], pw_states.S_2N_array[alpha_c],
-			pw_states.J_2N_array[alpha_c], pw_states.T_2N_array[alpha_c],
-			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
-			pw_states.two_T_3N_array[alpha_r]);
-
-		if (recoup0 == 0.0 && recoup2 == 0.0) return 0.0;
+		if (recoup0 == 0.0) return 0.0;
 
 		// Squared-Gaussian regulator per E2002 eq. (3.19).
 		const double f_bra = chiral_3nf::regulator_gauss(p_r, q_r, m_Lambda);
@@ -408,46 +415,14 @@ private:
 		// Computed from m_fpi4 = fπ⁴ stored in the class.
 		const double fpi_fm = std::sqrt(std::sqrt(m_fpi4));
 
-		// [EN] Rank-2 Hermitian symmetrization: compute the transposed recoupling
-		// recoup2_T = recoupling with bra and ket swapped (alpha_c→alpha_r convention).
-		// The spatial kernel kernel_2pe_c1c3_rank2 has a pp² = p_c² dependence that
-		// makes W1(alpha_r,alpha_c,p_r,q_r,p_c,q_c) ≠ W1(alpha_c,alpha_r,p_c,q_c,p_r,q_r)
-		// when only one side is evaluated. Explicit symmetrization:
-		//   rank2_contribution = ½ [recoup2(r,c) × integ2(p_r,q_r,p_c,q_c)
-		//                          + recoup2(c,r) × integ2(p_c,q_c,p_r,q_r)]
-		// ensures the full W1 satisfies W1(r,c,p_r,q_r,p_c,q_c) = W1(c,r,p_c,q_c,p_r,q_r).
-		const double recoup2_T = recoupling_3nf_rank2(
-			pw_states.L_2N_array[alpha_c], pw_states.S_2N_array[alpha_c],
-			pw_states.J_2N_array[alpha_c], pw_states.T_2N_array[alpha_c],
-			pw_states.L_1N_array[alpha_c], pw_states.two_J_1N_array[alpha_c],
-			pw_states.two_J_3N_array[alpha_c],
-			pw_states.L_2N_array[alpha_r], pw_states.S_2N_array[alpha_r],
-			pw_states.J_2N_array[alpha_r], pw_states.T_2N_array[alpha_r],
-			pw_states.L_1N_array[alpha_r], pw_states.two_J_1N_array[alpha_r],
-			pw_states.two_T_3N_array[alpha_c]);
-
-		const bool need_rank2 = (recoup2 != 0.0 || recoup2_T != 0.0);
-
 		// Gauss-Legendre x-quadrature for pion propagator kernels.
 		// x = cos(q̂·q̂') ∈ [-1, +1]; Q²(x) = q² + q'² - 2qq'x = |Δq|²(x).
-		double integ0 = 0.0, integ2 = 0.0, integ2_T = 0.0;
+		double integ0 = 0.0;
 		for (int ix = 0; ix < N_GL; ++ix) {
 			const double x  = m_gl_x[ix];
 			const double wx = m_gl_w[ix];
-			if (recoup0 != 0.0) {
-				integ0 += wx * chiral_3nf::kernel_2pe_c1c3(
-					p_r, q_r, p_c, q_c, x, m_mpi_fm, m_c1, m_c3, fpi_fm);
-			}
-			if (need_rank2) {
-				// Direct: kernel with pp = p_c (ket pair momentum)
-				const double k2 = chiral_3nf::kernel_2pe_c1c3_rank2(
-					p_r, q_r, p_c, q_c, x, m_mpi_fm, m_c1, m_c3, fpi_fm);
-				// Transposed: swap (p_r,q_r) ↔ (p_c,q_c) so pp = p_r (bra pair momentum)
-				const double k2_T = chiral_3nf::kernel_2pe_c1c3_rank2(
-					p_c, q_c, p_r, q_r, x, m_mpi_fm, m_c1, m_c3, fpi_fm);
-				if (recoup2   != 0.0) integ2   += wx * k2;
-				if (recoup2_T != 0.0) integ2_T += wx * k2_T;
-			}
+			integ0 += wx * chiral_3nf::kernel_2pe_c1c3(
+				p_r, q_r, p_c, q_c, x, m_mpi_fm, m_c1, m_c3, fpi_fm);
 		}
 
 		// Overall coefficient: (gA/2fπ)² = gA²/(4fπ²).
@@ -456,13 +431,9 @@ private:
 		// Units: gA² dimensionless, fπ² in fm⁻², so coeff has units fm².
 		const double coeff = m_gA * m_gA / (4.0 * fpi_fm * fpi_fm);
 
-		// Rank-0 carries a ⅓ from the (σ₂·q₂)(σ₃·q₃) = ⅓(σ₂·σ₃)(q₂·q₃) decomposition.
-		// Rank-2 does NOT carry ⅓ — it is the full [σ₂⊗σ₃]₂·[q₂⊗q₃]₂ piece.
-		// The ½ symmetrization factor ensures Hermitian symmetry: each side contributes
-		// half of the combined recoup2×integ2 + recoup2_T×integ2_T.
-		return coeff * f_bra * f_ket
-		       * ((1.0/3.0) * recoup0 * integ0
-		          + 0.5 * (recoup2 * integ2 + recoup2_T * integ2_T));
+		// Rank-0 carries 1/3 from the scalar spin decomposition. No rank-2
+		// contribution is added until a manifestly Hermitian full PWD is verified.
+		return coeff * f_bra * f_ket * (1.0/3.0) * recoup0 * integ0;
 	}
 };
 

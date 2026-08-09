@@ -140,6 +140,25 @@ void test_2pe_nonzero_when_c1c3_set() {
     }
 }
 
+void test_2pe_rank2_fail_closed_3S1_3D1() {
+    // The old production rank-2 ansatz was made Hermitian by averaging it with
+    // its transpose and had no full angular oracle. It must contribute exactly
+    // zero until a manifestly Hermitian PWD is independently verified.
+    chiral_N2LO_3NF tnf_2pe(0.0, 0.0, 500.0, -0.81, -3.2, 0.0);
+    pw_3N_statespace pw = make_test_pw_states();
+    int a_3S1 = find_alpha(pw, 0, 1, 1, 0, 0, 1, 1, 1);
+    int a_3D1 = find_alpha(pw, 2, 1, 1, 0, 0, 1, 1, 1);
+    if (a_3S1 < 0 || a_3D1 < 0) {
+        std::printf("FAIL c1/c3 rank2 fail-closed: 3S1/3D1 channels not found\n");
+        g_failures++;
+        return;
+    }
+    const double sd = tnf_2pe.W1_element(a_3S1, a_3D1, 0.6, 0.5, 1.1, 0.8, pw);
+    const double ds = tnf_2pe.W1_element(a_3D1, a_3S1, 1.1, 0.8, 0.6, 0.5, pw);
+    check_close("c1/c3 rank2 3S1->3D1 fail-closed", sd, 0.0, 0.0);
+    check_close("c1/c3 rank2 3D1->3S1 fail-closed", ds, 0.0, 0.0);
+}
+
 // =============================================================================
 // GOLDEN VALUE TESTS — c_E contact
 // =============================================================================
@@ -423,6 +442,16 @@ void test_c4_implemented_returns_false() {
     }
 }
 
+void test_c1c3_rank2_implemented_returns_false() {
+    chiral_N2LO_3NF tnf(0.0, 0.0, 500.0, -0.81, -3.2, 0.0);
+    if (tnf.c1c3_rank2_implemented()) {
+        std::printf("FAIL c1c3_rank2_implemented: unverified tensor must be blocked\n");
+        g_failures++;
+    } else {
+        g_passes++;
+    }
+}
+
 void test_capabilities_string_mentions_c4() {
     chiral_N2LO_3NF tnf(-0.2, -0.02914, 500.0, -0.81, -3.2, 0.0);
     std::string caps = tnf.capabilities();
@@ -579,6 +608,7 @@ int main() {
     test_1pe_ct_nonzero_when_cD_set();
     test_2pe_zero_when_c1c3c4_zero();
     test_2pe_nonzero_when_c1c3_set();
+	test_2pe_rank2_fail_closed_3S1_3D1();
 
     std::printf("\n--- Golden value tests (independent SymPy oracle) ---\n");
     test_golden_cE_3S1_diagonal();
@@ -597,6 +627,7 @@ int main() {
     test_c4_nonzero_construction_throws();
     test_c4_small_nonzero_construction_throws();
     test_c4_implemented_returns_false();
+	test_c1c3_rank2_implemented_returns_false();
     test_capabilities_string_mentions_c4();
     test_c4_requirement_documented_xfail();
 
