@@ -34,6 +34,26 @@ void calculate_PVC_col(double*  col_array,
 					   size_t*  P123_col_array,
 					   size_t   P123_dim);
 
+// Add the bare-3NF part W^(1)·(1+P)·C for one external packet column to a
+// pre-existing right-kernel column.  This is the single implementation used by
+// both calculate_CPVC_col and calculate_all_CPVC_rows.
+//
+// CT_RM storage contract:
+//   CT_RM[a*Nalpha+b][i*Np+j]
+//     = (C^T)_(a i,b j) = C_(b j,a i).
+// Hence the identity term W1*C must sum alpha_j and use
+//   C_(alpha_j p_j,alpha_c p_c)
+//     = CT_RM[alpha_c*Nalpha+alpha_j][p_c*Np+p_j].
+void add_W1_one_plus_P_C_col(double*  col_array,
+							 size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
+							 size_t   Nalpha,      size_t Nq_WP,   size_t Np_WP,
+							 double** CT_RM_array,
+							 double*  P123_val_array,
+							 int*     P123_row_array,
+							 size_t*  P123_col_array,
+							 size_t   P123_dim,
+							 const tnf_kernel_context& tnf_ctx);
+
 // CPVC = C^T·P·V·C is the packet-space kernel that drives both the first Neumann
 // term and every later rescattering step. With 3NF enabled (tnf_ctx.tnf != null
 // and tnf->enabled()), the column also accumulates W^(1)·(1+P)·C, i.e. the full

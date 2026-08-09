@@ -214,132 +214,17 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 								  P123_col_array,
 								  P123_dim);
 
-				// [EN] 3NF contributions: W^(1)·(1+P)·C = W^(1)·C + W^(1)·P·C
-				// Momenta converted MeV→fm^{-1} for W1 API; output scaled fm^5→MeV^{-5}.
-				// w1_scale==0 short-circuit skips the ~O(Nα² Nq² Np³) W1_element hot path.
-				if (tnf_ctx.tnf != nullptr && tnf_ctx.tnf->enabled() && tnf_ctx.w1_scale != 0.0){
-					const three_nucleon_force_model* tnf = tnf_ctx.tnf;
-					const pw_3N_statespace& pw_st = *tnf_ctx.pw_states;
-					const double* p_WP = tnf_ctx.p_WP_array;
-					const double* q_WP = tnf_ctx.q_WP_array;
-
-					const double inv_hbarc  = 1.0 / hbarc;
-					const double inv_hbarc5 = inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc;
-					const double w1_unit    = inv_hbarc5 * tnf_ctx.w1_scale;
-
-					double q_c_mid = 0.5 * (q_WP[idx_q_c] + q_WP[idx_q_c + 1]);
-					double dq_c    = q_WP[idx_q_c + 1] - q_WP[idx_q_c];
-					double wq_c    = q_c_mid * std::sqrt(dq_c);
-					double q_c_fm  = q_c_mid * inv_hbarc;
-
-					// Identity part: W^(1)·C
-					double* C_block = tnf_ctx.CT_RM_array[idx_alpha_c * Nalpha + idx_alpha_c];
-					if (C_block != nullptr){
-						for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
-							if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_c]) continue;
-							if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_c]) continue;
-							if (pw_st.P_3N_array[idx_alpha_r]     != pw_st.P_3N_array[idx_alpha_c])     continue;
-							for (size_t idx_q_r = 0; idx_q_r < Nq_WP; idx_q_r++){
-								double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
-								double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
-								double wq_r    = q_r_mid * std::sqrt(dq_r);
-								double q_r_fm  = q_r_mid * inv_hbarc;
-								for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
-									double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
-									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
-									double wp_r    = p_r_mid * std::sqrt(dp_r);
-									double p_r_fm  = p_r_mid * inv_hbarc;
-									double w1c = 0.0;
-									for (size_t idx_p_j = 0; idx_p_j < Np_WP; idx_p_j++){
-										// CT_RM_array stores C^T in row-major; C[p_j, p_c] = C^T[p_c, p_j] = C_block[p_c*Np+p_j]
-										double C_val = C_block[idx_p_c * Np_WP + idx_p_j];
-										if (C_val == 0.0) continue;
-										double p_j_mid = 0.5 * (p_WP[idx_p_j] + p_WP[idx_p_j + 1]);
-										double dp_j    = p_WP[idx_p_j + 1] - p_WP[idx_p_j];
-										double wp_j    = p_j_mid * std::sqrt(dp_j);
-										double p_j_fm  = p_j_mid * inv_hbarc;
-										// Cache value is the WP bin matrix element in MeV (pre-w1_scale);
-										// fallback does the legacy 1-point midpoint computation inline.
-										double w1_bin;
-										if (tnf_ctx.w1_cache != nullptr) {
-											w1_bin = tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_c,
-																		   idx_p_r, idx_q_r, idx_p_j, idx_q_c)
-											         * tnf_ctx.w1_scale;
-										} else {
-											double w1_raw = tnf->W1_element(idx_alpha_r, idx_alpha_c,
-																			 p_r_fm, q_r_fm,
-																			 p_j_fm, q_c_fm, pw_st);
-											w1_bin = (w1_raw * w1_unit) * (wp_r * wq_r * wp_j * wq_c);
-										}
-										w1c += w1_bin * C_val;
-									}
-									if (w1c != 0.0){
-										PVC_col[idx_alpha_r*Nq_WP*Np_WP + idx_q_r*Np_WP + idx_p_r] += w1c;
-									}
-								}
-							}
-						}
-					}
-
-					// Permutation part: W^(1)·P·C
-					std::vector<double> PC_col_local(Nalpha * Nq_WP * Np_WP, 0.0);
-					calculate_PVC_col(PC_col_local.data(),
-									  idx_alpha_c, idx_p_c, idx_q_c,
-									  Nalpha, Nq_WP, Np_WP,
-									  tnf_ctx.CT_RM_array,
-									  P123_val_array,
-									  P123_row_array,
-									  P123_col_array,
-									  P123_dim);
-					for (size_t idx_k = 0; idx_k < Nalpha * Nq_WP * Np_WP; idx_k++){
-						double pc_val = PC_col_local[idx_k];
-						if (pc_val == 0.0) continue;
-						size_t idx_alpha_k = idx_k / (Nq_WP * Np_WP);
-						size_t idx_q_k = (idx_k % (Nq_WP * Np_WP)) / Np_WP;
-						size_t idx_p_k = idx_k % Np_WP;
-						double p_k_mid = 0.5 * (p_WP[idx_p_k] + p_WP[idx_p_k + 1]);
-						double q_k_mid = 0.5 * (q_WP[idx_q_k] + q_WP[idx_q_k + 1]);
-						double dp_k    = p_WP[idx_p_k + 1] - p_WP[idx_p_k];
-						double dq_k    = q_WP[idx_q_k + 1] - q_WP[idx_q_k];
-						double wp_k    = p_k_mid * std::sqrt(dp_k);
-						double wq_k    = q_k_mid * std::sqrt(dq_k);
-						double p_k_fm  = p_k_mid * inv_hbarc;
-						double q_k_fm  = q_k_mid * inv_hbarc;
-						for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
-							if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_k]) continue;
-							if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_k]) continue;
-							if (pw_st.P_3N_array[idx_alpha_r]     != pw_st.P_3N_array[idx_alpha_k])     continue;
-							for (size_t idx_q_r = 0; idx_q_r < Nq_WP; idx_q_r++){
-								double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
-								double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
-								double wq_r    = q_r_mid * std::sqrt(dq_r);
-								double q_r_fm  = q_r_mid * inv_hbarc;
-								for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
-									double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
-									double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
-									double wp_r    = p_r_mid * std::sqrt(dp_r);
-									double p_r_fm  = p_r_mid * inv_hbarc;
-									// Cache value is the WP bin matrix element in MeV (pre-w1_scale);
-									// fallback does the legacy 1-point midpoint computation inline.
-									double w1_wp;
-									if (tnf_ctx.w1_cache != nullptr) {
-										w1_wp = tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
-																	  idx_p_r, idx_q_r, idx_p_k, idx_q_k)
-										        * tnf_ctx.w1_scale;
-									} else {
-										double w1_raw = tnf->W1_element(idx_alpha_r, idx_alpha_k,
-																		 p_r_fm, q_r_fm,
-																		 p_k_fm, q_k_fm, pw_st);
-										w1_wp = (w1_raw * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
-									}
-									if (w1_wp != 0.0){
-										PVC_col[idx_alpha_r * Nq_WP * Np_WP + idx_q_r * Np_WP + idx_p_r] += w1_wp * pc_val;
-									}
-								}
-							}
-						}
-					}
-				}
+				// Shared with calculate_CPVC_col: W^(1)·(1+P)·C, including
+				// the complete tensor-coupled intermediate-alpha contraction.
+				add_W1_one_plus_P_C_col(PVC_col.data(),
+									 idx_alpha_c, idx_p_c, idx_q_c,
+									 Nalpha, Nq_WP, Np_WP,
+									 CT_RM_array,
+									 P123_val_array,
+									 P123_row_array,
+									 P123_col_array,
+									 P123_dim,
+									 tnf_ctx);
 
 				/* Re-use PVC-column in all relevant calculations */
 				for (size_t i=0; i<num_deuteron_states; i++){
