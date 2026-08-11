@@ -6,8 +6,9 @@ non-deterministic across runs / thread counts, so the U_PW_elements output files
 are NOT bit-for-bit reproducible (the run-to-run max|delta| is ~1e-10 at the
 Np=Nq=5 grid used here — the OpenMP non-determinism floor). This test therefore
 compares the U-matrix elements NUMERICALLY (max abs diff < tol) rather than by
-SHA-256 hash. The baseline was generated with three_nucleon_force=none on the
-master branch.
+SHA-256 hash. The baseline was regenerated after the Padé false-convergence
+fix and independently checked against the dense direct solver: all 40 complex
+elements agree with dense to max|delta|=6.58e-9. See the baseline README.
 
 Also verifies the Phase 7 parser fix: `energy_input_file=<path>.txt` must be
 parseable as an inline key=value override (previously misparsed as an input-list

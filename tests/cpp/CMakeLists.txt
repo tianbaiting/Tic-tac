@@ -115,6 +115,27 @@ target_link_libraries(test_3nf_operator_oracle
 )
 add_test(NAME 3nf_operator_oracle COMMAND test_3nf_operator_oracle)
 
+# Padé convergence honesty: reject the legacy false-positive where a moving
+# sequence was frozen at P[0/0], and require a stable final tail.
+add_executable(test_pade_convergence
+    test_pade_convergence.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/pade_approximant.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/matrix_routines.cpp
+)
+target_include_directories(test_pade_convergence PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver
+    ${CMAKE_SOURCE_DIR}/src/utils
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_pade_convergence
+    ${GSL_LIBRARIES}
+    ${LAPACKE_LIB}
+    ${LAPACK_LIB}
+    ${BLAS_LIB}
+)
+add_test(NAME pade_convergence COMMAND test_pade_convergence)
+
 # Phase 3 oracle driver: prints production W1_element for the independent
 # Python angular oracle (tools/3nf_oracle/angular_oracle.py). NOT a test — a
 # thin wrapper around chiral_N2LO_3NF::W1_element so the oracle can compare

@@ -133,7 +133,7 @@ def pade_approximant(a: List[complex], N: int, M: int, z: complex = 1 + 0j) -> c
 
 
 def compute_best_pade(a: List[complex], NM_max: int = 14) -> Tuple[complex, int, bool]:
-    """Replicate the solver's convergence-tracking loop for a single element.
+    """Replicate the solver's final-tail convergence policy for one element.
 
     Returns (best_PA_value, idx_best_PA, genuinely_converged).
     """
@@ -146,8 +146,6 @@ def compute_best_pade(a: List[complex], NM_max: int = 14) -> Tuple[complex, int,
         return a[0], 0, False
 
     PAs: List[complex] = []
-    genuinely_converged = False
-    idx_best_PA = 0
 
     for NM in range(NM_feasible_max + 1):
         # Need a_0..a_{2*NM}
@@ -157,51 +155,48 @@ def compute_best_pade(a: List[complex], NM_max: int = 14) -> Tuple[complex, int,
             PA = pade_approximant(a, NM, NM, z=1 + 0j)
         except Exception:
             PA = float("nan") + 0j
-        if not np.isfinite(PA) or abs(PA) > 1e15:
-            # Skip pathological (singular Q, overflow, ...)
-            PAs.append(PA)
-            continue
         PAs.append(PA)
-
-        if NM == 0:
-            continue
-
-        # Find best NM using minimum successive difference (matches solver logic)
-        idx_best_PA = 0
-        min_PA_diff = 1.0
-        for NM_prev in range(NM):  # NM_prev = 0..NM-1
-            PA_prev = PAs[NM_prev]
-            if NM_prev - 1 < 0:
-                continue
-            PA_diff_prev = abs(PA_prev - PAs[NM_prev - 1])
-            if PA_diff_prev < min_PA_diff and PA_diff_prev > 1e-15:
-                idx_best_PA = NM_prev
-                min_PA_diff = PA_diff_prev
-        PA_diff_curr = abs(PA - PAs[NM - 1])
-        if PA_diff_curr < min_PA_diff and PA_diff_curr > 1e-15:
-            idx_best_PA = NM
-            min_PA_diff = PA_diff_curr
-
-        # Convergence criteria
-        crit_0 = (NM == NM_max)
-        crit_1 = (NM - idx_best_PA > 4)
-        if idx_best_PA < len(PAs):
-            best_PA_val = PAs[idx_best_PA] if idx_best_PA < len(PAs) else PA
-            crit_2 = (
-                min_PA_diff < 1e-6 * abs(best_PA_val)
-                and abs(best_PA_val) > 0
-            )
-        else:
-            crit_2 = False
-        crit_3 = (min_PA_diff < 1e-7)
-        if crit_0 or crit_1 or crit_2 or crit_3:
-            genuinely_converged = bool(crit_1 or crit_2 or crit_3)
-            break
 
     if not PAs:
         return 0 + 0j, 0, False
-    if idx_best_PA >= len(PAs):
-        idx_best_PA = len(PAs) - 1
+
+    finite_orders = [idx for idx, value in enumerate(PAs)
+                     if np.isfinite(value.real) and np.isfinite(value.imag)]
+    if not finite_orders:
+        return PAs[0], 0, False
+    latest_finite_order = finite_orders[-1]
+
+    # Production only certifies convergence at the configured final order and
+    # only if its last three consecutive updates satisfy abs+relative tolerance.
+    genuinely_converged = (
+        NM_feasible_max == NM_max
+        and latest_finite_order == NM_max
+        and NM_max >= 3
+    )
+    if genuinely_converged:
+        for upper in range(NM_max, NM_max - 3, -1):
+            current, previous = PAs[upper], PAs[upper - 1]
+            if not (np.isfinite(current.real) and np.isfinite(current.imag)
+                    and np.isfinite(previous.real) and np.isfinite(previous.imag)):
+                genuinely_converged = False
+                break
+            tolerance = 1e-7 + 1e-5 * max(abs(current), abs(previous))
+            if abs(current - previous) > tolerance:
+                genuinely_converged = False
+                break
+
+    if genuinely_converged:
+        idx_best_PA = NM_max
+    else:
+        finite_pairs = [upper for upper in range(1, len(PAs))
+                        if (np.isfinite(PAs[upper].real)
+                            and np.isfinite(PAs[upper].imag)
+                            and np.isfinite(PAs[upper - 1].real)
+                            and np.isfinite(PAs[upper - 1].imag))]
+        idx_best_PA = (min(finite_pairs,
+                           key=lambda upper: abs(PAs[upper] - PAs[upper - 1]))
+                       if finite_pairs else latest_finite_order)
+
     return PAs[idx_best_PA], idx_best_PA, genuinely_converged
 
 

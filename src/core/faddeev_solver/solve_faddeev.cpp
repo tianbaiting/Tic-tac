@@ -412,12 +412,10 @@ void pade_method_solve(cdouble*  U_array,
 	cdouble* pade_approximants_array      = new cdouble [num_EL_A_vals * (NM_max+1)];
 	size_t*  pade_approximants_idx_array  = new size_t  [num_EL_A_vals];
 	bool*    pade_approximants_conv_array = new bool    [num_EL_A_vals];
-	// [EN] Honesty layer (additive, parallel to *_conv_array). truly_converged_array is
-	// set when criteria 1/2/3 fire; maxiter_truncated_array is set ONLY when criterion 0
-	// (NM == NM_max) fired without any of 1/2/3. Old consumers reading *_conv_array are
-	// unaffected. / [CN] 诚信层（与 *_conv_array 平行新增）。truly_converged_array 在
-	// criteria 1/2/3 触发时置位；maxiter_truncated_array 仅在 criterion 0 (NM == NM_max)
-	// 触发而 1/2/3 都未满足时置位。读旧 *_conv_array 的代码不受影响。
+	// [EN] Honesty layer (additive, parallel to *_conv_array).  A result is
+	// genuinely converged only when the final three consecutive diagonal Padé
+	// updates are stable; reaching NM_max without that stable tail is recorded as
+	// max-order truncated.  Old consumers reading *_conv_array are unaffected.
 	bool*    pade_approximants_truly_converged_array     = new bool [num_EL_A_vals];
 	bool*    pade_approximants_maxiter_truncated_array   = new bool [num_EL_A_vals];
 	size_t	 num_converged_elements		  = 0;
@@ -851,7 +849,10 @@ void pade_method_solve(cdouble*  U_array,
 
 	/* Loop over number of Pade-terms we use */
 	for (size_t NM=0; NM<NM_max+1; NM++){
-		if (num_converged_elements==num_EL_A_vals){
+		const bool elastic_complete = (num_converged_elements == num_EL_A_vals);
+		const bool breakup_complete = !run_parameters.include_breakup_channels
+		                           || (num_converged_BU_elements == num_BU_A_vals);
+		if (elastic_complete && breakup_complete){
 			printf("     - Convergence reached for all on-shell elements! \n"); fflush(stdout);
 			break;
 		}
@@ -1181,58 +1182,19 @@ void pade_method_solve(cdouble*  U_array,
 
 					pade_approximants_array[idx_NDOS*(NM_max+1) + NM] = PA;
 					
-					/* See if we've reached convergence with this iteration */
-					size_t idx_best_PA = 0;
-					bool convergence_reached = false;
+					const pade_convergence_decision decision = assess_pade_convergence(
+						&pade_approximants_array[idx_NDOS*(NM_max+1)], NM, NM_max);
 
-					/* Find minimum PA from previous calculations */
-					double min_PA_diff = 1;
-					for (int NM_prev=0; NM_prev<NM; NM_prev++){
-						cdouble PA_prev = pade_approximants_array[idx_NDOS*(NM_max+1) + NM_prev];
-
-						/* Calculate difference between PAs from previous PA-calculations */
-						double PA_diff_prev = std::abs(PA_prev - pade_approximants_array[idx_NDOS*(NM_max+1) + NM_prev-1]);
-
-						/* Ignore PA_diff_prev if numerically equal to the previous PA_diff, overwrite if smaller than min_PA_diff */
-						if (PA_diff_prev<min_PA_diff && PA_diff_prev>1e-15){
-							idx_best_PA = NM_prev;
-							min_PA_diff = PA_diff_prev;
-						}
-					}
-					/* See if current PA is better/worse than previous minimum */
-					double PA_diff_curr = std::abs(PA - pade_approximants_array[idx_NDOS*(NM_max+1) + NM - 1]);
-					
-					/* Ignore PA_diff_curr if numerically equal to the previous PA_diff_curr, overwrite if smaller than min_PA_diff */
-					if (PA_diff_curr<min_PA_diff && PA_diff_curr>1e-15){
-						idx_best_PA = NM;
-						min_PA_diff = PA_diff_curr;
-					}
-
-					/* Criterias for convergence¨
-					 * If any are fulfilled, we set convergence to true for current on-shell element */
-					bool convergence_criteria_0 = (NM==NM_max);													// Cannot go past max NM
-					bool convergence_criteria_1 = (NM-idx_best_PA>4);												// If nothing better is found in the last 3 PAs, we assume we found the best
-					bool convergence_criteria_2 = (min_PA_diff<1e-6*std::abs(pade_approximants_array[idx_NDOS*(NM_max+1) + idx_best_PA]));	// If the difference is less than the 4th significant digit, we assume "good enough"
-					bool convergence_criteria_3 = (min_PA_diff<1e-7);												// If we are below single precision resolution, assume convergence
-					
-					if (convergence_criteria_0 ||
-						convergence_criteria_1 ||
-						convergence_criteria_2 ||
-						convergence_criteria_3){
+					/* Freeze only after the configured final order; the helper distinguishes
+					 * a stable final tail from an honest max-order truncation. */
+					if (decision.stop){
 						pade_approximants_conv_array[idx_NDOS] = true;
-						pade_approximants_idx_array[idx_NDOS]  = idx_best_PA;
+						pade_approximants_idx_array[idx_NDOS]  = decision.selected_order;
 						num_converged_elements += 1;
-						// [EN] Honesty split: only criteria 1/2/3 represent genuine
-						// convergence. Criterion 0 (NM == NM_max) without any of 1/2/3
-						// is a max-iter timeout, not convergence. / [CN] 诚信拆分：
-						// 仅 criteria 1/2/3 代表真收敛；criterion 0 (NM == NM_max) 单
-						// 独触发表示达到迭代上限而非收敛。
-						bool genuinely_converged =  convergence_criteria_1
-												 || convergence_criteria_2
-												 || convergence_criteria_3;
-						pade_approximants_truly_converged_array[idx_NDOS]   = genuinely_converged;
-						pade_approximants_maxiter_truncated_array[idx_NDOS] = !genuinely_converged
-																			  && convergence_criteria_0;
+						pade_approximants_truly_converged_array[idx_NDOS] =
+							decision.genuinely_converged;
+						pade_approximants_maxiter_truncated_array[idx_NDOS] =
+							decision.max_order_truncated;
 					}
 				}
 			}
@@ -1259,53 +1221,17 @@ void pade_method_solve(cdouble*  U_array,
 
 						pade_approximants_BU_array[idx_NDOS*(NM_max+1) + NM] = PA;
 						
-						/* See if we've reached convergence with this iteration */
-						size_t idx_best_PA = 0;
-						bool convergence_reached = false;
+						const pade_convergence_decision decision = assess_pade_convergence(
+							&pade_approximants_BU_array[idx_NDOS*(NM_max+1)], NM, NM_max);
 
-						/* Find minimum PA from previous calculations */
-						double min_PA_diff = 1;
-						for (int NM_prev=0; NM_prev<NM; NM_prev++){
-							cdouble PA_prev = pade_approximants_BU_array[idx_NDOS*(NM_max+1) + NM_prev];
-
-							/* Calculate difference between PAs from previous PA-calculations */
-							double PA_diff_prev = std::abs(PA_prev - pade_approximants_BU_array[idx_NDOS*(NM_max+1) + NM_prev-1]);
-
-							/* Ignore PA_diff_prev if numerically equal to the previous PA_diff, overwrite if smaller than min_PA_diff */
-							if (PA_diff_prev<min_PA_diff && PA_diff_prev>1e-15){
-								idx_best_PA = NM_prev;
-								min_PA_diff = PA_diff_prev;
-							}
-						}
-						/* See if current PA is better/worse than previous minimum */
-						double PA_diff_curr = std::abs(PA - pade_approximants_BU_array[idx_NDOS*(NM_max+1) + NM - 1]);
-						
-						/* Ignore PA_diff_curr if numerically equal to the previous PA_diff_curr, overwrite if smaller than min_PA_diff */
-						if (PA_diff_curr<min_PA_diff && PA_diff_curr>1e-15){
-							idx_best_PA = NM;
-							min_PA_diff = PA_diff_curr;
-						}
-
-						/* Criterias for convergence¨
-						* If any are fulfilled, we set convergence to true for current on-shell element */
-						bool convergence_criteria_0 = (NM==NM_max);													// Cannot go past max NM
-						bool convergence_criteria_1 = (NM-idx_best_PA>4);												// If nothing better is found in the last 3 PAs, we assume we found the best
-						bool convergence_criteria_2 = (min_PA_diff<1e-6*std::abs(pade_approximants_BU_array[idx_NDOS*(NM_max+1) + idx_best_PA]));	// If the difference is less than the 4th significant digit, we assume "good enough"
-						bool convergence_criteria_3 = (min_PA_diff<1e-7);												// If we are below single precision resolution, assume convergence
-						
-						if (convergence_criteria_0 ||
-							convergence_criteria_1 ||
-							convergence_criteria_2 ||
-							convergence_criteria_3){
+						if (decision.stop){
 							pade_approximants_BU_conv_array[idx_NDOS] = true;
-							pade_approximants_BU_idx_array[idx_NDOS]  = idx_best_PA;
-							num_converged_elements += 1;
-							bool genuinely_converged =  convergence_criteria_1
-													 || convergence_criteria_2
-													 || convergence_criteria_3;
-							pade_approximants_BU_truly_converged_array[idx_NDOS]   = genuinely_converged;
-							pade_approximants_BU_maxiter_truncated_array[idx_NDOS] = !genuinely_converged
-																					  && convergence_criteria_0;
+							pade_approximants_BU_idx_array[idx_NDOS] = decision.selected_order;
+							num_converged_BU_elements += 1;
+							pade_approximants_BU_truly_converged_array[idx_NDOS] =
+								decision.genuinely_converged;
+							pade_approximants_BU_maxiter_truncated_array[idx_NDOS] =
+								decision.max_order_truncated;
 						}
 					}
 				}
@@ -1387,7 +1313,7 @@ void pade_method_solve(cdouble*  U_array,
 		std::string conv_file = run_parameters.output_folder + "/U_PW_convergence" + file_identification + ".txt";
 		std::ofstream cf(conv_file);
 		cf << "# Per-element Padé convergence honesty (additive sidecar).\n";
-		cf << "# Conv: 1 = truly_converged (criteria 1/2/3); 2 = maxiter_truncated (criterion 0 only).\n";
+		cf << "# Conv: 1 = stable final three-order tail; 2 = max-order truncated.\n";
 		cf << "# Columns: row col q_com Conv idx_best_PA\n";
 		for (size_t idx_d_row=0; idx_d_row<num_deuteron_states; idx_d_row++){
 			for (size_t idx_d_col=0; idx_d_col<num_deuteron_states; idx_d_col++){
