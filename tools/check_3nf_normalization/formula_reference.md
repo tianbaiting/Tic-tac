@@ -174,70 +174,61 @@ From [E2002] eq. (A-4):
        × f_R(p', q') f_R(p, q).
 ```
 
-where `{...}_{6j}` is the Wigner 6j symbol for the 3N isospin recoupling
-(pair-spectator ↔ 12-3 ordering); last argument `1` is 2·(total isospin)
-= 2·T_3N = 1 (doublet, T_3N=½).
+The final `1` in the 6j symbol is the rank of the isospin operator, not the
+three-body isospin.  Direct evaluation gives
+
+```
+  t=0: 6 (-1)^(t+1) {1/2 1/2 t; 1/2 1/2 1} = 6(-1)(1/2) = -3,
+  t=1: 6 (-1)^(t+1) {1/2 1/2 t; 1/2 1/2 1} = 6(+1)(1/6) = +1.
+```
+
+These are exactly the pair eigenvalues of `tau_2·tau_3`; no additional
+isospin-recoupling coefficient remains in Tic-tac's pair-coupled basis.
 
 Selection rules:
 
 - Only S-waves contribute: `L_2N = L_2N' = l_1N = l_1N' = 0`.
 - `S_2N = J_2N`, `j_1N = ½`, `T_2N' = T_2N`, `S_2N' = S_2N`.
 
-The factor `(4π)²` comes from the trivial angular integrations `∫dp̂ ∫dq̂`
-of an S-wave spectator–pair state. **There is no `∫dx` integration —
-the contact term is diagonal in radial-momentum space up to the
-regulator.**
+The factor `(4π)²` comes from the four incoming/outgoing S-wave solid-angle
+integrals.  The contact is constant in the four radial momenta (apart from the
+nonlocal regulator); it is not delta-diagonal in radial momentum.
 
-### 1.4 Spin-isospin recoupling coefficient (closed form)
+### 1.4 Tic-tac Fourier and state normalization
 
 ```
-  A_cE(α', α; T_3N) = 6 (4π)²
-                    × δ_{S_2N S_2N'} δ_{T_2N T_2N'}
-                    × δ_{L_2N 0} δ_{L_2N' 0} δ_{l_1N 0} δ_{l_1N' 0}
-                    × δ_{j_1N ½} δ_{j_1N' ½}
-                    × δ_{S_2N J_2N} δ_{S_2N' J_2N'}
-                    × (-1)^{T_2N + 1}
-                    × SixJ(½, ½, T_2N, ½, ½, T_3N).
+  N_FT(3N) = [(2π)^-3]_p [(2π)^-3]_q = (2π)^-6,
+  N_cE,PW  = (4π)^2 N_FT(3N) = 1/(4π^4).
 ```
 
-Close analog of `Atilde`: at [Tic-tac/src/utils/auxiliary.cpp:863-884](../../src/utils/auxiliary.cpp)
-the same 6j symbol structure appears in the spin recoupling for the
-permutation operator P123.
+The first equality follows from applying Tic-tac's demonstrated 2NF convention
+once for each independent Jacobi relative coordinate.  The WP cache later
+integrates `p' q' p q dp' dq' dp dq` and divides by square roots of bin widths;
+it contains no hidden `(2π)^3` factor.  Thus the normalized spectator contact is
+
+```
+  <p'q'alpha'|W_cE^(1)|pq alpha>_Tic-tac
+    = delta_channels [tau_2·tau_3] E/(4π^4) f_R(p',q') f_R(p,q).
+```
 
 ### 1.5 Benchmark point (3S1, p=q=0.5 fm⁻¹)
 
 Channel α_r = α_c = {L_2N=0, S_2N=1, J_2N=1, T_2N=0, l_1N=0, 2j_1N=1,
 2J_3N=1, 2T_3N=1}.
 
-- `(-1)^{T_2N + 1}` with T_2N=0 → `+1`.
-- `SixJ(½, ½, 0, ½, ½, ½)`: evaluate via standard closed form.
-  Racah: `{½ ½ 0; ½ ½ ½} = -½` (a standard result;
-  `{j_1 j_2 0; j_4 j_5 j_6} = δ_{j_1 j_5} δ_{j_2 j_4} (-1)^{j_1+j_2+j_6}/√((2j_1+1)(2j_2+1))`
-  → δ_{½,½}·δ_{½,½}·(-1)^{½+½+½}/√(2·2) = -1/2. )
-- 6 × (4π)² × 1 × (-½) = -3 × (4π)² = -3 × 157.914 = -473.74.
+- `tau_2·tau_3 = -3` for `T_2N=0`.
+- The raw angular projection is `-3(4π)^2`.
 - Overall scale: `E = cE / (fπ⁴ Λ_χ)`.
   cE = -0.205, fπ = 0.4682 fm⁻¹ → fπ⁴ = 0.04807 fm⁻⁴, Λ_χ = 3.547 fm⁻¹.
   `E = -0.205 / (0.04807 × 3.547) = -1.202 fm⁵`.
 - Regulator: `f_R(0.5, 0.5) = exp(-((4·0.25 + 3·0.25)/(4·6.42))²) = exp(-(1.75/25.68)²) = exp(-0.004643) ≈ 0.99537`.
   Squared: 0.99077.
 
-**Benchmark value** (c_E alone):
-  `V_cE = E × A_cE × f_R² = (-1.202) × (-473.74) × 0.99077`
-        `≈ 564.2 fm⁵` (positive, with numerical sign tied to the
-        [E2002] `-½ E` convention).
-
-**Sign**: after a `-½ E (τ·τ)` convention ([E2002] eq. 2.10) the
-3S1(T_2N=0) gives `τ_2·τ_3 = -3`, so `-½·E·(-3) = +3E/2`. With
-`cE < 0`, `E < 0` hence V < 0 in the [E2002] convention. The present
-code's sign is flipped; this is one root cause of the sign-flip
-observed in the normalization check for c_E.
-
-**Order of magnitude**: `|V_cE| ~ 10²–10³ fm⁵` at these low momenta
-before regulator damping; after the squared-Gaussian [E2002] regulator
-applied at physical triton momenta (where ⟨p²+¾q²⟩ ≫ (0.5 fm⁻¹)²) the
-expectation value per channel is damped to `~10⁻¹ fm⁵` range, giving
-`⟨ψ|V_cE|ψ⟩ ~ 0.4 MeV` in rough agreement with the reference value
-`+0.410 MeV` in `epelbaum_reference.md`.
+For Tic-tac constants (`fpi=92.2 MeV`) and `cE=-0.205`, the normalized
+benchmark is `+4.624485603949657e-3 fm^5`.  The sign follows directly from
+positive `E tau_2·tau_3`: both `E` and the `T_2N=0` eigenvalue are negative.
+The raw Epelbaum value before `(2π)^-6` is about `+5.691e2 fm^5`; it must not be
+fed directly to Tic-tac's radial/WP integrals.
 
 ---
 
@@ -681,30 +672,19 @@ for the full Jj ↔ LS recoupling.
 
 ---
 
-## 6. Pending clarifications (questions for human review)
+## 6. Audit resolution ledger
 
-1. **Sign convention of V^(1)_cont**: [E2002] eq. (2.10) writes
-   `V^(1)_cont = -½ E Σ (τ_j·τ_k)`, but the current code in
-   `W1_contact` uses `+ cE/(fπ⁴ Λ_χ)·(τ_2·τ_3)`. Factor of `-½` may be
-   the missing piece, or a separate antisymmetrization normalization
-   (Navrátil convention absorbs it). Cross-check against [W2008]
-   (Witała PRC 77 034004) before committing a sign fix.
+1. **Resolved - contact sign and pair counting**: visual inspection and text
+   extraction of [E2002] Eq. (2.10) give `+½ E sum_(j!=k) tau_j·tau_k`.
+   Each unordered pair occurs twice, so `V^(1)_cont=+E tau_2·tau_3`.
 
-2. **Regulator power**: [E2002] eq. (3.19) has
-   `fR = exp(-((4p²+3q²)/(4Λ²))²)` (**squared** Gaussian). Current
-   code uses a linear exponent `exp(-(p²+¾q²)/Λ²)`. Fixing this alone
-   is likely responsible for a factor ~100× in X for the c_E channel.
+2. **Resolved - regulator power**: [E2002] Eq. (3.19) and production both use
+   `fR=exp(-((4p²+3q²)/(4Λ²))²)` on bra and ket.
 
-3. **[E2002] eq. (A-1) literal transcription**: The PDF→text conversion
-   of the Appendix A is hard to read due to nested 6j and
-   CG-coefficient TeX breaks (see
-   /tmp/3nf_papers/epelbaum2002.txt:989-1148 — the literal equation
-   spans ~160 lines of broken-up symbols). The schematic transcription
-   in §2.3 above captures the structure but **every** coupling factor
-   must be verified against a clean PDF or LaTeX source before coding.
-   Recommend reviewing the original Eur. Phys. J. A published version
-   (open access at Springer) or requesting the LaTeX source from
-   Epelbaum directly.
+3. **Resolved for A-4; open for analytic A-1 reuse**: the original PDF page was
+   rendered and A-4 unambiguously reads `6E(4π)^2`.  The exact full numerical
+   five-angle projector is authoritative for production development; no broken
+   OCR transcription of A-1 may be coded without a separate visual check.
 
 4. **c_1 rank-2 coefficient sign**: the diagnostic tool reports a
    sign flip on c_1 at X = 92-362. The rank-2 piece of

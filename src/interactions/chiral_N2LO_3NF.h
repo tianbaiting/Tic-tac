@@ -151,7 +151,7 @@ public:
 
 	// Status string for run-metadata output.
 	virtual std::string capabilities() const {
-			return std::string("c_E=ordered-pair coefficient verified; Fourier/PWD normalization provisional, ")
+				return std::string("c_E=ordered-pair and Epelbaum-A4/Fourier normalization verified, ")
 		     + "c_D=rank-0 spectator-S-wave verified; higher-l/rank-2 blocked, "
 		     + "c_1/c_3=rank-0 monopole approximation, "
 		     + "c_1/c_3 rank-2="

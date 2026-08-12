@@ -5,18 +5,17 @@ partial-wave matrix element, using the exact conventions that Task 3 installs
 in chiral_N2LO_3NF.h::W1_contact:
 
     W^(1)_cE(alpha', alpha; p', q', p, q)
-        = recoupling_3nf_scalar(alpha', alpha)
+        = recoupling_3nf_contact_cE(alpha', alpha)
           * kernel_contact(c_E, fpi^4, Lambda_chi)
           * f_R(p', q') * f_R(p, q)                                (Eq. A)
 
 with
 
-    recoupling_3nf_scalar (rank-0) = (sigma_2 . sigma_3) * (tau_2 . tau_3)
-                                     * (Kronecker selection on all quantum numbers
-                                        of pair and spectator)
+    recoupling_3nf_contact_cE = (tau_2 . tau_3)
+                               * (Kronecker selection on all quantum numbers)
 
-    kernel_contact = c_E / (fpi^4 * Lambda_chi)                     (fm^5)
-                     [E2002 eq. 2.10: V^(1)_cont = -1/2 E sum_{j!=k} (tau_j . tau_k)]
+    kernel_contact = c_E / (fpi^4 * Lambda_chi) * 1/(4*pi^4)       (fm^5)
+                     [E2002 eqs. 2.10, 2.12, and A-4]
 
     f_R(p, q; Lambda) = exp( -((4 p^2 + 3 q^2) / (4 Lambda^2))^2 ) (dimensionless)
                        [E2002 eq. 3.19, squared-Gaussian]
@@ -27,14 +26,9 @@ Diagonal 3S1 channel:
 
 At p = q = p' = q' = 0.5 fm^-1.
 
-NOTE: The Task-1 helper `recoupling_3nf_scalar` deliberately encodes the
-rank-0 scalar piece as (sigma . sigma) * (tau . tau).  For the strict c_E
-contact operator, only (tau . tau) is present on physical grounds (the
-operator is a pure isospin scalar with no sigma dependence, see
-formula_reference.md §1.1); the extra (sigma . sigma) = 2 S(S+1) - 3 is
-innocuous for S_pair = 1 (factor +1) but would spuriously enter S_pair = 0.
-This matches the deliberate design choice in the pw-kernels infrastructure
-and is what the rewrite installs.  We flag this for the reviewer.
+The normalization 1/(4*pi^4) is the product of the raw S-wave angular factor
+(4*pi)^2 in Epelbaum Eq. (A-4) and one (2*pi)^-3 Fourier factor for each of the
+two independent Jacobi coordinates.
 """
 
 import math
@@ -70,33 +64,27 @@ def main():
     print()
 
     # ------------------- channel quantum numbers (3S1 diag) -------------------
-    S_2N = 1
     T_2N = 0
     # (recoupling is diagonal in all of L_2N, S_2N, J_2N, T_2N, L_1N, j_1N.)
 
-    # sigma_2 . sigma_3  =  2 S_pair (S_pair + 1) - 3
-    #                    =  2*1*2 - 3 = +1
-    sigma_sigma = 2.0 * S_2N * (S_2N + 1) - 3.0
     # tau_2 . tau_3      =  2 T_pair (T_pair + 1) - 3
     #                    =  2*0*1 - 3 = -3
     tau_tau = 2.0 * T_2N * (T_2N + 1) - 3.0
-    # Helper (Task 1) returns this product (no 6j, no (4pi)^2):
-    recoup = sigma_sigma * tau_tau
+    recoup = tau_tau
 
-    print("[recoupling coefficient (Task-1 rank-0 convention)]")
-    print(f"  sigma_2 . sigma_3 (S_2N=1) = {sigma_sigma:+.1f}")
+    print("[c_E recoupling coefficient]")
     print(f"  tau_2   . tau_3   (T_2N=0) = {tau_tau:+.1f}")
-    print(f"  recoupling_3nf_scalar       = sigma*sigma * tau*tau = {recoup:+.6f}")
+    print(f"  recoupling_3nf_contact_cE   = tau*tau = {recoup:+.6f}")
     print()
 
     # ----------------------- kernel_contact (Task 2) --------------------------
-    # c_E / (fpi^4 * Lambda_chi), with 1/(2π)³ Fourier normalization.
+    # c_E / (fpi^4 * Lambda_chi), with exact contact PWD normalization.
     # The 1/2 in Epelbaum Eq. (2.10) is exhausted by the ordered-pair sum.
-    fourier_norm_3nf = 1.0 / (8.0 * math.pi * math.pi * math.pi)
-    kernel = fourier_norm_3nf * (c_E / (fpi4_fm * Lambda_chi_fm))
+    contact_pw_norm = 1.0 / (4.0 * math.pi**4)
+    kernel = contact_pw_norm * (c_E / (fpi4_fm * Lambda_chi_fm))
     print("[kernel_contact (Task 2)]")
-    print(f"  (1/(8π³)) * c_E / (fpi^4 * Lambda_chi)")
-    print(f"  = {fourier_norm_3nf:.6e} * ({c_E}) / ({fpi4_fm:.6e} * {Lambda_chi_fm:.6f})")
+    print(f"  (1/(4π⁴)) * c_E / (fpi^4 * Lambda_chi)")
+    print(f"  = {contact_pw_norm:.6e} * ({c_E}) / ({fpi4_fm:.6e} * {Lambda_chi_fm:.6f})")
     print(f"  = {kernel:+.6e}  [fm^5]")
     print()
 
@@ -122,7 +110,7 @@ def main():
     print()
 
     # ------------------------- sanity: arithmetic trace -----------------------
-    # recoup = +1 * (-3) = -3
+    # recoup = tau_2.tau_3 = -3
     # kernel = -0.205 / (fpi^4 * Lambda_chi)
     # fR^2   ~ 0.99 (near 1; regulator barely damps at p=q=0.5 fm^-1)
     # Final sign: recoup(-3) * kernel(negative) * fR^2(positive) = positive.
@@ -136,7 +124,7 @@ def main():
     fpi_task_MeV = 92.4
     fpi_task_fm = fpi_task_MeV / hbarc
     fpi4_task_fm = fpi_task_fm**4
-    kernel_task = fourier_norm_3nf * (c_E / (fpi4_task_fm * Lambda_chi_fm))
+    kernel_task = contact_pw_norm * (c_E / (fpi4_task_fm * Lambda_chi_fm))
     W1_task = recoup * kernel_task * fR * fR
     print(f"[ref: with fpi=92.4 MeV (task-spec) -> W1 = {W1_task:+.6e} fm^5]")
 

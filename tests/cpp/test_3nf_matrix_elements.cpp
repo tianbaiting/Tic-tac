@@ -235,8 +235,8 @@ void test_2pe_rank2_fail_closed_3S1_3D1() {
 // Independent oracle: tools/check_3nf_normalization/oracle_cE_sympy.py
 // Derivation: explicit Pauli-matrix sum on the |(½½)T, ½; T_3N⟩ state, NOT the
 // closed form 2T(T+1)-3 used in the C++ helper. Regulator per E2002 eq. (3.19)
-// squared-Gaussian, evaluated independently in Python. Fourier norm 1/(8π³)
-// and angular (4π)² included.
+// squared-Gaussian, evaluated independently in Python.  The raw angular
+// factor (4π)² and two-coordinate Fourier factor (2π)^-6 are both included.
 //
 // Locked parameters (must match oracle_cE_sympy.py exactly):
 //   p = q = p' = q' = 0.5 fm⁻¹
@@ -247,7 +247,7 @@ void test_2pe_rank2_fail_closed_3S1_3D1() {
 
 // Golden values from oracle_cE_sympy.py (committed JSON).
 // Oracle uses the SAME convention as the C++ W1_element:
-//   W_cE = tau23 × (c_E / (f_π⁴ Λ_χ)) × 1/(8π³) × f_R²
+//   W_cE = tau23 × (c_E / (f_π⁴ Λ_χ)) × 1/(4π⁴) × f_R²
 // The INDEPENDENT part is the tau23 eigenvalue, derived via explicit Pauli
 // matrix sum on |(½½)T⟩ rather than the closed form 2T(T+1)−3.
 // Constants: f_π = 92.2 MeV, Λ_χ = 700 MeV, ħc = 197.327 MeV·fm.
@@ -257,10 +257,10 @@ static constexpr double GOLDEN_cE_pp_fm  = 0.5;
 static constexpr double GOLDEN_cE_qp_fm  = 0.5;
 static constexpr double GOLDEN_cE_cE     = -0.02914;
 static constexpr double GOLDEN_cE_Lambda = 500.0;  // MeV
-// Values from oracle_cE_sympy.py regenerated on 2026-08-12 after correcting
-// the ordered-pair factor in Epelbaum Eq. (2.10).
-static constexpr double GOLDEN_cE_3S1    = +2.0651374515022864e-03;  // fm⁵
-static constexpr double GOLDEN_cE_1S0    = -6.883791505007622e-04;   // fm⁵
+// Values from oracle_cE_sympy.py regenerated on 2026-08-13 after correcting
+// the ordered-pair factor and the Epelbaum-A4/Fourier normalization.
+static constexpr double GOLDEN_cE_3S1    = +1.3147073342831526e-03;  // fm⁵
+static constexpr double GOLDEN_cE_1S0    = -4.3823577809438426e-04;  // fm⁵
 // Ratio is convention-invariant: tau23(T=0)/tau23(T=1) = -3/+1 = -3.
 // This is the CRITICAL test that exposes the original B1 bug: the old code
 // returned sigma*sigma × tau*tau which would have given
@@ -273,7 +273,7 @@ static constexpr double GOLDEN_cE_RATIO_3S1_over_1S0 = -3.0;
 // Fourier factor and verify that production has not retained an extra 1/2.
 void test_cE_spectator_component_ordered_pair_counting() {
     const double stripped = chiral_3nf::kernel_contact(1.0, 1.0, 1.0)
-                          / chiral_3nf::fourier_norm_3nf;
+                          / chiral_3nf::contact_pw_normalization;
     check_close("cE spectator component exhausts ordered-pair 1/2", stripped, 1.0, 1e-14);
 }
 
@@ -634,25 +634,25 @@ static std::complex<double> tau1_dot_tau2_cross_tau3(int T23_row, int T23_col) {
     // CG for ((T23, ½)_1 → T3N=½, T3N_z=+½):
     //   T23=0: |½,+½⟩ = |m1=+½⟩|T23=0,Tz=0⟩ = |0⟩_1 ⊗ (|1⟩₂₃ − |2⟩₂₃)/√2
     //          → 8-basis: |0*4+1⟩ - |0*4+2⟩ = |1⟩ - |2⟩, /√2
-    //   T23=1: |½,+½⟩ = √(1/3)|m1=−½⟩|1,+1⟩ − √(2/3)|m1=+½⟩|1,0⟩
-    //          → √(1/3)|1*4+0⟩ − √(2/3)|0*4+1 + 0*4+2⟩/√2
-    //            = √(1/3)|4⟩ − √(2/3)(|1⟩+|2⟩)/√2 = √(1/3)|4⟩ − 1/√3 (|1⟩+|2⟩)
-    //            Wait: √(2/3)·1/√2 = √(2/3)/√2 = 1/√3. So = √(1/3)|4⟩ − (|1⟩+|2⟩)/√3
+    //   T23=1: |½,+½⟩ = √(2/3)|m1=−½⟩|1,+1⟩ − √(1/3)|m1=+½⟩|1,0⟩
+    //          → √(2/3)|4⟩ − √(1/6)(|1⟩+|2⟩).
+    // These are the Condon-Shortley CG coefficients
+    // <1,+1;1/2,-1/2|1/2,+1/2> and <1,0;1/2,+1/2|1/2,+1/2>.
     std::vector<std::complex<double>> psi_row(8, 0), psi_col(8, 0);
     double s = 1.0/std::sqrt(2.0);
     if (T23_row == 0) {
         psi_row[1] = s; psi_row[2] = -s;   // |T23=0,Tz=+1/2⟩ = (|1⟩−|2⟩)/√2
     } else {
-        psi_row[4] = std::sqrt(1.0/3.0);   // √(1/3)|4⟩
-        psi_row[1] = -1.0/std::sqrt(3.0);  // −(|1⟩+|2⟩)/√3
-        psi_row[2] = -1.0/std::sqrt(3.0);
+        psi_row[4] = std::sqrt(2.0/3.0);
+        psi_row[1] = -std::sqrt(1.0/6.0);
+        psi_row[2] = -std::sqrt(1.0/6.0);
     }
     if (T23_col == 0) {
         psi_col[1] = s; psi_col[2] = -s;
     } else {
-        psi_col[4] = std::sqrt(1.0/3.0);
-        psi_col[1] = -1.0/std::sqrt(3.0);
-        psi_col[2] = -1.0/std::sqrt(3.0);
+        psi_col[4] = std::sqrt(2.0/3.0);
+        psi_col[1] = -std::sqrt(1.0/6.0);
+        psi_col[2] = -std::sqrt(1.0/6.0);
     }
     std::complex<double> exp(0,0);
     for (int r = 0; r < 8; ++r)
@@ -676,8 +676,8 @@ void test_c4_isospin_offdiagonal_is_imaginary() {
     auto off = tau1_dot_tau2_cross_tau3(0, 1);
     // real part ~ 0, imaginary part non-zero
     check_close("c4 isospin Re<t0|O|t1> == 0", off.real(), 0.0, 1e-12);
-    if (std::abs(off.imag()) > 1e-10) { g_passes++; }
-    else { std::printf("FAIL c4 isospin Im<t0|O|t1> == 0 (should be non-zero)\n"); g_failures++; }
+    check_close("c4 isospin Im<t0|O|t1> == -2sqrt(3)",
+                off.imag(), -2.0 * std::sqrt(3.0), 1e-12);
     // τ_1·(τ_2×τ_3) is HERMITIAN (sum of products of Hermitian operators on
     // different particles), so <t0|O|t1> = conj(<t1|O|t0>).
     auto off_rev = tau1_dot_tau2_cross_tau3(1, 0);

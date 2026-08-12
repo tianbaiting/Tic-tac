@@ -54,17 +54,30 @@
 namespace chiral_3nf {
 
 // -----------------------------------------------------------------------------
-// Partial-wave Fourier normalization constant, 1 / (2π)³ = 1 / (8π³).
+// Fourier and angular normalizations.
 //
-// This mirrors the 2NF convention in src/interactions/chiral_LO_internal.cpp:59
-// where every two-body matrix element is multiplied by 1/(8π³) as part of the
-// Tic-tac partial-wave basis Fourier convention. Diagnosed via the Epelbaum
-// target comparison: the code/ref magnitude ratio was ~246× without this
-// factor, essentially equal to (2π)³ = 248.05. Applied to every non-trivial
-// momentum-space kernel below (kernel_contact, kernel_1pe_contact,
-// kernel_2pe_c1c3). *Not* applied to the dimensionless regulator.
+// Tic-tac's two-body convention applies one factor (2π)^-3 for its one
+// relative coordinate (see chiral_LO_internal.cpp and OPEP.cpp).  A 3N Jacobi
+// state has two independent relative coordinates, p and q, hence a raw 3NF
+// angular projection carries (2π)^-6.  For a momentum-independent contact the
+// four S-wave solid-angle integrals give (4π)^2.  Epelbaum 2002 Eq. (A-4)
+// independently contains exactly this factor.  Therefore the spectator-1 cE
+// S-wave coefficient in Tic-tac is
+//
+//   (2π)^-6 (4π)^2 = 1/(4π^4).
+//
+// The incomplete cD and c1/c3 monopole formulas below were historically
+// calibrated with a single (2π)^-3 factor while omitting the rest of the exact
+// angular projection.  Keep that provisional normalization explicitly named;
+// it must disappear with the approximate kernels rather than masquerade as the
+// correct three-body Fourier factor.
 // -----------------------------------------------------------------------------
-constexpr double fourier_norm_3nf = 1.0 / (8.0 * M_PI * M_PI * M_PI);
+constexpr double fourier_norm_per_jacobi = 1.0 / (8.0 * M_PI * M_PI * M_PI);
+constexpr double fourier_norm_3nf = fourier_norm_per_jacobi * fourier_norm_per_jacobi;
+constexpr double s_wave_contact_angular_factor = 16.0 * M_PI * M_PI;
+constexpr double contact_pw_normalization =
+    fourier_norm_3nf * s_wave_contact_angular_factor;
+constexpr double legacy_rank0_projection_norm = fourier_norm_per_jacobi;
 
 // -----------------------------------------------------------------------------
 // Squared-Gaussian regulator (per [E2002] eq. 3.19):
@@ -107,13 +120,12 @@ inline double regulator_gauss(double p, double q, double Lambda) noexcept
 //   Lambda_chi  — chiral breaking scale Λ_χ in fm⁻¹
 //
 // Returns: scalar in fm⁵ (momentum-independent LEC factor multiplying
-//          (τ₂·τ₃) × f_R(p',q') f_R(p,q) × fourier_norm_3nf in the full
-//          matrix element).
+//          (τ₂·τ₃) × f_R(p',q') f_R(p,q), including the exact S-wave angular
+//          projection and Tic-tac three-body Fourier normalization).
 // -----------------------------------------------------------------------------
 inline double kernel_contact(double c_E, double fpi4_fm, double Lambda_chi) noexcept
 {
-    // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
-    return fourier_norm_3nf * (c_E / (fpi4_fm * Lambda_chi));
+    return contact_pw_normalization * (c_E / (fpi4_fm * Lambda_chi));
 }
 
 // -----------------------------------------------------------------------------
@@ -145,8 +157,8 @@ inline double kernel_1pe_contact(double /*p*/, double q,
 {
     const double Q2  = q * q + qp * qp - 2.0 * q * qp * x;  // |Δq|²
     const double mp2 = m_pi_fm * m_pi_fm;
-    // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
-    return fourier_norm_3nf * (1.0 / (Q2 + mp2));
+    // Provisional normalization of the explicitly incomplete rank-0 model.
+    return legacy_rank0_projection_norm * (1.0 / (Q2 + mp2));
 }
 
 // -----------------------------------------------------------------------------
@@ -221,8 +233,8 @@ inline double kernel_2pe_c1c3(double p, double q,
 
     // Scalar (rank-0) spin-reduction carries a (q₂·q₃) factor from the
     // ⅓(σ₂·σ₃)(q₂·q₃) identity — see §3.2.
-    // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
-    return fourier_norm_3nf * (lec_bracket * q2q3 * prop);
+    // Provisional normalization of the explicitly incomplete rank-0 model.
+    return legacy_rank0_projection_norm * (lec_bracket * q2q3 * prop);
 }
 
 }  // namespace chiral_3nf

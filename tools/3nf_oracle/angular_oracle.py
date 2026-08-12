@@ -64,7 +64,9 @@ LAMBDA_CHI_MEV = 700.0        # chiral breaking scale [MeV]
 MPI = MPI_MEV / HBARC
 FPI = FPI_MEV / HBARC
 LAMBDA_CHI = LAMBDA_CHI_MEV / HBARC
-FOURIER_NORM = 1.0 / (8.0 * math.pi ** 3)
+LEGACY_RANK0_NORM = 1.0 / (8.0 * math.pi ** 3)
+THREE_BODY_FOURIER_NORM = (2.0 * math.pi) ** -6
+CONTACT_PW_NORM = (4.0 * math.pi) ** 2 * THREE_BODY_FOURIER_NORM
 
 
 def regulator_gauss(p, q, Lambda):
@@ -133,7 +135,7 @@ def oracle_cE(cE, Lambda, p, q, pp, qp, S_pair, T_pair):
     tau23 = tau2_dot_tau3(T_pair)
     fR = regulator_gauss(p, q, Lambda) * regulator_gauss(pp, qp, Lambda)
     lec = cE / (FPI**4 * LAMBDA_CHI)
-    return tau23 * lec * fR * FOURIER_NORM
+    return tau23 * lec * fR * CONTACT_PW_NORM
 
 
 # -----------------------------------------------------------------------------
@@ -162,7 +164,7 @@ def oracle_cD_rank0_swave(cD, Lambda, p, q, pp, qp):
     coeff = -GA * cD / (8.0 * FPI**4 * LAMBDA_CHI) * 2.0
     fR = regulator_gauss(p, q, Lambda) * regulator_gauss(pp, qp, Lambda)
     recoupling = (math.sqrt(3.0) * math.sqrt(3.0)) / 3.0
-    return coeff * fR * recoupling * FOURIER_NORM * integ
+    return coeff * fR * recoupling * LEGACY_RANK0_NORM * integ
 
 
 # -----------------------------------------------------------------------------
@@ -340,7 +342,7 @@ def run():
     print("Phase 3 independent angular oracle — chiral N2LO 3NF")
     print("=" * 72)
     print(f"constants: m_pi={MPI:.6f} fpi={FPI:.6f} gA={GA} Lambda_chi={LAMBDA_CHI:.6f} fm")
-    print(f"           fourier_norm=1/(8pi^3)={FOURIER_NORM:.6e}")
+    print(f"           legacy_rank0_norm=1/(8pi^3)={LEGACY_RANK0_NORM:.6e}")
     print()
 
     Lambda = 500.0  # MeV
@@ -410,7 +412,7 @@ def run():
         (0.2, 0.2, 0.2, 0.2),   # low momentum (near threshold)
     ]
     si_3S1 = sigma2_dot_sigma3(1) * tau2_dot_tau3(0) / 3.0
-    prefactor = (GA / (2.0 * FPI)) ** 2 * FOURIER_NORM
+    prefactor = (GA / (2.0 * FPI)) ** 2 * LEGACY_RANK0_NORM
     for (p, q, pp, qp) in points:
         I_full, fR_f = oracle_2pe_rank0_full(c1_fm, c3_fm, Lambda_fm, p, q, pp, qp)
         I_mono, fR_m = oracle_2pe_rank0_production_formula(c1_fm, c3_fm, Lambda_fm, p, q, pp, qp)

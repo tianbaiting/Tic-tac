@@ -315,15 +315,21 @@ convention below.
 | `G_array` (channel resolvent) | MeV⁻¹ | from `(E − e_SWP)⁻¹` |
 | `W1_WP` (WP-basis 3NF, after bin averaging) | MeV | `W1_raw[fm⁵] × (p_r·q_r·p_c·q_c)·√(dp_r·dq_r·dp_c·dq_c) × 1/ħc⁵`, where the four momenta (MeV) + four `√bin` (MeV^{1/2} each) give MeV⁶, times `1/ħc⁵` (MeV⁻⁵·fm⁻⁵ → but `W1_raw` is fm⁵, so fm⁵×MeV⁶×(1/ħc⁵) = MeV⁶×MeV⁻⁵ = MeV). |
 
-**Fourier convention.** The partial-wave Fourier normalisation
-`1/(2π)³ = 1/(8π³)` (`chiral_3nf::fourier_norm_3nf`) is *applied inside the
-scalar kernels* `kernel_contact`, `kernel_1pe_contact`, `kernel_2pe_c1c3`. This
-mirrors the 2NF convention in `chiral_LO_internal.cpp:59`; the diagnostic
-"missing factor of ~(2π)³ = 248" reported in earlier notes is the *symptom* of
-the convention, not an independent scaling to be applied. No extra `(2π)³`
-factor may be added to fix a magnitude mismatch — a mismatch signals a real bug
-in the recoupling or kernel, to be diagnosed against the independent oracle
-(Phase 3), not patched.
+**Fourier convention.** Tic-tac applies `1/(2π)³` for each independent relative
+coordinate.  The 2NF has one such coordinate; a 3NF Jacobi state has `p` and
+`q`, hence a raw 3NF partial-wave projection is multiplied by `(2π)^-6`.
+For the contact, Epelbaum Eq. (A-4) supplies the raw S-wave angular factor
+`(4π)²`, so the normalized spectator coefficient is
+`(4π)²(2π)^-6 = 1/(4π⁴)`.  The independent five-angle projector reproduces
+both this contact factor and Golak Table 2 before the Tic-tac normalization is
+applied.  The WP cache integrates only the radial measure and contains no
+hidden `(2π)^3` cancellation.  The old single factor `1/(8π³)` made `cE` too
+large by `π/2`; W1 cache schema v5 prevents reuse of those blocks.
+
+The incomplete `cD` and `c1/c3` rank-zero development kernels retain a clearly
+named legacy normalization until they are replaced by the exact full angular
+projection.  Their numerical normalization is not part of the locked complete
+N2LO contract.
 
 **Regulator.** Squared-Gaussian per E2002 eq. (3.19):
 `f_R(p,q;Λ) = exp(−((4p²+3q²)/(4Λ²))²)`, applied symmetrically to bra and ket.

@@ -9,6 +9,9 @@ constexpr int P123_SCHEMA_VERSION = 1;
 // Bumped 3 → 4 on 2026-06-21 (3NF audit B5): added c_1, c_3, c_4 and grid
 // hashes to W1Key so caches cannot be wrongly reused across different
 // Hamiltonians / momentum grids. Old v3 caches are read as misses.
-constexpr int W1_SCHEMA_VERSION   = 4;
+// Bumped 4 -> 5 on 2026-08-13: cE now uses the exact Epelbaum A-4 angular
+// factor with the two-Jacobi-coordinate Fourier normalization.  Old v4 W1
+// blocks have a cE coefficient larger by pi/2 and must remain cache misses.
+constexpr int W1_SCHEMA_VERSION   = 5;
 
 }  // namespace tictac::cache

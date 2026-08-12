@@ -205,7 +205,7 @@ def V_cE_matrix_element(channel_r: dict, channel_c: dict,
     Channel dict keys: L_2N, S_2N, J_2N, T_2N, L_1N, two_J_1N, two_J_3N, two_T_3N.
 
     CONVENTION (matches the spectator component of Epelbaum Eq. 2.10):
-      W_cE = tau23 × (c_E / (f_π⁴ Λ_χ)) × 1/(8π³) × f_R(p',q') f_R(p,q)
+      W_cE = tau23 × (c_E / (f_π⁴ Λ_χ)) × 1/(4π⁴) × f_R(p',q') f_R(p,q)
 
     The full +0.5 sum_(j!=k) counts each unordered pair twice.  Thus the
     spectator-1 component is +E tau_2.tau_3, not +0.5 E tau_2.tau_3.
@@ -230,11 +230,12 @@ def V_cE_matrix_element(channel_r: dict, channel_c: dict,
     # INDEPENDENT: Pauli-sum eigenvalue for τ_2·τ_3 in pair isospin T_2N.
     tau23 = pauli_eigenvalue_independent(channel_r['T_2N'])
 
-    # Spectator-component prefactor: c_E / (f_π⁴ Λ_χ) × 1/(8π³).
+    # Spectator-component prefactor including (4π)^2 from the raw S-wave
+    # projection and (2π)^-6 from the two independent Jacobi coordinates.
     fpi_fm        = FPI_MEV / HBARC_MEV_FM
     Lambda_chi_fm = LAMBDA_CHI / HBARC_MEV_FM
     lec = c_E / (fpi_fm**4 * Lambda_chi_fm)
-    fourier_norm = 1.0 / (8.0 * math.pi**3)
+    fourier_norm = 1.0 / (4.0 * math.pi**4)
 
     # Regulator product (Epelbaum 2002 eq. 3.19).
     Lambda_fm = Lambda_3NF_MeV / HBARC_MEV_FM
