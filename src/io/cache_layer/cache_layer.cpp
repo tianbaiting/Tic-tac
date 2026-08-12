@@ -35,6 +35,11 @@ static int64_t file_size(const std::string& path) {
     return (int64_t)st.st_size;
 }
 
+static bool file_exists(const std::string& path) {
+    struct stat st;
+    return ::stat(path.c_str(), &st) == 0;
+}
+
 void initialize(const std::string& cache_root_in) {
     std::lock_guard<std::mutex> g(g_mu);
     g_root = cache_root_in;
@@ -64,6 +69,7 @@ LookupResult lookup_p123(const P123Key& key, P123Arrays* out) {
     auto rel = p123_filename(key);
     auto abs = g_root + "/" + rel;
     r.source_path = abs;
+    if (!file_exists(abs)) { r.miss_reason = "not_found"; return r; }
     bool ok = read_p123_h5(abs, key, out, &r.miss_reason);
     if (ok) {
         r.hit = true; r.miss_reason.clear();
@@ -102,6 +108,7 @@ LookupResult lookup_w1(const W1Key& key, W1Block* out) {
     auto rel = w1_filename(key);
     auto abs = g_root + "/" + rel;
     r.source_path = abs;
+    if (!file_exists(abs)) { r.miss_reason = "not_found"; return r; }
     bool ok = read_w1_h5(abs, key, out, &r.miss_reason);
     if (ok) {
         r.hit = true; r.miss_reason.clear();

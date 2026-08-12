@@ -341,6 +341,20 @@ void test_cache_layer_lookup_miss_when_no_file() {
     rmrf(root);
 }
 
+void test_cache_layer_w1_lookup_miss_when_no_file() {
+    auto root = make_tmpdir();
+    tictac::cache::initialize(root);
+
+    auto k = make_w1_key();
+    tictac::cache::W1Block r{};
+    auto res = tictac::cache::lookup_w1(k, &r);
+    EXPECT(!res.hit);
+    EXPECT_EQ(res.miss_reason, std::string("not_found"));
+
+    tictac::cache::shutdown();
+    rmrf(root);
+}
+
 void test_cache_layer_w1_roundtrip() {
     auto root = make_tmpdir();
     tictac::cache::initialize(root);
@@ -387,6 +401,7 @@ int main() {
 
     test_cache_layer_p123_roundtrip();
     test_cache_layer_lookup_miss_when_no_file();
+    test_cache_layer_w1_lookup_miss_when_no_file();
     test_cache_layer_w1_roundtrip();
 
     if (failures > 0) {
