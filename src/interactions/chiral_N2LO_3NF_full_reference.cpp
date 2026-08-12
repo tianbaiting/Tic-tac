@@ -10,6 +10,9 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <vector>
 
@@ -176,6 +179,116 @@ state8 angular_spin_state_jj(const channel& ch,
 	return result;
 }
 
+struct angular_grid {
+	int order;
+	std::vector<double> cosine;
+	std::vector<double> cosine_weight;
+	std::vector<double> phi;
+	std::vector<double> phi_weight;
+};
+
+std::shared_ptr<const angular_grid> get_angular_grid(int order)
+{
+	static std::mutex cache_mutex;
+	static std::map<int, std::shared_ptr<const angular_grid>> cache;
+	{
+		std::lock_guard<std::mutex> lock(cache_mutex);
+		const auto found = cache.find(order);
+		if (found != cache.end()) return found->second;
+	}
+
+	auto candidate = std::make_shared<angular_grid>();
+	candidate->order = order;
+	candidate->cosine.resize(order);
+	candidate->cosine_weight.resize(order);
+	candidate->phi.resize(order);
+	candidate->phi_weight.resize(order);
+	gauss(candidate->cosine.data(), candidate->cosine_weight.data(), order);
+	gauss(candidate->phi.data(), candidate->phi_weight.data(), order);
+	for (int i = 0; i < order; ++i) {
+		candidate->phi[i] = pi_value * (candidate->phi[i] + 1.0);
+		candidate->phi_weight[i] *= pi_value;
+	}
+
+	std::lock_guard<std::mutex> lock(cache_mutex);
+	const auto inserted = cache.emplace(order, candidate);
+	return inserted.first->second;
+}
+
+struct angular_basis {
+	int order;
+	int num_m;
+	std::vector<state8> ket_states;
+	std::vector<state8> bra_states;
+
+	const state8& ket(int iq, int im) const
+	{
+		return ket_states[static_cast<std::size_t>(iq) * num_m + im];
+	}
+
+	const state8& bra(int ipp, int iphip, int iqp, int iphiqp, int im) const
+	{
+		const std::size_t angular_index =
+			((static_cast<std::size_t>(ipp) * order + iphip) * order + iqp) * order + iphiqp;
+		return bra_states[angular_index * num_m + im];
+	}
+};
+
+std::array<int, 9> basis_key(const channel& ch, int order)
+{
+	return {order, ch.l_pair, ch.s_pair, ch.j_pair, ch.lambda_spectator,
+	        ch.two_j_spectator, ch.two_total_J, ch.t_pair, ch.two_total_T};
+}
+
+std::shared_ptr<const angular_basis> get_angular_basis(
+	const channel& ch, const std::shared_ptr<const angular_grid>& grid)
+{
+	using key_type = std::array<int, 9>;
+	static std::mutex cache_mutex;
+	static std::map<key_type, std::shared_ptr<const angular_basis>> cache;
+	const key_type key = basis_key(ch, grid->order);
+	{
+		std::lock_guard<std::mutex> lock(cache_mutex);
+		const auto found = cache.find(key);
+		if (found != cache.end()) return found->second;
+	}
+
+	auto candidate = std::make_shared<angular_basis>();
+	candidate->order = grid->order;
+	candidate->num_m = ch.two_total_J + 1;
+	candidate->ket_states.reserve(
+		static_cast<std::size_t>(grid->order) * candidate->num_m);
+	for (int iq = 0; iq < grid->order; ++iq) {
+		for (int two_m_j = -ch.two_total_J;
+		     two_m_j <= ch.two_total_J; two_m_j += 2) {
+			candidate->ket_states.push_back(angular_spin_state_jj(
+				ch, 1.0, 0.0, grid->cosine[iq], 0.0, two_m_j));
+		}
+	}
+
+	const std::size_t number_of_bra_angles = static_cast<std::size_t>(grid->order)
+	                                             * grid->order * grid->order * grid->order;
+	candidate->bra_states.reserve(number_of_bra_angles * candidate->num_m);
+	for (int ipp = 0; ipp < grid->order; ++ipp) {
+		for (int iphip = 0; iphip < grid->order; ++iphip) {
+			for (int iqp = 0; iqp < grid->order; ++iqp) {
+				for (int iphiqp = 0; iphiqp < grid->order; ++iphiqp) {
+					for (int two_m_j = -ch.two_total_J;
+					     two_m_j <= ch.two_total_J; two_m_j += 2) {
+						candidate->bra_states.push_back(angular_spin_state_jj(
+							ch, grid->cosine[ipp], grid->phi[iphip],
+							grid->cosine[iqp], grid->phi[iphiqp], two_m_j));
+					}
+				}
+			}
+		}
+	}
+
+	std::lock_guard<std::mutex> lock(cache_mutex);
+	const auto inserted = cache.emplace(key, candidate);
+	return inserted.first->second;
+}
+
 state8 apply_pauli_axis(const state8& input, int particle, int axis)
 {
 	state8 result = zero_state();
@@ -189,16 +302,6 @@ state8 apply_pauli_axis(const state8& input, int particle, int axis)
 		} else {
 			result[index] += (down ? -1.0 : 1.0) * input[index];
 		}
-	}
-	return result;
-}
-
-state8 apply_pauli_dot(const state8& input, int particle, const vector3& vector)
-{
-	state8 result = zero_state();
-	for (int axis = 0; axis < 3; ++axis) {
-		const state8 term = apply_pauli_axis(input, particle, axis);
-		for (int i = 0; i < 8; ++i) result[i] += vector[axis] * term[i];
 	}
 	return result;
 }
@@ -230,26 +333,119 @@ state8 apply_triple_cross_123(const state8& input)
 	return result;
 }
 
-complex spin_matrix_element(const state8& bra, const state8& ket,
-	                          int component, const vector3& q1,
-	                          const vector3& q2, const vector3& q3)
+struct spin_bilinears {
+	std::array<complex, 9> sigma23{};
+	std::array<complex, 27> sigma231{};
+	std::array<complex, 9> sigma12{};
+	std::array<complex, 9> sigma13{};
+	complex identity{0.0, 0.0};
+};
+
+std::array<int, 18> bilinear_key(const channel& bra, const channel& ket, int order)
 {
-	state8 operated = ket;
-	if (component == 0 || component == 1) {
-		operated = apply_pauli_dot(operated, 3, q3);
-		operated = apply_pauli_dot(operated, 2, q2);
-	} else if (component == 2) {
-		operated = apply_pauli_dot(operated, 1, cross(q2, q3));
-		operated = apply_pauli_dot(operated, 3, q3);
-		operated = apply_pauli_dot(operated, 2, q2);
-	} else if (component == 3) {
-		operated = apply_pauli_dot(operated, 2, q1);
-		operated = apply_pauli_dot(operated, 1, q1);
-	} else if (component == 4) {
-		operated = apply_pauli_dot(operated, 3, q1);
-		operated = apply_pauli_dot(operated, 1, q1);
+	const auto bra_key = basis_key(bra, order);
+	const auto ket_key = basis_key(ket, order);
+	std::array<int, 18> result{};
+	std::copy(bra_key.begin(), bra_key.end(), result.begin());
+	std::copy(ket_key.begin(), ket_key.end(), result.begin() + 9);
+	return result;
+}
+
+std::shared_ptr<const std::vector<spin_bilinears>> get_spin_bilinears(
+	const channel& bra, const channel& ket,
+	const std::shared_ptr<const angular_grid>& grid)
+{
+	using key_type = std::array<int, 18>;
+	static std::mutex cache_mutex;
+	static std::map<key_type, std::shared_ptr<const std::vector<spin_bilinears>>> cache;
+	const key_type key = bilinear_key(bra, ket, grid->order);
+	{
+		std::lock_guard<std::mutex> lock(cache_mutex);
+		const auto found = cache.find(key);
+		if (found != cache.end()) return found->second;
 	}
-	return inner_product(bra, operated);
+
+	const auto bra_basis = get_angular_basis(bra, grid);
+	const auto ket_basis = get_angular_basis(ket, grid);
+	auto candidate = std::make_shared<std::vector<spin_bilinears>>();
+	const std::size_t number_of_angles = static_cast<std::size_t>(grid->order)
+	                                   * grid->order * grid->order * grid->order * grid->order;
+	candidate->resize(number_of_angles);
+	std::size_t angular_index = 0;
+	for (int iq = 0; iq < grid->order; ++iq) {
+		for (int ipp = 0; ipp < grid->order; ++ipp) {
+			for (int iphip = 0; iphip < grid->order; ++iphip) {
+				for (int iqp = 0; iqp < grid->order; ++iqp) {
+					for (int iphiqp = 0; iphiqp < grid->order; ++iphiqp, ++angular_index) {
+						spin_bilinears& values = (*candidate)[angular_index];
+						for (int im = 0; im < bra_basis->num_m; ++im) {
+							const state8& bra_spin = bra_basis->bra(ipp, iphip, iqp, iphiqp, im);
+							const state8& ket_spin = ket_basis->ket(iq, im);
+							values.identity += inner_product(bra_spin, ket_spin);
+							for (int a = 0; a < 3; ++a) {
+								for (int b = 0; b < 3; ++b) {
+									state8 operated = apply_pauli_axis(ket_spin, 3, b);
+									operated = apply_pauli_axis(operated, 2, a);
+									values.sigma23[3 * a + b] += inner_product(bra_spin, operated);
+
+									operated = apply_pauli_axis(ket_spin, 2, b);
+									operated = apply_pauli_axis(operated, 1, a);
+									values.sigma12[3 * a + b] += inner_product(bra_spin, operated);
+
+									operated = apply_pauli_axis(ket_spin, 3, b);
+									operated = apply_pauli_axis(operated, 1, a);
+									values.sigma13[3 * a + b] += inner_product(bra_spin, operated);
+
+									for (int c = 0; c < 3; ++c) {
+										operated = apply_pauli_axis(ket_spin, 1, c);
+										operated = apply_pauli_axis(operated, 3, b);
+										operated = apply_pauli_axis(operated, 2, a);
+										values.sigma231[9 * a + 3 * b + c] +=
+											inner_product(bra_spin, operated);
+									}
+								}
+							}
+						}
+						const double inverse_m_count = 1.0 / bra_basis->num_m;
+						values.identity *= inverse_m_count;
+						for (complex& value : values.sigma23) value *= inverse_m_count;
+						for (complex& value : values.sigma231) value *= inverse_m_count;
+						for (complex& value : values.sigma12) value *= inverse_m_count;
+						for (complex& value : values.sigma13) value *= inverse_m_count;
+					}
+				}
+			}
+		}
+	}
+
+	std::lock_guard<std::mutex> lock(cache_mutex);
+	const auto inserted = cache.emplace(key, candidate);
+	return inserted.first->second;
+}
+
+complex contract_rank2(const std::array<complex, 9>& tensor,
+	                     const vector3& first, const vector3& second)
+{
+	complex result{0.0, 0.0};
+	for (int a = 0; a < 3; ++a) {
+		for (int b = 0; b < 3; ++b) result += first[a] * second[b] * tensor[3 * a + b];
+	}
+	return result;
+}
+
+complex contract_rank3(const std::array<complex, 27>& tensor,
+	                     const vector3& first, const vector3& second,
+	                     const vector3& third)
+{
+	complex result{0.0, 0.0};
+	for (int a = 0; a < 3; ++a) {
+		for (int b = 0; b < 3; ++b) {
+			for (int c = 0; c < 3; ++c) {
+				result += first[a] * second[b] * third[c] * tensor[9 * a + 3 * b + c];
+			}
+		}
+	}
+	return result;
 }
 
 channel make_channel(int alpha, const pw_3N_statespace& pw)
@@ -308,14 +504,12 @@ double chiral_N2LO_3NF_full_reference::W1_element(
 	const channel bra = make_channel(alpha_r, pw);
 	const channel ket = make_channel(alpha_c, pw);
 	const int order = m_angular_order;
-	std::vector<double> cosine(order), cosine_weight(order);
-	std::vector<double> phi(order), phi_weight(order);
-	gauss(cosine.data(), cosine_weight.data(), order);
-	gauss(phi.data(), phi_weight.data(), order);
-	for (int i = 0; i < order; ++i) {
-		phi[i] = pi_value * (phi[i] + 1.0);
-		phi_weight[i] *= pi_value;
-	}
+	const auto grid = get_angular_grid(order);
+	const auto spin_cache = get_spin_bilinears(bra, ket, grid);
+	const auto& cosine = grid->cosine;
+	const auto& cosine_weight = grid->cosine_weight;
+	const auto& phi = grid->phi;
+	const auto& phi_weight = grid->phi_weight;
 
 	const int two_m_t = bra.two_total_T;
 	const state8 iso_bra = coupled_three_half_state(bra.t_pair, bra.two_total_T, two_m_t);
@@ -333,15 +527,11 @@ double chiral_N2LO_3NF_full_reference::W1_element(
 	const double f_pi_fourth = f_pi_squared * f_pi_squared;
 	const double d_lec = m_c_D / (f_pi_squared * m_lambda_chi);
 	const double e_lec = m_c_E / (f_pi_fourth * m_lambda_chi);
+	std::size_t angular_index = 0;
 
 	for (int iq = 0; iq < order; ++iq) {
 		const double sq = std::sqrt(std::max(0.0, 1.0 - cosine[iq] * cosine[iq]));
 		const vector3 q_in{q_c * sq, 0.0, q_c * cosine[iq]};
-		std::vector<state8> ket_spin;
-		for (int two_m_j = -ket.two_total_J; two_m_j <= ket.two_total_J; two_m_j += 2) {
-			ket_spin.push_back(angular_spin_state_jj(
-				ket, 1.0, 0.0, cosine[iq], 0.0, two_m_j));
-		}
 		for (int ipp = 0; ipp < order; ++ipp) {
 			const double spp = std::sqrt(std::max(0.0, 1.0 - cosine[ipp] * cosine[ipp]));
 			for (int iphip = 0; iphip < order; ++iphip) {
@@ -352,19 +542,12 @@ double chiral_N2LO_3NF_full_reference::W1_element(
 				};
 				for (int iqp = 0; iqp < order; ++iqp) {
 					const double sqp = std::sqrt(std::max(0.0, 1.0 - cosine[iqp] * cosine[iqp]));
-					for (int iphiqp = 0; iphiqp < order; ++iphiqp) {
+					for (int iphiqp = 0; iphiqp < order; ++iphiqp, ++angular_index) {
 						const vector3 q_out{
 							q_r * sqp * std::cos(phi[iphiqp]),
 							q_r * sqp * std::sin(phi[iphiqp]),
 							q_r * cosine[iqp]
 						};
-						std::vector<state8> bra_spin;
-						for (int two_m_j = -bra.two_total_J;
-						     two_m_j <= bra.two_total_J; two_m_j += 2) {
-							bra_spin.push_back(angular_spin_state_jj(
-								bra, cosine[ipp], phi[iphip], cosine[iqp], phi[iphiqp], two_m_j));
-						}
-
 						const vector3 k2_out = subtract(p_out, scale(0.5, q_out));
 						const vector3 k3_out = subtract(scale(-1.0, p_out), scale(0.5, q_out));
 						const vector3 k2_in = subtract(p_in, scale(0.5, q_in));
@@ -378,34 +561,24 @@ double chiral_N2LO_3NF_full_reference::W1_element(
 						const double common = gA * gA / (4.0 * f_pi_fourth * d2 * d3);
 						const double q2q3 = dot(transfer2, transfer3);
 
-						std::array<complex, 6> spin_me{};
-						spin_me.fill(complex{0.0, 0.0});
-						for (std::size_t im = 0; im < bra_spin.size(); ++im) {
-							spin_me[0] += spin_matrix_element(bra_spin[im], ket_spin[im], 0,
-							                                  transfer1, transfer2, transfer3);
-							spin_me[1] += spin_matrix_element(bra_spin[im], ket_spin[im], 1,
-							                                  transfer1, transfer2, transfer3);
-							spin_me[2] += spin_matrix_element(bra_spin[im], ket_spin[im], 2,
-							                                  transfer1, transfer2, transfer3);
-							spin_me[3] += spin_matrix_element(bra_spin[im], ket_spin[im], 3,
-							                                  transfer1, transfer2, transfer3);
-							spin_me[4] += spin_matrix_element(bra_spin[im], ket_spin[im], 4,
-							                                  transfer1, transfer2, transfer3);
-							spin_me[5] += inner_product(bra_spin[im], ket_spin[im]);
-						}
-						for (complex& value : spin_me) value /= (bra.two_total_J + 1.0);
+						const spin_bilinears& spin = (*spin_cache)[angular_index];
+						const complex spin23 = contract_rank2(spin.sigma23, transfer2, transfer3);
+						const complex spin4 = contract_rank3(
+							spin.sigma231, transfer2, transfer3, cross(transfer2, transfer3));
+						const complex spin_d2 = contract_rank2(spin.sigma12, transfer1, transfer1);
+						const complex spin_d3 = contract_rank2(spin.sigma13, transfer1, transfer1);
 
 						const double weight = cosine_weight[iq] * cosine_weight[ipp]
 						                    * phi_weight[iphip] * cosine_weight[iqp]
 						                    * phi_weight[iphiqp];
 						totals[0] += weight * common * (-4.0 * m_c1_fm * m_pi_squared)
-						           * iso23 * spin_me[0];
+						           * iso23 * spin23;
 						totals[1] += weight * common * (2.0 * m_c3_fm * q2q3)
-						           * iso23 * spin_me[1];
-						totals[2] += weight * common * m_c4_fm * iso_cross * spin_me[2];
+						           * iso23 * spin23;
+						totals[2] += weight * common * m_c4_fm * iso_cross * spin4;
 						totals[3] += weight * (-gA * d_lec / (8.0 * f_pi_squared * d1))
-						           * (iso12 * spin_me[3] + iso13 * spin_me[4]);
-						totals[4] += weight * e_lec * iso23 * spin_me[5];
+						           * (iso12 * spin_d2 + iso13 * spin_d3);
+						totals[4] += weight * e_lec * iso23 * spin.identity;
 					}
 				}
 			}

@@ -25,6 +25,16 @@ void expect_close(const char* label, double value, double expected,
 	}
 }
 
+void expect_true(const char* label, bool condition)
+{
+	if (!condition) {
+		std::printf("FAIL %s\n", label);
+		++failures;
+	} else {
+		std::printf("PASS %s\n", label);
+	}
+}
+
 struct five_channel_space {
 	int l_pair[5] = {1, 0, 0, 1, 0};
 	int s_pair[5] = {1, 1, 0, 1, 0};
@@ -126,6 +136,30 @@ int main()
 	const double contact_reverse = cE.W1_element(
 		1, 1, p_ket, q_ket, p_bra, q_bra, space.pw);
 	expect_close("contact Hermitian exactly", contact_reverse, contact_forward);
+
+	// Fixed-axis forward/reverse differences must shrink with angular order.
+	// The signed N=4 and N=6 values are independently frozen from Python.
+	chiral_N2LO_3NF_full_reference all4(
+		-0.2, -0.205, 500.0, -0.81, -3.2, 5.4, 4);
+	const double forward4 = all4.W1_element(
+		1, 2, p_bra, q_bra, p_ket, q_ket, space.pw);
+	const double reverse4 = all4.W1_element(
+		2, 1, p_ket, q_ket, p_bra, q_bra, space.pw);
+	expect_close("forward Nangle=4 oracle", forward4, 1.3808781771934725e-2);
+	expect_close("reverse Nangle=4 oracle", reverse4, 1.3881881139728283e-2);
+
+	chiral_N2LO_3NF_full_reference all6(
+		-0.2, -0.205, 500.0, -0.81, -3.2, 5.4, 6);
+	const double forward6 = all6.W1_element(
+		1, 2, p_bra, q_bra, p_ket, q_ket, space.pw);
+	const double reverse6 = all6.W1_element(
+		2, 1, p_ket, q_ket, p_bra, q_bra, space.pw);
+	expect_close("forward Nangle=6 oracle", forward6, 1.3775796815388002e-2);
+	expect_close("reverse Nangle=6 oracle", reverse6, 1.3784579177913635e-2);
+	expect_true("Hermiticity residual decreases N=2->4",
+		std::abs(forward4 - reverse4) < std::abs(forward - reverse));
+	expect_true("Hermiticity residual decreases N=4->6",
+		std::abs(forward6 - reverse6) < std::abs(forward4 - reverse4));
 
 	chiral_N2LO_3NF_full_reference zero(
 		0.0, 0.0, 500.0, 0.0, 0.0, 0.0, 2);
