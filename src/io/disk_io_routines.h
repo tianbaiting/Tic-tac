@@ -34,7 +34,6 @@
 #include "hdf5/serial/hdf5_hl.h"
 
 #include "type_defs.h"
-#include "set_run_parameters.h"
 #include "error_management.h"
 #include "make_pw_symm_states.h"
 #include "utils/matrix_routines.h"

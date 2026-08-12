@@ -1,5 +1,9 @@
 
 #include "set_run_parameters.h"
+#include "disk_io_routines.h"
+#include "error_management.h"
+#include <cstdio>
+#include <omp.h>
 
 /* Template soluation copied from: https://stackoverflow.com/questions/16605967/set-precision-of-stdto-string-when-converting-floating-point-values
  * on 21/02/2022.

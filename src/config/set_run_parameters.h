@@ -11,7 +11,6 @@
 #include <algorithm>
 
 #include "type_defs.h"
-#include "disk_io_routines.h"
 
 std::string create_input_printout_string(run_params run_parameters);
 
