@@ -23,6 +23,13 @@ assert GOLAK_SPEC.loader is not None
 sys.modules[GOLAK_SPEC.name] = GOLAK
 GOLAK_SPEC.loader.exec_module(GOLAK)
 
+PWD_PATH = REPO / "tools" / "3nf_oracle" / "full_vector_five_angle_pwd.py"
+PWD_SPEC = importlib.util.spec_from_file_location("full_vector_five_angle_pwd", PWD_PATH)
+PWD = importlib.util.module_from_spec(PWD_SPEC)
+assert PWD_SPEC.loader is not None
+sys.modules[PWD_SPEC.name] = PWD
+PWD_SPEC.loader.exec_module(PWD)
+
 
 class FullVectorN2LOOracleTests(unittest.TestCase):
     def setUp(self):
@@ -144,6 +151,59 @@ class FullVectorN2LOOracleTests(unittest.TestCase):
             with self.subTest(matrix_element=name):
                 relative = abs(values[name] - target) / abs(target)
                 self.assertLess(relative, 3.0e-4)
+
+    def test_generic_five_angle_projector_matches_golak_closed_integrands(self):
+        constants = PWD._OP.N2LOConstants(197.327, 1.29, 92.4, 138.0)
+        projector = PWD.FiveAngleProjector(constants)
+        order = 4
+        closed = GOLAK.integrate(order)
+        scalar = projector.project(
+            PWD.GOLAK_BETA[1],
+            PWD.GOLAK_BETA[1],
+            (1.0, 2.0, 3.0, 4.0),
+            PWD._OP.N2LOLECs(c1_gev_inverse=-0.81, c3_gev_inverse=-3.4),
+            order,
+        )
+        c4 = projector.project(
+            PWD.GOLAK_BETA[2],
+            PWD.GOLAK_BETA[1],
+            (1.0, 2.0, 3.0, 4.0),
+            PWD._OP.N2LOLECs(c4_gev_inverse=3.4),
+            order,
+        )
+        self.assertAlmostEqual((scalar["c1"] + scalar["c3"]).real, closed["G(1,1)"], places=10)
+        self.assertAlmostEqual(c4["c4"].real, closed["G(2,1)"], places=10)
+        self.assertLess(abs(scalar["c1"].imag + scalar["c3"].imag), 1e-12)
+        self.assertLess(abs(c4["c4"].imag), 1e-12)
+
+    def test_generic_contact_projection_has_four_pi_squared_angular_factor(self):
+        projector = PWD.FiveAngleProjector(PWD._OP.N2LOConstants.tictac())
+        projected = projector.project(
+            PWD.GOLAK_BETA[1],
+            PWD.GOLAK_BETA[1],
+            (0.4, 0.5, 0.6, 0.7),
+            PWD._OP.N2LOLECs(c_e=1.0),
+            order=2,
+        )["cE"]
+        e_lec = 1.0 / (projector.constants.f_pi**4 * projector.constants.lambda_chi)
+        expected = (4.0 * np.pi) ** 2 * e_lec  # t_pair=1 => tau23=+1
+        self.assertAlmostEqual(projected.real, expected, places=10)
+        self.assertLess(abs(projected.imag), 1e-12)
+
+    def test_tictac_contact_normalization_is_one_over_four_pi_to_fourth(self):
+        projector = PWD.FiveAngleProjector(PWD._OP.N2LOConstants.tictac())
+        raw = projector.project(
+            PWD.GOLAK_BETA[1],
+            PWD.GOLAK_BETA[1],
+            (0.4, 0.5, 0.6, 0.7),
+            PWD._OP.N2LOLECs(c_e=1.0),
+            order=2,
+        )
+        normalized = projector.to_tictac_normalization(raw)["cE"]
+        e_lec = 1.0 / (projector.constants.f_pi**4 * projector.constants.lambda_chi)
+        expected = e_lec / (4.0 * np.pi**4)  # t_pair=1 => tau23=+1
+        self.assertAlmostEqual(normalized.real, expected, places=12)
+        self.assertLess(abs(normalized.imag), 1e-12)
 
 
 if __name__ == "__main__":
