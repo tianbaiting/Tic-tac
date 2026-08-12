@@ -41,3 +41,9 @@ tools/check_3nf_normalization/check_3nf_normalization
 # Stray scratch outputs at repo root
 /alpha_pq_boundaries.txt
 /lab_energies.txt
+
+# CodeGraph index (regeneratable via `codegraph init`)
+.codegraph/
+
+# clangd / IDE compilation database (symlinked into build/)
+compile_commands.json
