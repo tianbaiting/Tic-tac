@@ -1,0 +1,176 @@
+{
+  "aggregate": {
+    "all_pade_elements_truly_converged": false,
+    "max_absolute_difference_mev": 2.1171274466526326e-09,
+    "max_relative_difference": 7.412572383478288e-08,
+    "num_complex_amplitudes": 12,
+    "num_files": 1
+  },
+  "files": [
+    {
+      "convergence_sha256": "f33c811c18b7b287d12857cade6022cf599277445f70c37288619ebe2758c9cd",
+      "dense_deuteron_binding_mev": -0.011400617,
+      "dense_sha256": "c82b206a1d16401c3c45f2fde276619194bb303de1a84dd7e1a9b19283a6c79d",
+      "deuteron_binding_mev": -0.011400617,
+      "file": "U_PW_elements_Np_4_Nq_3_JP_1_1_Jmax_1_PSI_0.txt",
+      "max_absolute_difference_mev": 2.1171274466526326e-09,
+      "max_relative_difference": 7.412572383478288e-08,
+      "num_complex_amplitudes": 12,
+      "num_kinematic_rows": 3,
+      "pade_sha256": "b19022c8762d16c066a906a48bcaf158cd870ae1cea053b459539ef2d57115d7",
+      "pade_status": {
+        "all_truly_converged": false,
+        "num_max_order_truncated": 12,
+        "num_truly_converged": 0,
+        "records": [
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 0,
+            "q_index": 0,
+            "row": 0
+          },
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 0,
+            "q_index": 1,
+            "row": 0
+          },
+          {
+            "best_pade_order": 8,
+            "code": 2,
+            "column": 0,
+            "q_index": 2,
+            "row": 0
+          },
+          {
+            "best_pade_order": 8,
+            "code": 2,
+            "column": 1,
+            "q_index": 0,
+            "row": 0
+          },
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 1,
+            "q_index": 1,
+            "row": 0
+          },
+          {
+            "best_pade_order": 8,
+            "code": 2,
+            "column": 1,
+            "q_index": 2,
+            "row": 0
+          },
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 0,
+            "q_index": 0,
+            "row": 1
+          },
+          {
+            "best_pade_order": 6,
+            "code": 2,
+            "column": 0,
+            "q_index": 1,
+            "row": 1
+          },
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 0,
+            "q_index": 2,
+            "row": 1
+          },
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 1,
+            "q_index": 0,
+            "row": 1
+          },
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 1,
+            "q_index": 1,
+            "row": 1
+          },
+          {
+            "best_pade_order": 7,
+            "code": 2,
+            "column": 1,
+            "q_index": 2,
+            "row": 1
+          }
+        ]
+      },
+      "rms_absolute_difference_mev": 8.870665261910772e-10
+    }
+  ],
+  "generated_utc": "2026-08-12T18:07:12Z",
+  "intentional_parameter_differences": {
+    "Solve Faddeev with LAPACK": {
+      "dense": "true",
+      "pade": "false"
+    }
+  },
+  "limitations": [
+    "Np_WP=4 gives an unphysical deuteron binding energy near -0.0114 MeV.",
+    "Np_per_WP_W1=Nq_per_WP_W1=1 is the unconverged midpoint diagnostic.",
+    "Nangle_3NF=2 is not an angular-convergence certificate.",
+    "Only one J^pi block is compared.",
+    "Numerical agreement with dense inversion does not override Pade honesty codes."
+  ],
+  "parameters": {
+    "3NF LEC c_D": "-0.200",
+    "3NF LEC c_E": "-0.205",
+    "3NF cutoff Lambda_3NF [MeV]": "500.000",
+    "Calculate P123 and store": "true",
+    "Calculate breakup amplitudes": "false",
+    "Channel index": "0",
+    "Energy input file": "CPP/Input/lab_energies.txt",
+    "Isospin-breaking in 1S0": "true",
+    "J_2N_max": "1",
+    "Mid-point approximation": "false",
+    "Nangle_3NF": "2",
+    "Np_WP": "4",
+    "Np_per_WP": "2",
+    "Np_per_WP_W1": "1",
+    "Nphi": "4",
+    "Nq_WP": "3",
+    "Nq_per_WP": "2",
+    "Nq_per_WP_W1": "1",
+    "Nx": "4",
+    "P123 omp number of threads": "3",
+    "P123-recovery mode on": "false",
+    "Parallel run": "true",
+    "Parameter input file": "none",
+    "Parameter set index (PSI) end": "-1",
+    "Parameter set index (PSI) start": "-1",
+    "Parameter walk": "false",
+    "Potential model": "N2LOopt",
+    "Production run": "true",
+    "Solve Faddeev equation": "true",
+    "Solve Faddeev with LAPACK": "false",
+    "Tensor-force on": "true",
+    "Three-nucleon force": "chiral_N2LO_full_factorized",
+    "chebyshev scale": "100.000",
+    "chebyshev sparseness": "1.000",
+    "p-momentum grid input file": "",
+    "p-momentum grid type": "chebyshev",
+    "q-momentum grid input file": "",
+    "q-momentum grid type": "chebyshev",
+    "two_J_3N_max": "1"
+  },
+  "purpose": "algorithm-level complete-N2LO-3NF Pade versus dense cross-check",
+  "schema_version": 1,
+  "source_hashes": {
+    "dense_run_parameters_sha256": "a48ccb13ab485ca0b01a2cc776e2dcf05b70a5578fb2e1beac9159b615686cf5",
+    "pade_run_parameters_sha256": "1f030ee67c6fa3870d0dfb3b1c35d5d44395c0342e10e8b38786caf930e74162"
+  }
+}

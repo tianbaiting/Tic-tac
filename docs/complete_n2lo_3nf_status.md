@@ -2,7 +2,7 @@
 
 **Audit date:** 2026-08-13
 **Branch:** `fix/3nf-physics-contract`
-**Audited baseline:** `9592434`, plus the W1 cell-integration validation in the
+**Audited baseline:** `8eb498e`, plus the reduced-solver validation in the
 current worktree
 
 ## Scope and publication gate
@@ -50,6 +50,7 @@ The labels used below are:
 | Complete W1 cell integration | `python3 -m unittest tests/test_factorized_wp_quadrature.py`; `output/validation/n2lo_3nf_wp_quadrature.json` | **Verified result:** for ordinary and deliberately wide cells, the legacy midpoint has relative errors from `2.28e-3` to `1.90e-1`.  The hardest wide `c4+cD` transition still has `3.84e-3` error at radial order two, while order four agrees with order six to `7.89e-7`. |
 | W1 cache off/miss/hit parity | `build/tests/cpp/test_chiral_n2lo_w1_cache` | **Verified result:** at radial order two, an uninitialized-cache direct build, an HDF5-cache miss/store build, and a subsequent all-block disk hit are bitwise identical.  A counting wrapper proves that the hit makes zero `W1_element` calls, and the wide `c4+cD` transition agrees with the independent Python cell integral to `5.2e-11` relative. |
 | Reduced solver interface smoke | `build/bin/Tic-tac ... three_nucleon_force=chiral_N2LO_full_factorized Np_WP=1 Nq_WP=1 ...` | **Verified interface result only:** factory construction, basis generation, permutation, W1 cache construction, AGS assembly, and Padé code completed without an interface error.  The selected energy file yielded no on-shell energies and the radial grids used one midpoint, so this is not solver-physics or convergence evidence. |
+| Reduced complete-3NF dense/Padé cross-check | `tools/3nf_oracle/compare_reduced_solver_outputs.py`; `output/validation/n2lo_3nf_reduced_solver_crosscheck.json` | **Verified algorithm-level result:** for one `J=1/2`, positive-parity block at `Np=4`, `Nq=3`, radial order one and angular order two, all 12 complex Padé amplitudes agree with dense inversion to `max|delta U|=2.12e-9 MeV` and maximum relative difference `7.41e-8`.  A repeated cache-hit Padé run is byte-identical.  The honesty sidecar nevertheless marks 12/12 elements maximum-order truncated, and the deuteron energy is an unphysical `-0.0114 MeV`; this is not a converged physics result. |
 | Full Python discovery | `python3 -m unittest ...` including `tests/test_pade_honesty.py` | **Environment limitation:** collection fails because the local Python environment does not provide `pytest`; this is separate from the clean `unittest` regression set above. |
 
 At audit start the worktree also contained three unrelated untracked user files:
@@ -202,6 +203,14 @@ Existing 10 MeV analyzing-power results are diagnostic only:
 These calculations use coarse WP/angular truncations and the incomplete force.
 They do not satisfy the requested low-energy nd Ay publication benchmark.
 
+The first reduced-grid solve with the complete factorized force adds an
+algorithmic check, not a physics benchmark.  On this machine, constructing 101
+W1 blocks for `Np=4`, `Nq=3`, radial order one, angular order two, and four
+OpenMP threads took roughly 6.5 minutes; a later all-hit W1 load took about
+0.2 seconds.  The cache-hit Padé solve completed in about 7.4 seconds and the
+dense solve in about 0.31 seconds.  The large, strongly channel-dependent first
+build cost is an explicit scalability issue for higher-order realistic grids.
+
 ## Open convention ledger
 
 No physical kernel or normalization should be changed until each item below has
@@ -244,9 +253,13 @@ discriminator.
    miss/store, and hit paths are bitwise equal at order two, with the disk hit
    making no operator calls.  Repeat the ladder on realistic production grids
    before fixing a default.
-7. Demonstrate stable two-body binding, Padé honesty, WP/rank/J convergence,
-   symmetry/Hermiticity/permutation checks, zero-LEC and 2NF-only limits, and a
-   reproducible low-energy nd Ay comparison with uncertainty/convergence tables.
+7. **Partly resolved at diagnostic grid only:** the complete-force Padé and
+   dense paths agree below `2.2e-9 MeV` for 12 amplitudes, but all 12 Padé
+   elements remain honestly marked maximum-order truncated and the coarse-grid
+   deuteron binding is unphysical.  Demonstrate stable two-body binding, Padé
+   honesty, WP/rank/J convergence, symmetry/Hermiticity/permutation checks,
+   zero-LEC and 2NF-only limits, and a reproducible low-energy nd Ay comparison
+   with uncertainty/convergence tables.
 
 ## Acceptance decision
 
@@ -255,9 +268,10 @@ published raw-PWD, exact-contact-normalization, complete slow-C++-reference,
 factorized matrix-element implementation gates.  Representative W1 cell
 integration is also converged at radial order four, but the repository still
 fails the decisive cache/solver convergence and physical-validation gates.  The
-next safe milestone is reduced-grid direct-solve/Padé agreement, followed by
-physical truncation ladders.  No existing Ay curve is yet admissible as a
-complete-N2LO result.
+next safe milestone is profiling and reducing the high-orbital W1 block-build
+cost, then repeating the solver comparison with converged radial/angular orders
+and a physically stable two-body grid before physical truncation ladders.  No
+existing Ay curve is yet admissible as a complete-N2LO result.
 
 ## GLM-5.2 review disposition
 
