@@ -21,23 +21,7 @@
 #include "make_pw_symm_states.h"
 #include "make_permutation_matrix.h"
 #include "utils/matrix_routines.h"
-
-class three_nucleon_force_model;
-class W1_PW_cache;
-
-// [EN] Bundles all data the column-computation hot path needs for the 3NF contribution so that
-// existing function signatures stay manageable. When tnf->enabled()==false (null object) the entire
-// 3NF branch is skipped via a single test. / [CN] 把列计算热路径所需的全部 3NF 数据打包到一个结构体中，
-// 避免已有函数签名膨胀。当 tnf->enabled()==false（null 对象）时，整个 3NF 分支通过一次判断跳过。
-struct tnf_kernel_context {
-	const three_nucleon_force_model* tnf;
-	const pw_3N_statespace*          pw_states;
-	const double*                    p_WP_array;   // WP boundaries, size Np_WP+1
-	const double*                    q_WP_array;   // WP boundaries, size Nq_WP+1
-	double**                         CT_RM_array;  // C^T row-major = C column-major, [Nalpha*Nalpha]
-	double                           w1_scale;     // Overall scale factor applied to W^(1) output (diagnostic knob)
-	const W1_PW_cache*               w1_cache;     // optional: bin-midpoint-evaluated W1 lookup table (nullptr → fall back to direct W1_element)
-};
+#include "tnf_kernel_context.h"
 
 void solve_faddeev_equations(cdouble*  U_array,
 					   		 cdouble*  U_BU_array,

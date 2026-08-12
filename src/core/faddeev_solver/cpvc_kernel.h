@@ -1,8 +1,10 @@
 #ifndef CPVC_KERNEL_H
 #define CPVC_KERNEL_H
 
+#include <cstddef>
+
 #include "type_defs.h"
-#include "solve_faddeev.h"   // tnf_kernel_context
+#include "tnf_kernel_context.h"
 
 // [EN] Self-contained AGS kernel-algebra builders, extracted from
 // solve_faddeev.cpp so they can be unit-tested in isolation
