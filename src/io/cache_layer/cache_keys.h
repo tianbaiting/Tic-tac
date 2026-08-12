@@ -30,6 +30,9 @@ struct W1Key {
     // Two runs that differ only in 2NF (e.g. N2LOopt c_1=-0.86 vs Idaho_N3LO
     // c_1=-0.81) would have wrongly reused cached W^(1) values.
     double c_1, c_3, c_4;     // GeV⁻¹, matching run_params convention
+    // Complete chiral-kernel convention.  These are values, not a manually
+    // maintained version label, so changing constants necessarily changes hashes.
+    double g_A, f_pi_MeV, m_pi_MeV, Lambda_chi_MeV, hbarc_MeV_fm;
     std::string regulator_kind;
     // Grid + channel parameters: change them, the WP bin midpoints change,
     // hence the cached W^(1) values change.
@@ -47,6 +50,9 @@ struct W1Key {
     // quadrature. Different orders produce different cached values, so they must
     // appear in the key.
     int    Np_per_WP_W1, Nq_per_WP_W1;
+    // Angular order of the underlying W1 projector (0 for models without a
+    // runtime angular quadrature).  Omitting this would permit cross-order reuse.
+    int    Nangle_3NF;
 
     bool operator==(const W1Key& o) const;
 };

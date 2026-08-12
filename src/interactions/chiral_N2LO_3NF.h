@@ -148,6 +148,11 @@ public:
 	double lec_c1_gev() const override { return m_c1 * 1000.0 / hbarc; }
 	double lec_c3_gev() const override { return m_c3 * 1000.0 / hbarc; }
 	double lec_c4_gev() const override { return m_c4_input; }  // raw input value (GeV⁻¹)
+	double axial_coupling_3nf() const override { return gA; }
+	double pion_decay_constant_mev_3nf() const override { return fpi; }
+	double pion_mass_mev_3nf() const override { return mpi; }
+	double chiral_scale_mev_3nf() const override { return 700.0; }
+	double hbarc_mev_fm_3nf() const override { return hbarc; }
 
 	// Status string for run-metadata output.
 	virtual std::string capabilities() const {

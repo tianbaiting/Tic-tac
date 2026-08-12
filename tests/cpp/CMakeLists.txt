@@ -67,6 +67,17 @@ add_executable(test_chiral_3nf_recoupling
 target_link_libraries(test_chiral_3nf_recoupling ${GSL_LIBRARIES})
 add_test(NAME chiral_3nf_recoupling COMMAND test_chiral_3nf_recoupling)
 
+# Complete c1/c3/c4/cD/cE direct-Jj five-angle reference projector.  The
+# order-2 signed values are frozen from the independent Python m-scheme oracle.
+add_executable(test_chiral_n2lo_full_reference
+    test_chiral_n2lo_full_reference.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_full_reference.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
+)
+target_link_libraries(test_chiral_n2lo_full_reference ${GSL_LIBRARIES})
+add_test(NAME chiral_n2lo_full_reference COMMAND test_chiral_n2lo_full_reference)
+
 # L4: Faddeev/AGS operator-ordering dense test (3NF audit B4)
 add_executable(test_faddeev_operator_order
     test_faddeev_operator_order.cpp
@@ -143,6 +154,7 @@ add_test(NAME pade_convergence COMMAND test_pade_convergence)
 add_executable(print_w1_element
     ${CMAKE_SOURCE_DIR}/tools/3nf_oracle/print_w1_element.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/three_nucleon_force_model.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_full_reference.cpp
     ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp

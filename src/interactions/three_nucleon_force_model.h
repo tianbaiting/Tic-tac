@@ -85,6 +85,16 @@ public:
 	virtual double lec_c1_gev() const { return 0.0; }
 	virtual double lec_c3_gev() const { return 0.0; }
 	virtual double lec_c4_gev() const { return 0.0; }
+	// Angular quadrature order that changes W1 matrix elements.  Zero denotes a
+	// model with no runtime angular-order control.
+	virtual int angular_order_3nf() const { return 0; }
+	// Constants that define a chiral W1 kernel.  They are explicit cache-key
+	// inputs so recompiling with a different convention cannot reuse old blocks.
+	virtual double axial_coupling_3nf() const { return 0.0; }
+	virtual double pion_decay_constant_mev_3nf() const { return 0.0; }
+	virtual double pion_mass_mev_3nf() const { return 0.0; }
+	virtual double chiral_scale_mev_3nf() const { return 0.0; }
+	virtual double hbarc_mev_fm_3nf() const { return 0.0; }
 };
 
 #endif // THREE_NUCLEON_FORCE_MODEL_H

@@ -12,6 +12,8 @@ constexpr int P123_SCHEMA_VERSION = 1;
 // Bumped 4 -> 5 on 2026-08-13: cE now uses the exact Epelbaum A-4 angular
 // factor with the two-Jacobi-coordinate Fourier normalization.  Old v4 W1
 // blocks have a cE coefficient larger by pi/2 and must remain cache misses.
-constexpr int W1_SCHEMA_VERSION   = 5;
+// Bumped 5 -> 6 on 2026-08-13: complete-reference angular order and all
+// dimensionful/dimensionless chiral kernel constants are now part of W1Key.
+constexpr int W1_SCHEMA_VERSION   = 6;
 
 }  // namespace tictac::cache

@@ -185,6 +185,11 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         k.c_1             = tnf.lec_c1_gev();
         k.c_3             = tnf.lec_c3_gev();
         k.c_4             = tnf.lec_c4_gev();
+        k.g_A             = tnf.axial_coupling_3nf();
+        k.f_pi_MeV        = tnf.pion_decay_constant_mev_3nf();
+        k.m_pi_MeV        = tnf.pion_mass_mev_3nf();
+        k.Lambda_chi_MeV  = tnf.chiral_scale_mev_3nf();
+        k.hbarc_MeV_fm    = tnf.hbarc_mev_fm_3nf();
         // Today every supported chiral 3NF uses a Gaussian regulator; if a
         // different regulator family is added later, expose it through
         // three_nucleon_force_model and source it here instead of hardcoding.
@@ -195,6 +200,7 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
         k.Np_per_WP_W1       = Np_quad;
         k.Nq_per_WP_W1       = Nq_quad;
+        k.Nangle_3NF         = tnf.angular_order_3nf();
         // NEW (B5): SHA-256 of the binary representation of the grid arrays.
         // Computed once outside the block loop and captured by reference.
         k.p_grid_hash        = p_grid_hash;

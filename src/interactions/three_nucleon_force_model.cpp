@@ -6,6 +6,7 @@
 #include "three_nucleon_force_none.h"
 #include "three_nucleon_force_gaussian_stub.h"
 #include "chiral_N2LO_3NF.h"
+#include "chiral_N2LO_3NF_full_reference.h"
 #include "../utils/error_management.h"
 #include "constants.h"
 
@@ -47,17 +48,32 @@ std::unique_ptr<three_nucleon_force_model> three_nucleon_force_model::create(run
 	}
 
 	if (model=="chiral_N2LO"){
-		// [EN] FAIL-CLOSED: the string `chiral_N2LO` claims the FULL N²LO 3NF
-		// (c1, c3, c4, cD, cE). Since c4 is not implemented, requesting the
-		// full model is a hard error — never silently degrade to the
-		// approximation. Use `chiral_N2LO_c1c3cDcE_approx` for the c1/c3/cD/cE
-		// subset. / [CN] 硬阻断：`chiral_N2LO` 声称完整 N²LO 3NF，但 c4 未实现，
-		// 故请求该模型为硬错误。请改用 chiral_N2LO_c1c3cDcE_approx。
+		// FAIL-CLOSED: this unqualified name is reserved for the converged,
+		// scalable complete model.  A complete O(N^5) validation projector now
+		// exists, but routing realistic WPCD runs to it implicitly would be both
+		// prohibitively expensive and numerically unaudited.
 		raise_error("three_nucleon_force='chiral_N2LO' requests the FULL N2LO 3NF, "
-		            "but the c_4 term (Epelbaum 2002 eq. 2.2-2.3) is NOT implemented "
-		            "in this build. Use three_nucleon_force='chiral_N2LO_c1c3cDcE_approx' "
-		            "for the c1/c3/cD/cE subset (c4 will be dropped with a documented "
-		            "notice). See docs/three_nf_equation_contract.md §8.");
+		            "but the converged scalable implementation is not yet available. "
+		            "Use 'chiral_N2LO_full_5d_reference' only for explicitly small "
+		            "validation runs, or 'chiral_N2LO_c1c3cDcE_approx' for the documented "
+		            "incomplete fast model. See docs/complete_n2lo_3nf_status.md.");
+	}
+
+	if (model=="chiral_N2LO_full_5d_reference") {
+		// Complete but deliberately slow direct-Jj five-angle projector.  Keep it
+		// distinct from the reserved production name `chiral_N2LO`: realistic
+		// WPCD cache runs require the factorised implementation and convergence
+		// evidence before that name can be enabled.
+		double c1 = c1_idaho_n3lo, c3 = c3_idaho_n3lo, c4 = c4_idaho_n3lo;
+		const std::string& pot = run_parameters.potential_model;
+		if (pot == "N2LOopt") {
+			c1 = c1_n2lo_opt; c3 = c3_n2lo_opt; c4 = c4_n2lo_opt;
+		} else if (pot == "Idaho_N3LO") {
+			c1 = c1_idaho_n3lo; c3 = c3_idaho_n3lo; c4 = c4_idaho_n3lo;
+		}
+		return std::make_unique<chiral_N2LO_3NF_full_reference>(
+			run_parameters.c_D, run_parameters.c_E, run_parameters.Lambda_3NF,
+			c1, c3, c4, run_parameters.Nangle_3NF);
 	}
 
 	if (model=="chiral_N2LO_c1c3cDcE_approx" || model=="chiral_N2LO_without_c4"){
@@ -90,8 +106,9 @@ std::unique_ptr<three_nucleon_force_model> three_nucleon_force_model::create(run
 
 	std::cout << "Unknown three_nucleon_force=\"" << model << "\". "
 		  << "Supported values: \"none\", \"gaussian_stub\", "
-		  << "\"chiral_N2LO_c1c3cDcE_approx\" (c4 NOT implemented; "
-		  << "\"chiral_N2LO\" is rejected as incomplete). Exiting ..." << std::endl;
+		  << "\"chiral_N2LO_c1c3cDcE_approx\", "
+		  << "\"chiral_N2LO_full_5d_reference\" (complete but slow; "
+		  << "\"chiral_N2LO\" remains reserved for the converged scalable model). Exiting ..." << std::endl;
 	exit(-1);
 	return nullptr;
 }

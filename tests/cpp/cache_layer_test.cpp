@@ -40,7 +40,7 @@ static P123Key make_p123_key() {
 
 static W1Key make_w1_key() {
     W1Key k{};
-    k.schema_version = 4;  // B5: bumped 3 → 4
+    k.schema_version = 6;
     k.potential_model = "N2LOopt";
     k.tnf_model = "chiral_N2LO";
     k.Np_WP = 30; k.Nq_WP = 30;
@@ -51,6 +51,8 @@ static W1Key make_w1_key() {
     // B5: NEW fields — c_1, c_3, c_4 must be initialised (defaults break
     // aggregator-style usage). N2LOopt values from constants.h.
     k.c_1 = -0.86; k.c_3 = -3.40; k.c_4 = 0.0;
+    k.g_A = 1.289; k.f_pi_MeV = 92.2; k.m_pi_MeV = 138.039;
+    k.Lambda_chi_MeV = 700.0; k.hbarc_MeV_fm = 197.327;
     k.regulator_kind = "gaussian";
     k.a_r = 0; k.a_c = 0;
     k.chebyshev_s = 1.5; k.chebyshev_t = 1.0;
@@ -59,6 +61,7 @@ static W1Key make_w1_key() {
     // B5: NEW grid hashes — empty disables the check (back-compat).
     k.p_grid_hash = ""; k.q_grid_hash = "";
     k.Np_per_WP_W1 = 1; k.Nq_per_WP_W1 = 1;
+    k.Nangle_3NF = 0;
     return k;
 }
 
@@ -142,6 +145,14 @@ void test_w1_grid_and_channel_fields_change_hash() {
     }
     {
         auto k = make_w1_key(); k.Nq_per_WP_W1 = 4;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
+    {
+        auto k = make_w1_key(); k.Nangle_3NF = 4;
+        EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
+    }
+    {
+        auto k = make_w1_key(); k.g_A = 1.276;
         EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(k));
     }
 }

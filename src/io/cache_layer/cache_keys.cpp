@@ -64,6 +64,11 @@ bool W1Key::operator==(const W1Key& o) const {
         && quantize_1e9(c_1) == quantize_1e9(o.c_1)
         && quantize_1e9(c_3) == quantize_1e9(o.c_3)
         && quantize_1e9(c_4) == quantize_1e9(o.c_4)
+        && quantize_1e9(g_A) == quantize_1e9(o.g_A)
+        && quantize_1e9(f_pi_MeV) == quantize_1e9(o.f_pi_MeV)
+        && quantize_1e9(m_pi_MeV) == quantize_1e9(o.m_pi_MeV)
+        && quantize_1e9(Lambda_chi_MeV) == quantize_1e9(o.Lambda_chi_MeV)
+        && quantize_1e9(hbarc_MeV_fm) == quantize_1e9(o.hbarc_MeV_fm)
         && regulator_kind == o.regulator_kind
         && quantize_1e9(chebyshev_s) == quantize_1e9(o.chebyshev_s)
         && quantize_1e9(chebyshev_t) == quantize_1e9(o.chebyshev_t)
@@ -72,7 +77,8 @@ bool W1Key::operator==(const W1Key& o) const {
         && p_grid_hash == o.p_grid_hash
         && q_grid_hash == o.q_grid_hash
         && Np_per_WP_W1 == o.Np_per_WP_W1
-        && Nq_per_WP_W1 == o.Nq_per_WP_W1;
+        && Nq_per_WP_W1 == o.Nq_per_WP_W1
+        && Nangle_3NF == o.Nangle_3NF;
 }
 
 std::string canonical_json(const P123Key& k) {
@@ -100,6 +106,8 @@ std::string canonical_json(const W1Key& k) {
     os << "{"
        << "\"J_2N_max\":" << k.J_2N_max
        << ",\"Lambda_3NF\":" << fmt_double_q(k.Lambda_3NF)
+       << ",\"Lambda_chi_MeV\":" << fmt_double_q(k.Lambda_chi_MeV)
+       << ",\"Nangle_3NF\":" << k.Nangle_3NF
        << ",\"Np_WP\":" << k.Np_WP
        << ",\"Np_per_WP_W1\":" << k.Np_per_WP_W1
        << ",\"Nq_WP\":" << k.Nq_WP
@@ -114,7 +122,11 @@ std::string canonical_json(const W1Key& k) {
        << ",\"c_E\":" << fmt_double_q(k.c_E)
        << ",\"chebyshev_s\":" << fmt_double_q(k.chebyshev_s)
        << ",\"chebyshev_t\":" << fmt_double_q(k.chebyshev_t)
+       << ",\"f_pi_MeV\":" << fmt_double_q(k.f_pi_MeV)
+       << ",\"g_A\":" << fmt_double_q(k.g_A)
+       << ",\"hbarc_MeV_fm\":" << fmt_double_q(k.hbarc_MeV_fm)
        << ",\"isospin_breaking_1S0\":" << (k.isospin_breaking_1S0 ? "true" : "false")
+       << ",\"m_pi_MeV\":" << fmt_double_q(k.m_pi_MeV)
        << ",\"p_grid_hash\":" << json_escape(k.p_grid_hash)
        << ",\"potential_model\":" << json_escape(k.potential_model)
        << ",\"q_grid_hash\":" << json_escape(k.q_grid_hash)

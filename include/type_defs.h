@@ -123,6 +123,10 @@ typedef struct run_params{
 	// 与 V_WP 已使用 Np_per_WP 的约定保持一致。
 	int         Np_per_WP_W1;
 	int         Nq_per_WP_W1;
+	// Gauss-Legendre order in each of the five angular dimensions of the
+	// complete direct-Jj 3NF reference projector.  It is ignored by the legacy
+	// rank-0 approximation but is part of the W1 cache identity.
+	int         Nangle_3NF;
 	int			channel_idx;
 	int			P123_omp_num_threads;
 	double 		chebyshev_t;
