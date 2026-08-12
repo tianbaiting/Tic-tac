@@ -34,16 +34,16 @@ static chiral_N2LO_3NF* make_chiral_N2LO_approx(run_params rp,
 	return new chiral_N2LO_3NF(rp.c_D, rp.c_E, rp.Lambda_3NF, c1, c3, /*c4=*/0.0);
 }
 
-three_nucleon_force_model* three_nucleon_force_model::fetch(run_params run_parameters){
+std::unique_ptr<three_nucleon_force_model> three_nucleon_force_model::create(run_params run_parameters){
 
 	const std::string& model = run_parameters.three_nucleon_force;
 
 	if (model=="none" || model==""){
-		return new three_nucleon_force_none();
+		return std::make_unique<three_nucleon_force_none>();
 	}
 
 	if (model=="gaussian_stub"){
-		return new three_nucleon_force_gaussian_stub();
+		return std::make_unique<three_nucleon_force_gaussian_stub>();
 	}
 
 	if (model=="chiral_N2LO"){
@@ -84,12 +84,21 @@ three_nucleon_force_model* three_nucleon_force_model::fetch(run_params run_param
 		} else if (pot == "Idaho_N3LO") {
 			c1 = c1_idaho_n3lo; c3 = c3_idaho_n3lo; c4 = c4_idaho_n3lo;
 		}
-		return make_chiral_N2LO_approx(run_parameters, c1, c3, c4);
+		return std::unique_ptr<three_nucleon_force_model>(
+			make_chiral_N2LO_approx(run_parameters, c1, c3, c4));
 	}
 
 	std::cout << "Unknown three_nucleon_force=\"" << model << "\". "
-			  << "Supported values: \"none\", \"gaussian_stub\", "
-			  << "\"chiral_N2LO_c1c3cDcE_approx\" (c4 NOT implemented; "
-			  << "\"chiral_N2LO\" is rejected as incomplete). Exiting ..." << std::endl;
+		  << "Supported values: \"none\", \"gaussian_stub\", "
+		  << "\"chiral_N2LO_c1c3cDcE_approx\" (c4 NOT implemented; "
+		  << "\"chiral_N2LO\" is rejected as incomplete). Exiting ..." << std::endl;
 	exit(-1);
+	return nullptr;
+}
+
+three_nucleon_force_model* three_nucleon_force_model::fetch(run_params run_parameters){
+	// [EN] Compatibility wrapper preserving the legacy raw-pointer API. New
+	// production call sites should use create() and hold a unique_ptr. / [CN]
+	// 兼容包装，保留旧式裸指针接口；新生产调用点应使用 create() 持有 unique_ptr。
+	return create(run_parameters).release();
 }

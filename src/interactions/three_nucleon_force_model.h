@@ -2,6 +2,7 @@
 #define THREE_NUCLEON_FORCE_MODEL_H
 
 #include <string>
+#include <memory>
 
 #include "type_defs.h"
 
@@ -21,6 +22,12 @@ public:
 
 	// Factory: dispatches on run_parameters.three_nucleon_force. Unknown strings raise an error; "none" (the
 	// default) returns a three_nucleon_force_none null object so callers never need to null-check the pointer.
+	// [EN] Modern factory returning an owning unique_ptr. Production code should
+	// prefer create(); fetch() below is retained as a thin compatibility wrapper
+	// that releases the pointer for legacy raw-pointer call sites. / [CN] 新工厂
+	// 返回持有所有权的 unique_ptr，生产代码应优先使用；fetch() 作为兼容包装保留，
+	// 向旧式裸指针调用点释放所有权。
+	static std::unique_ptr<three_nucleon_force_model> create(run_params run_parameters);
 	static three_nucleon_force_model* fetch(run_params run_parameters);
 
 	// True only for concrete (real) 3NF implementations. The null object returns false so one test in the
