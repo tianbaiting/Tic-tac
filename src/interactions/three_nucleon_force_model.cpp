@@ -6,6 +6,7 @@
 #include "three_nucleon_force_none.h"
 #include "three_nucleon_force_gaussian_stub.h"
 #include "chiral_N2LO_3NF.h"
+#include "chiral_N2LO_3NF_factorized.h"
 #include "chiral_N2LO_3NF_full_reference.h"
 #include "../utils/error_management.h"
 #include "constants.h"
@@ -53,9 +54,10 @@ std::unique_ptr<three_nucleon_force_model> three_nucleon_force_model::create(run
 		// exists, but routing realistic WPCD runs to it implicitly would be both
 		// prohibitively expensive and numerically unaudited.
 		raise_error("three_nucleon_force='chiral_N2LO' requests the FULL N2LO 3NF, "
-		            "but the converged scalable implementation is not yet available. "
-		            "Use 'chiral_N2LO_full_5d_reference' only for explicitly small "
-		            "validation runs, or 'chiral_N2LO_c1c3cDcE_approx' for the documented "
+		            "but the complete factorized implementation has not yet passed the "
+		            "end-to-end convergence gate. Use 'chiral_N2LO_full_factorized' for "
+		            "explicit convergence runs, 'chiral_N2LO_full_5d_reference' only for "
+		            "small validation runs, or 'chiral_N2LO_c1c3cDcE_approx' for the documented "
 		            "incomplete fast model. See docs/complete_n2lo_3nf_status.md.");
 	}
 
@@ -72,6 +74,22 @@ std::unique_ptr<three_nucleon_force_model> three_nucleon_force_model::create(run
 			c1 = c1_idaho_n3lo; c3 = c3_idaho_n3lo; c4 = c4_idaho_n3lo;
 		}
 		return std::make_unique<chiral_N2LO_3NF_full_reference>(
+			run_parameters.c_D, run_parameters.c_E, run_parameters.Lambda_3NF,
+			c1, c3, c4, run_parameters.Nangle_3NF);
+	}
+
+	if (model=="chiral_N2LO_full_factorized") {
+		// Complete three-integral Hebeler projector.  It is exposed under an
+		// explicit name while WP/solver convergence is established; only after
+		// that gate may the reserved unqualified production name be enabled.
+		double c1 = c1_idaho_n3lo, c3 = c3_idaho_n3lo, c4 = c4_idaho_n3lo;
+		const std::string& pot = run_parameters.potential_model;
+		if (pot == "N2LOopt") {
+			c1 = c1_n2lo_opt; c3 = c3_n2lo_opt; c4 = c4_n2lo_opt;
+		} else if (pot == "Idaho_N3LO") {
+			c1 = c1_idaho_n3lo; c3 = c3_idaho_n3lo; c4 = c4_idaho_n3lo;
+		}
+		return std::make_unique<chiral_N2LO_3NF_factorized>(
 			run_parameters.c_D, run_parameters.c_E, run_parameters.Lambda_3NF,
 			c1, c3, c4, run_parameters.Nangle_3NF);
 	}
@@ -107,6 +125,7 @@ std::unique_ptr<three_nucleon_force_model> three_nucleon_force_model::create(run
 	std::cout << "Unknown three_nucleon_force=\"" << model << "\". "
 		  << "Supported values: \"none\", \"gaussian_stub\", "
 		  << "\"chiral_N2LO_c1c3cDcE_approx\", "
+		  << "\"chiral_N2LO_full_factorized\" (complete; pending end-to-end convergence), "
 		  << "\"chiral_N2LO_full_5d_reference\" (complete but slow; "
 		  << "\"chiral_N2LO\" remains reserved for the converged scalable model). Exiting ..." << std::endl;
 	exit(-1);

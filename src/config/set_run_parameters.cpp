@@ -445,6 +445,7 @@ void show_usage(){
 
 	std::cout << "three_nucleon_force:      Sets which three-nucleon force (3NF) model is used.\n"
 			  << "                          Supported: none, chiral_N2LO_c1c3cDcE_approx,\n"
+			  << "                          chiral_N2LO_full_factorized,\n"
 			  << "                          chiral_N2LO_full_5d_reference, gaussian_stub.\n"
 			  << "                          ('chiral_N2LO' remains reserved for the converged scalable implementation.)\n"
 			  << "                          When set to \"none\", the solver reproduces the 2NF-only\n"
@@ -453,8 +454,9 @@ void show_usage(){
 			  << seperationLine
 			  << std::endl;
 
-	std::cout << "Nangle_3NF:               Gauss order in each of the five angular dimensions of\n"
-			  << "                          chiral_N2LO_full_5d_reference. Cost grows as N^5;\n"
+	std::cout << "Nangle_3NF:               Gauss order in each transfer dimension of the full\n"
+			  << "                          factorized projector (cost N^3), or each of five\n"
+			  << "                          angles in the reference projector (cost N^5);\n"
 			  << "                          compare successive orders and do not treat the default\n"
 			  << "                          as a convergence certificate.\n"
 			  << "Example:                  Nangle_3NF=6\n"
@@ -684,7 +686,7 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.Nq_per_WP	 	        = 8;
 	run_parameters.Np_per_WP_W1             = 2;  // safer baseline; production must check N=2 vs N=4
 	run_parameters.Nq_per_WP_W1             = 2;
-	run_parameters.Nangle_3NF               = 4;  // reference projector only; must be converged explicitly
+	run_parameters.Nangle_3NF               = 4;  // full projectors; must be converged explicitly
 	run_parameters.channel_idx		        = -1;
 	run_parameters.parallel_run		        = false;
 	run_parameters.potential_model	        = "LO_internal";

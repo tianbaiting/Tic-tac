@@ -23,7 +23,14 @@ from typing import Iterable
 import numpy as np
 
 from factorized_scalar_pwd import ScalarKernel, project_scalar_ls, uncoupled_orbital_kernel
-from full_vector_five_angle_pwd import LSChannel, _cg, _isospin_state, _OP
+from full_vector_five_angle_pwd import (
+    JjChannel,
+    LSChannel,
+    THREE_BODY_FOURIER_NORMALIZATION,
+    _cg,
+    _isospin_state,
+    _OP,
+)
 
 
 @dataclass(frozen=True)
@@ -549,3 +556,75 @@ def project_cE_ls(
     )
     e_lec = c_e / (constants.f_pi**4 * constants.lambda_chi)
     return e_lec * iso23 * scalar
+
+
+def project_n2lo_ls(
+    bra: LSChannel,
+    ket: LSChannel,
+    momenta: tuple[float, float, float, float],
+    constants: _OP.N2LOConstants,
+    lecs: _OP.N2LOLECs,
+    order: int,
+) -> dict[str, complex]:
+    """Return all five raw LS components with independently switchable LECs."""
+    components = {name: 0.0j for name in ("c1", "c3", "c4", "cD", "cE")}
+    if lecs.c1_gev_inverse != 0.0 or lecs.c3_gev_inverse != 0.0:
+        components.update(project_c1_c3_ls(
+            bra,
+            ket,
+            momenta,
+            constants,
+            lecs.c1_gev_inverse,
+            lecs.c3_gev_inverse,
+            order,
+        ))
+    if lecs.c4_gev_inverse != 0.0:
+        components["c4"] = project_c4_ls(
+            bra, ket, momenta, constants, lecs.c4_gev_inverse, order
+        )
+    if lecs.c_d != 0.0:
+        components["cD"] = project_cD_ls(
+            bra, ket, momenta, constants, lecs.c_d, order
+        )
+    if lecs.c_e != 0.0:
+        components["cE"] = project_cE_ls(
+            bra, ket, momenta, constants, lecs.c_e, order
+        )
+    return components
+
+
+def project_n2lo_jj_recoupled(
+    bra: JjChannel,
+    ket: JjChannel,
+    momenta: tuple[float, float, float, float],
+    constants: _OP.N2LOConstants,
+    lecs: _OP.N2LOLECs,
+    order: int,
+    cutoff_mev: float | None = None,
+) -> dict[str, complex]:
+    """Unitary LS-to-Jj factorized result in Tic-tac normalization."""
+    totals = {name: 0.0j for name in ("c1", "c3", "c4", "cD", "cE")}
+    for ls_bra, bra_coefficient in bra.ls_expansion():
+        for ls_ket, ket_coefficient in ket.ls_expansion():
+            block = project_n2lo_ls(
+                ls_bra, ls_ket, momenta, constants, lecs, order
+            )
+            recoupling = bra_coefficient * ket_coefficient
+            for name, value in block.items():
+                totals[name] += recoupling * value
+
+    regulator_product = 1.0
+    if cutoff_mev is not None:
+        cutoff = cutoff_mev / constants.hbar_c_mev_fm
+        p, q, pp, qp = momenta
+
+        def regulator(pair_momentum: float, spectator_momentum: float) -> float:
+            invariant = pair_momentum**2 + 0.75 * spectator_momentum**2
+            return math.exp(-((invariant / cutoff**2) ** 2))
+
+        regulator_product = regulator(p, q) * regulator(pp, qp)
+
+    return {
+        name: value * THREE_BODY_FOURIER_NORMALIZATION * regulator_product
+        for name, value in totals.items()
+    }

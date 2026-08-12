@@ -78,6 +78,18 @@ add_executable(test_chiral_n2lo_full_reference
 target_link_libraries(test_chiral_n2lo_full_reference ${GSL_LIBRARIES})
 add_test(NAME chiral_n2lo_full_reference COMMAND test_chiral_n2lo_full_reference)
 
+# Complete Hebeler three-integral factorized projector.  Signed component
+# values are frozen from the independent Python factorized implementation.
+add_executable(test_chiral_n2lo_factorized
+    test_chiral_n2lo_factorized.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_factorized.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_full_reference.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
+)
+target_link_libraries(test_chiral_n2lo_factorized ${GSL_LIBRARIES})
+add_test(NAME chiral_n2lo_factorized COMMAND test_chiral_n2lo_factorized)
+
 # L4: Faddeev/AGS operator-ordering dense test (3NF audit B4)
 add_executable(test_faddeev_operator_order
     test_faddeev_operator_order.cpp
@@ -154,6 +166,7 @@ add_test(NAME pade_convergence COMMAND test_pade_convergence)
 add_executable(print_w1_element
     ${CMAKE_SOURCE_DIR}/tools/3nf_oracle/print_w1_element.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/three_nucleon_force_model.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_factorized.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_full_reference.cpp
     ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp

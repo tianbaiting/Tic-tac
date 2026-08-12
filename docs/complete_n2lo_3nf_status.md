@@ -2,7 +2,7 @@
 
 **Audit date:** 2026-08-13
 **Branch:** `fix/3nf-physics-contract`
-**Audited baseline:** `a28360f`, plus the factorized-PWD prototype in the
+**Audited baseline:** `04f9501`, plus the factorized C++ implementation in the
 current worktree
 
 ## Scope and publication gate
@@ -18,9 +18,10 @@ benchmark, not a substitute for operator-level validation.
 deliberately named `chiral_N2LO_c1c3cDcE_approx`.  A complete, solver-selectable
 direct-Jj model now exists under the explicit name
 `chiral_N2LO_full_5d_reference`; it is an exact-operator reference with
-`O(Nangle_3NF^5)` cost, not yet a scalable production PWD.  The unqualified
-name `chiral_N2LO` remains fail-closed until the factorized implementation and
-its convergence evidence are complete.
+`O(Nangle_3NF^5)` cost.  The complete three-integral implementation is now
+solver-selectable as `chiral_N2LO_full_factorized`, but remains provisional
+until the WP, cache, solver, and observable convergence gates are complete.
+The unqualified name `chiral_N2LO` therefore remains fail-closed.
 
 ## Evidence ledger
 
@@ -37,7 +38,7 @@ The labels used below are:
 | Item | Evidence | Status |
 |---|---|---|
 | C++ build | `cmake --build build -j4` | **Verified result:** successful; existing compiler/HDF5 warnings remain. |
-| C++ tests | `ctest --test-dir build --output-on-failure` | **Verified result:** 11/11 passed. |
+| C++ tests | `ctest --test-dir build --output-on-failure` | **Verified result:** 12/12 passed. |
 | Direct 3NF oracle test | `build/tests/test_3nf_operator_oracle` | **Verified result:** 26 passed, 0 failed. |
 | Faddeev ordering discriminator | `build/tests/test_faddeev_operator_order` | **Superseded audit-start result:** the former test only proved conformity to the repository's incorrect assumed ordering.  It has been replaced by a primary-equation discriminator described below. |
 | 3NF matrix-element tests | `build/tests/test_3nf_matrix_elements` | **Verified result:** 432 passed, 0 failed; the complete `c4` requirement remains an expected failure/skip. |
@@ -45,6 +46,7 @@ The labels used below are:
 | Full-vector/PWD oracle | `python3 -m unittest tests/test_full_vector_n2lo_oracle.py` | **Verified result:** 13/13 passed.  The generic five-angle projector agrees with the independently transcribed Golak integrands at `N=4` to 10 decimal places, reproduces the published Table 2 values at `N=12` within `3e-4` relative, and gives identical direct-Jj and unitary-9j-transformed LS projections. |
 | Complete C++ reference PWD | `build/tests/cpp/test_chiral_n2lo_full_reference` | **Verified result:** all signed component and combined checks passed.  Direct Jj `c1`, `c3`, `c4`, `cD`, and `cE` values agree with the independent Python projector at the same `Nangle_3NF=2` to roughly `1e-17` absolute.  Both low-order forward and reverse values are frozen separately; no post-hoc Hermitian averaging is used. |
 | Factorized Python PWD | `python3 -m unittest tests/test_factorized_scalar_pwd.py tests/test_factorized_n2lo_pwd.py` | **Verified result:** 5/5 passed.  The Hebeler Eq. (6) three-integral scalar kernel gives the exact `(4pi)^2` contact limit, agrees with the independent five-angle projector for P-wave and `l=0<->2` finite-rank kernels, reproduces Golak Table 2 for `c1/c3/c4` within `3e-4` relative, and matches complete `cD` S-wave and spectator-D transitions. |
+| Factorized C++ PWD | `build/tests/cpp/test_chiral_n2lo_factorized` | **Verified result:** signed `c1/c3/c4/cD/cE` values agree with the independently tested Python factorization to about `1e-17` absolute for S, P, pair-D, `J=3/2`, and `T=3/2` channels.  Exact forward/reverse Hermiticity holds, and the independent five-angle result approaches it from `N=4` to `N=6`. |
 | Full Python discovery | `python3 -m unittest ...` including `tests/test_pade_honesty.py` | **Environment limitation:** collection fails because the local Python environment does not provide `pytest`; this is separate from the clean `unittest` regression set above. |
 
 At audit start the worktree also contained three unrelated untracked user files:
@@ -118,7 +120,7 @@ are being preserved.
 | `c1`, `c3` two-pion exchange | Diagonal rank-zero azimuthal/monopole approximation | Incomplete.  Off-diagonal and higher-rank angular-momentum couplings are absent. |
 | `c4` in legacy fast model | Constructor rejects nonzero `c4` | Missing by design; the approximate model cannot represent the complete N2LO force. |
 | Complete five-angle reference | Explicit Jj angular-spin states, 8-state Pauli spin and isospin algebra, all five operator components, regulator, rotational volume, and `(2pi)^-6` | Implemented as `chiral_N2LO_full_5d_reference` and signed-oracle tested.  Correctness-first only: cost scales as `Nangle_3NF^5`, so it is not accepted for converged WPCD production grids. |
-| Factorized three-integral prototype | Hebeler Eq. (6) scalar kernel plus an automated Cartesian-vector/spherical-harmonic finite-rank expansion and explicit spin/isospin matrices | Complete in Python for `c1`, `c3`, `c4`, `cD`, and `cE`.  It retains three nontrivial integrals and has independent five-angle/published-value tests.  This proves the production algorithm but is not yet solver-selectable C++. |
+| Factorized three-integral implementation | Hebeler Eq. (6) scalar kernel plus an automated Cartesian-vector/spherical-harmonic finite-rank expansion and explicit spin/isospin matrices | Complete in Python and C++ for `c1`, `c3`, `c4`, `cD`, and `cE`.  It retains three nontrivial integrals, caches momentum-independent angular/spin weights, applies the nonlocal regulator after PWD, and performs a unitary LS-to-Jj recoupling.  It is solver-selectable as `chiral_N2LO_full_factorized`; realistic WP cost and convergence remain open gates. |
 | Regulator | Squared nonlocal Gaussian associated with Epelbaum Eq. (3.19) | Present; convention and cutoff pairing must remain explicit in every benchmark. |
 | WP cache | Four-dimensional radial-bin quadrature with model/coupling/grid/truncation fields and schema-v6 operator versioning in the key | `Nangle_3NF`, the distinct reference model name, and numerical `gA`, `fpi`, `mpi`, `Lambda_chi`, and `hbarc` values prevent cross-projector/order/convention reuse.  Cache/direct parity is only tested for a one-point cell. |
 | Scattering insertion | Code builds `W1*C` and then its sparse left-permuted `P*W1*C`, including the complete intermediate-channel contraction | Corrected to the primary-source kernel `(1+P)W1`.  The noncommuting test now derives the reference matrix directly from Deltuva Eq. (7a). |
@@ -219,14 +221,15 @@ discriminator.
    and regulator factors are exact-golden tested.  Old caches are invalidated.
 4. **Resolved 2026-08-13:** the full-vector and generic five-angle oracles
    reproduce independent closed integrands and Golak Table 2.
-5. **Resolved as a reference and Python production-algorithm prototype:** a second C++ direct-Jj
+5. **Resolved at the matrix-element implementation level:** a second C++ direct-Jj
    five-angle implementation contains every `c1`, `c3`, `c4`, `cD`, and `cE`
    structure and is available through the factory with explicit slow-reference
    naming.  `Nangle_3NF` is printed, parsed, and hashed.  The Hebeler
-   three-integral factorization is now translated and independently validated
-   in Python for all five components.  A solver-selectable, cached C++ port and
-   its channel-by-channel matrix table remain required; no unsupported
-   dimensional reduction is accepted.
+   three-integral factorization is translated and independently validated in
+   Python for all five components, then ported to a solver-selectable C++ model.
+   Signed C++ comparisons cover S, P, pair-D, `J=3/2`, and `T=3/2` sectors.
+   A machine-readable broader channel/momentum table and WP convergence remain
+   required; no unsupported dimensional reduction is accepted.
 6. **Partly resolved:** W1 schema v6 hashes all chiral constants and the angular
    order.  Demonstrate cache-on/cache-off equality at quadrature order
    at least two and convergence under higher quadrature.
@@ -238,11 +241,12 @@ discriminator.
 
 The repository now satisfies the equation-ordering, full-vector-oracle,
 published raw-PWD, exact-contact-normalization, complete slow-C++-reference,
-and factorized-algorithm gates.  It still fails the decisive solver-selectable
-production and physical-validation gates.  The next safe milestone is the C++
-port of the validated factorized LS projector followed by unitary LS-to-Jj
-recoupling and signed channel-by-channel comparisons against the direct-Jj
-reference.  No existing Ay curve is yet admissible as a complete-N2LO result.
+and factorized matrix-element implementation gates.  It still fails the
+decisive WP/cache/solver convergence and physical-validation gates.  The next
+safe milestone is W1 cell-integration and cache-on/cache-off convergence with
+the complete factorized model, followed by reduced-grid direct-solve and
+physical truncation ladders.  No existing Ay curve is yet admissible as a
+complete-N2LO result.
 
 ## GLM-5.2 review disposition
 
