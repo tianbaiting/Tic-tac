@@ -13,6 +13,13 @@ BUILD_DIR ?= build
 DATA_DIR ?= data
 MODULE_DIR := $(BUILD_DIR)/modules
 
+# Cache layer switch — must match CMakeLists.txt option(TICTAC_USE_NEW_CACHE_LAYER ... ON).
+# Override with `make TICTAC_USE_NEW_CACHE_LAYER=0` for the legacy no-cache path.
+TICTAC_USE_NEW_CACHE_LAYER ?= 1
+# Guard against generated dependency files redefining the first goal and
+# hijacking the default target (`make` with no args must always build `all`).
+.DEFAULT_GOAL := all
+
 # 源文件目录
 CORE_DIR := $(SRC_DIR)/core
 UTILS_DIR := $(SRC_DIR)/utils
@@ -55,11 +62,15 @@ PKG_CONFIG ?= pkg-config
 HDF5_HAVE_SERIAL_PC := $(shell $(PKG_CONFIG) --exists hdf5-serial && echo yes 2>/dev/null)
 CONDA_INCLUDE :=
 CONDA_LDFLAGS :=
+CONDA_LDLIBS :=
 HDF5_LIBS :=
 ifneq ($(strip $(CONDA_PREFIX)),)
 CONDA_INCLUDE := -I$(CONDA_PREFIX)/include
 CONDA_LDFLAGS := -L$(CONDA_PREFIX)/lib -Wl,-rpath,$(CONDA_PREFIX)/lib
 HDF5_LIBS := -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5
+# conda's BLAS ships the CBLAS C interface in a separate libcblas; the code uses
+# cblas_* symbols (via gsl_cblas.h), so the link step must add -lcblas explicitly.
+CONDA_LDLIBS := -lcblas
 else ifneq ($(strip $(HDF5_HAVE_SERIAL_PC)),)
 HDF5_LIBS := -lhdf5_serial_hl_cpp -lhdf5_serial_cpp -lhdf5_serial_hl -lhdf5_serial
 else
@@ -67,15 +78,16 @@ HDF5_LIBS := -lhdf5_hl_cpp -lhdf5_cpp -lhdf5_hl -lhdf5
 endif
 
 CPPFLAGS += $(CONDA_INCLUDE)
+CPPFLAGS += -DTICTAC_USE_NEW_CACHE_LAYER=$(TICTAC_USE_NEW_CACHE_LAYER)
 LDFLAGS += $(CONDA_LDFLAGS)
 
 # 链接库
 LDLIBS := -Wl,--no-as-needed -lgomp -lgsl -lpthread -lm -ldl -lgfortran
 LDLIBS += $(HDF5_LIBS)
 LDLIBS += -lstdc++fs -llapacke -llapack -lblas -lcurl
+LDLIBS += $(CONDA_LDLIBS)
 
-# 包含依赖文件
--include $(DEP_FILES)
+# 依赖文件在文件末尾包含（见文件底部），避免生成的 .d 规则抢占默认目标。
 
 # 默认目标
 all: $(TARGET)
@@ -163,3 +175,7 @@ info:
 	@echo "Fortran 90 编译选项: $(FORTFLAGS_90)"
 	@echo "链接库: $(LDLIBS)"
 	@echo "========================"
+
+# 依赖文件放在文件最后包含：生成的 .d 文件含有规则，若在默认目标之前包含，
+# 可能把第一个 .d 规则当作默认目标；配合上方 .DEFAULT_GOAL := all 双重保险。
+-include $(DEP_FILES)
