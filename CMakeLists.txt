@@ -51,6 +51,7 @@ find_library(LAPACKE_LIB lapacke)
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_SOURCE_DIR}/src/config
     ${CMAKE_SOURCE_DIR}/src/core
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver
@@ -65,6 +66,7 @@ include_directories(
 )
 
 # 收集所有源文件
+file(GLOB_RECURSE SOURCES_APP "${CMAKE_SOURCE_DIR}/src/app/*.cpp")
 file(GLOB_RECURSE SOURCES_CONFIG "${CMAKE_SOURCE_DIR}/src/config/*.cpp")
 file(GLOB_RECURSE SOURCES_CORE "${CMAKE_SOURCE_DIR}/src/core/*/*.cpp")
 file(GLOB_RECURSE SOURCES_INTERACTIONS "${CMAKE_SOURCE_DIR}/src/interactions/*.cpp")
@@ -99,6 +101,7 @@ set(SOURCES_MAIN "${CMAKE_SOURCE_DIR}/src/main.cpp")
 # 所有源文件
 set(ALL_SOURCES
     ${SOURCES_MAIN}
+    ${SOURCES_APP}
     ${SOURCES_CONFIG}
     ${SOURCES_CORE}
     ${SOURCES_INTERACTIONS}
