@@ -1,5 +1,10 @@
 # Chiral N2LO 3NF Audit and Physics/Numerics Fix — Implementation Plan
 
+> **Historical plan; operator-ordering step superseded 2026-08-12.** The plan's
+> `W1(1+P)` conclusion came from a wrong Witala-2008 citation. The corrected
+> elastic WPCD kernel is `P V + (1+P)W1`, derived from Deltuva PRC 80, 064002,
+> Eq. (7a). See `docs/three_nf_equation_contract.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Audit and fix the chiral N²LO three-nucleon force (3NF) implementation so that the operator structure, partial-wave matrix elements, and Faddeev kernel ordering satisfy literature conventions (Epelbaum 2002, Golak 2010, Hebeler 2015, Witała 2008), with independent golden tests and honest capability reporting.

@@ -9,9 +9,9 @@
 
 // [EN] Self-contained AGS kernel-algebra builders shared by the production
 // solver and the independent finite-dimensional oracle.  Keeping the complete
-// W^(1)·(1+P)·C application here prevents the dense-column and on-shell-row
+// (1+P)·W^(1)·C application here prevents the dense-column and on-shell-row
 // paths from drifting apart. / [CN] 自包含的 AGS 核代数构造函数，由生产求解器与
-// 独立有限维 oracle 共用；完整 W^(1)·(1+P)·C 作用集中在此，避免稠密列路径与
+// 独立有限维 oracle 共用；完整 (1+P)·W^(1)·C 作用集中在此，避免稠密列路径与
 // on-shell 行路径出现代数分叉。
 
 // [EN] This is the raw driving column PVC that appears in the AGS kernel before the left basis rotation by C^T.
@@ -63,7 +63,7 @@ void calculate_PVC_col(double*  col_array,
 	}
 }
 
-void add_W1_one_plus_P_C_col(double*  col_array,
+void add_one_plus_P_W1_C_col(double*  col_array,
 							 size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
 							 size_t   Nalpha,      size_t Nq_WP,   size_t Np_WP,
 							 double** CT_RM_array,
@@ -85,6 +85,8 @@ void add_W1_one_plus_P_C_col(double*  col_array,
 	const double inv_hbarc  = 1.0 / hbarc;
 	const double inv_hbarc5 = inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc * inv_hbarc;
 	const double w1_unit    = inv_hbarc5 * tnf_ctx.w1_scale;
+	const size_t dense_dim  = Nalpha * Nq_WP * Np_WP;
+	std::vector<double> W1C_col(dense_dim, 0.0);
 
 	const double q_c_mid = 0.5 * (q_WP[idx_q_c] + q_WP[idx_q_c + 1]);
 	const double dq_c    = q_WP[idx_q_c + 1] - q_WP[idx_q_c];
@@ -147,78 +149,31 @@ void add_W1_one_plus_P_C_col(double*  col_array,
 					if (w1c != 0.0){
 						const size_t idx_row = idx_alpha_r * Nq_WP * Np_WP
 											 + idx_q_r * Np_WP + idx_p_r;
-						col_array[idx_row] += w1c;
+							W1C_col[idx_row] += w1c;
 					}
 				}
 			}
 		}
 	}
 
-	// Permutation part: W^(1)·P·C.  calculate_PVC_col treats CT_RM as
-	// column-major C, which is the same memory identity used above.
-	std::vector<double> PC_col(Nalpha * Nq_WP * Np_WP, 0.0);
-	calculate_PVC_col(PC_col.data(),
-					  idx_alpha_c, idx_p_c, idx_q_c,
-					  Nalpha, Nq_WP, Np_WP,
-					  CT_RM_array,
-					  P123_val_array,
-					  P123_row_array,
-					  P123_col_array,
-					  P123_dim);
+	// Complete symmetrized AGS term: (1+P)·W^(1)·C.  Add the identity
+	// contribution and then apply the stored CSC permutation to the already
+	// contracted W1C column.  This ordering is deliberately non-interchangeable
+	// with W^(1)·P·C when [P,W^(1)] != 0.
+	for (size_t idx_col = 0; idx_col < dense_dim; idx_col++){
+		const double w1c = W1C_col[idx_col];
+		if (w1c == 0.0) continue;
 
-	for (size_t idx_k = 0; idx_k < PC_col.size(); idx_k++){
-		const double pc_val = PC_col[idx_k];
-		if (pc_val == 0.0) continue;
-
-		const size_t idx_alpha_k = idx_k / (Nq_WP * Np_WP);
-		const size_t idx_q_k = (idx_k % (Nq_WP * Np_WP)) / Np_WP;
-		const size_t idx_p_k = idx_k % Np_WP;
-		const double p_k_mid = 0.5 * (p_WP[idx_p_k] + p_WP[idx_p_k + 1]);
-		const double q_k_mid = 0.5 * (q_WP[idx_q_k] + q_WP[idx_q_k + 1]);
-		const double dp_k    = p_WP[idx_p_k + 1] - p_WP[idx_p_k];
-		const double dq_k    = q_WP[idx_q_k + 1] - q_WP[idx_q_k];
-		const double wp_k    = p_k_mid * std::sqrt(dp_k);
-		const double wq_k    = q_k_mid * std::sqrt(dq_k);
-		const double p_k_fm  = p_k_mid * inv_hbarc;
-		const double q_k_fm  = q_k_mid * inv_hbarc;
-
-		for (size_t idx_alpha_r = 0; idx_alpha_r < Nalpha; idx_alpha_r++){
-			if (pw_st.two_J_3N_array[idx_alpha_r] != pw_st.two_J_3N_array[idx_alpha_k]) continue;
-			if (pw_st.two_T_3N_array[idx_alpha_r] != pw_st.two_T_3N_array[idx_alpha_k]) continue;
-			if (pw_st.P_3N_array[idx_alpha_r]     != pw_st.P_3N_array[idx_alpha_k])     continue;
-
-			for (size_t idx_q_r = 0; idx_q_r < Nq_WP; idx_q_r++){
-				const double q_r_mid = 0.5 * (q_WP[idx_q_r] + q_WP[idx_q_r + 1]);
-				const double dq_r    = q_WP[idx_q_r + 1] - q_WP[idx_q_r];
-				const double wq_r    = q_r_mid * std::sqrt(dq_r);
-				const double q_r_fm  = q_r_mid * inv_hbarc;
-
-				for (size_t idx_p_r = 0; idx_p_r < Np_WP; idx_p_r++){
-					const double p_r_mid = 0.5 * (p_WP[idx_p_r] + p_WP[idx_p_r + 1]);
-					const double dp_r    = p_WP[idx_p_r + 1] - p_WP[idx_p_r];
-					const double wp_r    = p_r_mid * std::sqrt(dp_r);
-					const double p_r_fm  = p_r_mid * inv_hbarc;
-					double w1_wp;
-					if (tnf_ctx.w1_cache != nullptr){
-						w1_wp = tnf_ctx.w1_cache->get(idx_alpha_r, idx_alpha_k,
-														  idx_p_r, idx_q_r, idx_p_k, idx_q_k)
-						        * tnf_ctx.w1_scale;
-					}
-					else{
-						const double w1_raw = tnf->W1_element(idx_alpha_r, idx_alpha_k,
-																p_r_fm, q_r_fm,
-																p_k_fm, q_k_fm, pw_st);
-						w1_wp = (w1_raw * w1_unit) * (wp_r * wq_r * wp_k * wq_k);
-					}
-					if (w1_wp != 0.0){
-						const size_t idx_row = idx_alpha_r * Nq_WP * Np_WP
-											 + idx_q_r * Np_WP + idx_p_r;
-						col_array[idx_row] += w1_wp * pc_val;
-					}
-				}
-			}
+		col_array[idx_col] += w1c;
+		const size_t idx_i_lower = P123_col_array[idx_col];
+		const size_t idx_i_upper = P123_col_array[idx_col + 1];
+		for (size_t idx_i = idx_i_lower; idx_i < idx_i_upper; idx_i++){
+			const double P_element = 2.0 * P123_val_array[idx_i];
+			const size_t idx_row = (size_t)P123_row_array[idx_i];
+			col_array[idx_row] += P_element * w1c;
 		}
 	}
+	(void)P123_dim;
 }
 
 // [EN] CPVC = C^T P V C is the packet-space kernel that drives both the first Neumann term and every later
@@ -261,7 +216,7 @@ void calculate_CPVC_col(double*  col_array,
 
 	// The shared helper is also called by calculate_all_CPVC_rows, so the
 	// dense-column and Padé/Neumann row paths use identical W1 contractions.
-	add_W1_one_plus_P_C_col(PVC_col.data(),
+		add_one_plus_P_W1_C_col(PVC_col.data(),
 							 idx_alpha_c, idx_p_c, idx_q_c,
 							 Nalpha, Nq_WP, Np_WP,
 							 CT_RM_array,
@@ -360,7 +315,7 @@ void calculate_all_CPVC_rows(double*  row_arrays,
 									  P123_col_array,
 									  P123_dim);
 
-					add_W1_one_plus_P_C_col(right_kernel_col.data(),
+						add_one_plus_P_W1_C_col(right_kernel_col.data(),
 									 idx_alpha_c, idx_p_c, idx_q_c,
 									 Nalpha, Nq_WP, Np_WP,
 									 CT_RM_array,

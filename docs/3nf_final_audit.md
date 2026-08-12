@@ -1,5 +1,14 @@
 # Final 3NF physics audit — `fix/3nf-physics-contract`
 
+> **Superseded for operator ordering (2026-08-12).** The earlier conclusion
+> `P V + W1(1+P)` relied on a miscitation of Witala PRC 77, 034004, Eq. (3).
+> Deltuva PRC 80, 064002, Eq. (7a), reduced with `tG0=vG` and
+> `G0(1+tG0)=G`, fixes the elastic WPCD kernel as `P V + (1+P)W1`.
+> Production and the noncommuting oracle have been corrected; see
+> `docs/three_nf_equation_contract.md` and
+> `docs/complete_n2lo_3nf_status.md`. Numerical claims in this older record
+> remain diagnostic only.
+
 **Audit date:** 2026-08-11
 
 **Audited code through:** `2e53680`
@@ -17,12 +26,12 @@ physical neutron--deuteron calculation is converged.
 
 | Item | Status | Independent evidence and scope |
 |---|---|---|
-| AGS operator structure | **VERIFIED** | Direct compound-index derivation and noncommuting dense-matrix oracle give `A=C^T[PV+W1(1+P)]C`; the oracle rejects `(1+P)W1`. The channel resolvent, rather than `G0`, is used. Literature traceability is recorded in `three_nf_equation_contract.md`. |
+| AGS operator structure | **SUPERSEDED** | The old oracle only enforced an assumed contract. The primary-equation audit now gives `A=C^T[PV+(1+P)W1]C`; see the notice above. |
 | `W1*C` coupled contraction | **VERIFIED** | Regression first failed the old code with 64 mismatches (max error 1.378), then passed after adding `sum_alpha_j W1_(r,j) C_(j,c)`. The present operator oracle has 26 checks and zero failures. |
 | `W1*P*C` contraction | **VERIFIED** | Independent dense assembly with nonsymmetric, alpha-off-diagonal `C`, `W1`, and noncommuting `P`; production row and column paths both agree. `P=2P123` is exercised only in the full permutation test, not in the isolated `W1*C` discriminator. |
 | `C`/`C^T` convention | **VERIFIED** | Pointer-layout oracle and a nonsymmetric real 3S1--3D1 coupled-block restructuring test verify the transpose and explicitly reject the untransposed orientation. |
 | 2NF-only and `W1=0` | **VERIFIED** | Python regression compares 40 complex U elements; current output equals the validated baseline. A separate end-to-end run gives byte-identical U and Neumann files for `three_nucleon_force=none` and `w1_scale=0`. |
-| Operator order `W1(1+P)` | **VERIFIED** | `test_faddeev_operator_order` uses `[W1,P] != 0`; five checks pass and the wrong operator differs by a nonzero norm. |
+| Operator order `W1(1+P)` | **REJECTED** | The replacement test derives `(1+P)W1` from Deltuva Eq. (7a) using Hermitian noncommuting matrices and rejects this former order. |
 | W1 cache equivalence | **VERIFIED** | Production cache consumer equals direct `W1_element` fallback for every toy element, including intermediate `alpha_j`. Cache keys include row/column alpha block, all LECs, cutoff/regulator, model, grid hashes, channel metadata, and W1 quadrature orders. |
 | Row/column kernel builders | **VERIFIED** | `calculate_CPVC_col` and `calculate_all_CPVC_rows` call the same W1 helper and agree with each other and independent dense algebra for every selected toy element. |
 | Dense vs Padé/Neumann | **VERIFIED, bounded scope** | Production Padé `[2/2]` agrees with a two-alpha dense toy solve to `1e-11`. On the Np=Nq=5 2NF grid, the selected truncations agree with dense to max `6.57420273e-9 MeV`, mean `4.82005695e-10 MeV`. This does not certify the final Padé tail: all those elements remain honestly labelled `Conv=2`. |

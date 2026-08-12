@@ -7,7 +7,7 @@
 // hand-constructed, deliberately NON-symmetric mock P, V, W^(1), C and checks
 // that every code path returns the same matrix
 //
-//     M = C^T · ( P·V  +  W^(1)·(1 + P) ) · C
+//     M = C^T · ( P·V  +  (1 + P)·W^(1) ) · C
 //
 // assembled directly from the dense definitions. The mock operators are
 // independent of the production 3NF recoupling / kernels: they are random
@@ -276,12 +276,12 @@ static DenseMock build_dense_mock(std::mt19937_64& rng) {
     return m;
 }
 
-// The mathematical oracle:  M = C^T·(P·V + W1·(1+P))·C
+// The mathematical oracle:  M = C^T·(P·V + (1+P)·W1)·C
 static std::vector<double> build_M_math(const DenseMock& m) {
     auto PV  = mat_mat(m.P, m.V);
-    auto W1P  = mat_mat(m.W1, m.P);
-    auto W1_one_plus_P = mat_add(m.W1, W1P);          // W1·(1+P)
-    auto K    = mat_add(PV, W1_one_plus_P);           // P·V + W1·(1+P)
+    auto PW1  = mat_mat(m.P, m.W1);
+    auto one_plus_P_W1 = mat_add(m.W1, PW1);          // (1+P)·W1
+    auto K    = mat_add(PV, one_plus_P_W1);           // P·V + (1+P)·W1
     auto KC  = mat_mat(K, m.C);                        // K·C
     return mat_mat(m.CT, KC);                          // C^T·K·C
 }
@@ -817,13 +817,13 @@ static void test_W1_cache_matches_fallback(const DenseMock& m) {
 }
 
 // =============================================================================
-// Test 7: Operator-ordering guard — wrong order (1+P)·W1 ≠ right order W1·(1+P).
+// Test 7: Operator-ordering guard — wrong W1·(1+P) differs from the
+// literature-derived (1+P)·W1 ordering.
 // =============================================================================
 static void test_operator_ordering(const DenseMock& m) {
     auto PV      = mat_mat(m.P, m.V);
-    auto PW1     = mat_mat(m.P, m.W1);          // P·W1 (wrong order)
-    auto W1C     = mat_mat(m.W1, m.C);
-    auto wrong_K = mat_add(PV, mat_add(PW1, m.W1));   // P·V + P·W1 + W1  (wrong)
+    auto W1P     = mat_mat(m.W1, m.P);                 // W1·P (wrong order)
+    auto wrong_K = mat_add(PV, mat_add(m.W1, W1P));   // P·V + W1 + W1·P
     auto wrong   = mat_mat(m.CT, mat_mat(wrong_K, m.C));
 
     auto right = build_M_math(m);
@@ -841,10 +841,10 @@ static void test_operator_ordering(const DenseMock& m) {
 // Test 6: C vs C^T guard — using C in place of C^T must NOT match M_math.
 // =============================================================================
 static void test_CT_distinction(const DenseMock& m, const std::vector<double>& M_math) {
-    // Build M_wrongC = C·(P·V + W1·(1+P))·C^T  (C and C^T swapped).
+    // Build M_wrongC = C·(P·V + (1+P)·W1)·C^T  (C and C^T swapped).
     auto PV      = mat_mat(m.P, m.V);
-    auto W1P     = mat_mat(m.W1, m.P);
-    auto K       = mat_add(PV, mat_add(m.W1, W1P));
+    auto PW1     = mat_mat(m.P, m.W1);
+    auto K       = mat_add(PV, mat_add(m.W1, PW1));
     auto KCT     = mat_mat(K, m.CT);
     auto M_wrong = mat_mat(m.C, KCT);   // C·K·C^T  (swapped)
 

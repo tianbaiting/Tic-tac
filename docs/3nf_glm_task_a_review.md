@@ -1,5 +1,11 @@
 # GLM-5.2 Task A: coupled-alpha contraction review
 
+> **Superseded for the outer permutation order (2026-08-12).** This review
+> correctly identified the complete intermediate-alpha contraction, but it
+> accepted the then-provided `W1(1+P)` contract without checking the primary
+> elastic AGS equation. Deltuva PRC 80, 064002, Eq. (7a), fixes the Tic-tac
+> elastic kernel as `(1+P)W1`; see `docs/three_nf_equation_contract.md`.
+
 **OpenCode session:** `ses_01906b545ffeR65TtdVS8PX305`
 
 **Model:** `paratera/GLM-5.2`
@@ -76,7 +82,8 @@ The required regression must use at least two conserved-compatible alpha
 channels, nonsymmetric nonzero `C_01` and `C_10`, and alpha-off-diagonal W1.
 The cleanest discriminator isolates `C^T W1 C` from permutation and 2NF terms;
 the full operator test must additionally retain the independent
-`C^T[PV+W1(1+P)]C` comparison and exercise both column and row builders.
+the corrected `C^T[PV+(1+P)W1]C` comparison and exercise both column and row
+builders.  The older formula in the original GLM response is superseded.
 
 ## Review confidence and open item
 

@@ -103,7 +103,7 @@ void CPVC_col_calc_test(size_t   Nalpha,
 // [EN] Made visible (forward-declared) for tests/cpp/test_3nf_operator_oracle.cpp —
 // the Phase 0 finite-dimensional operator oracle needs to call the production
 // column / row kernel builders directly with mock WP arrays, to verify that
-// the algebra assembled in solve_faddeev.cpp equals C^T·(P·V + W^(1)·(1+P))·C.
+// the algebra assembled in solve_faddeev.cpp equals C^T·(P·V + (1+P)·W^(1))·C.
 // See docs/three_nf_equation_contract.md §6. / [CN] 为 Phase 0 算符级 oracle 测试前向声明，
 // 使其可用 mock WP 数组直接调用生产列/行核构造函数，验证算符代数。
 void calculate_CPVC_col(double*  col_array,

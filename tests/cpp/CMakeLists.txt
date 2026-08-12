@@ -76,7 +76,7 @@ add_test(NAME faddeev_operator_order COMMAND test_faddeev_operator_order)
 
 # L0: Phase 0 operator-level oracle (fix/3nf-physics-contract).
 # Exercises the REAL calculate_CPVC_col with mock P,V,W1,C and verifies the
-# algebra equals C^T·(P·V + W^(1)·(1+P))·C. See docs/three_nf_equation_contract.md §6.
+# algebra equals C^T·(P·V + (1+P)·W^(1))·C. See docs/three_nf_equation_contract.md §6.
 add_executable(test_3nf_operator_oracle
     test_3nf_operator_oracle.cpp
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/cpvc_kernel.cpp

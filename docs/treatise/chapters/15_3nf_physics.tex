@@ -308,32 +308,30 @@ W = (1 + \Pop_{123} + \Pop_{132})\, W^{(1)} = (1 + \Pop)\, W^{(1)},
 \subsubsection{算符顺序：\(W^{(1)}(1+P)\) 还是 \((1+P)W^{(1)}\)？}
 \label{subsubsec:ch15-operator-order}
 
-\textbf{本节锁定 Tic-tac 中的算符顺序约定}（3NF audit B4，
-\texttt{docs/3nf\_audit\_2026-06-21.md}）。完整的物理 3NF
-算符~\cref{eq:ch15-W-full} 给出反对称 3N Hilbert 空间上的全算符。
-但是 Faddeev/AGS \textbf{核} \(K_{\rm AGS}\) 作用在 spectator-1 Faddeev
-空间里——在这个空间里 ket 只含一个 Faddeev 分量，\(W^{(1)}\) 才是良好
-定义的对象。Witała 等 PRC 77 034004 (2008) eq.~(3) 与 Golak 等 EPJA 43
-241 (2010) §2 把带 3NF 的 AGS 核写作
+\textbf{本节锁定 Tic-tac 中的弹性 AGS 算符顺序约定}。Deltuva
+PRC 80 064002 (2009) eq.~(7a) 从全预解算符推导出相同粒子的对称化
+弹性 AGS 方程。利用 \(tG_0=VG\) 与
+\(G_0(1+tG_0)=G\)，其迭代核无须交换任何非对易因子即可写作
 \begin{equation}
 \label{eq:ch15-AGS-kernel}
-K_{\rm AGS} = \Pop\V + W^{(1)}\,(1 + \Pop),
+K_{\rm AGS} = \Pop\V + (1 + \Pop)\,W^{(1)},
 \qquad
 \Pop \equiv \Pop_{123} + \Pop_{132},
 \end{equation}
-即 \(W^{(1)}\) 在\textbf{左}、\((1+\Pop)\) 在\textbf{右}。
+即 \((1+\Pop)\) 在\textbf{左}、\(W^{(1)}\) 在\textbf{右}。连续
+Faddeev breakup 分量方程中的 \(W^{(1)}(1+\Pop)\) 属于另一个未知算符；
+不能把该次序直接搬到弹性 channel-resolvent 方程。早期版本把 Witała
+PRC 77 034004 (2008) eq.~(3) 误引为 3NF 方程；该式实际是基底耦合关系。
 
-\textbf{不得}把核内的 \(W^{(1)}(1+\Pop)\) 替换为 \((1+\Pop)W^{(1)}\)，即使
-两者在完全反对称的 bra--ket 之间作为矩阵元相等。原因：\(W^{(1)}\) 是
-spectator-1 框架中的算符，左乘 \(\Pop\) 会把它移出该框架。在
-\texttt{solve\_faddeev.cpp} 里 \texttt{calculate\_CPVC\_col} 函数按
-\(\Pop\V\C + W^{(1)}\C + W^{(1)}\Pop\C\) 的代数结构组装核，正是
+\texttt{calculate\_CPVC\_col} 按
+\(\Pop\V\C + W^{(1)}\C + \Pop W^{(1)}\C\) 组装核，正是
 \cref{eq:ch15-AGS-kernel} 的实现。
 
 稠密算符顺序校验在 \texttt{tests/cpp/test\_faddeev\_operator\_order.cpp}：
-构造非平凡的 toy \(W^{(1)}, V, \Pop, C\)，验证 \(\|\text{kernel}_{\rm code} -
-(P\V + W^{(1)}(1+\Pop))\C\| = 0\) 且 \(\|\text{kernel}_{\rm code} -
-(P\V + (1+\Pop)W^{(1)})\C\| > 0\)。
+使用满足 \(\Pop^2=\Pop+2\) 的置换和 Hermitian、非对易 toy
+\(W^{(1)},V\)，逐项验证 Deltuva eq.~(7a) 化简为
+\([\Pop V+(1+\Pop)W^{(1)}]G\)，并拒绝
+\([\Pop V+W^{(1)}(1+\Pop)]G\)。
 
 \subsection{2\(\pi\)-exchange 项 \(W^{(1)}_{2\pi}\)（Fujita-Miyazawa 类）}
 \label{subsec:ch15-2pe}

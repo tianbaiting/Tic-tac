@@ -12,7 +12,7 @@
 // and so the dense / sparse / row / column / Pade solver paths share ONE
 // implementation of the algebra
 //
-//     A = C^T · ( P·V  +  W^(1)·(1 + P) ) · C
+//     A = C^T · ( P·V  +  (1 + P)·W^(1) ) · C
 //
 // (see docs/three_nf_equation_contract.md §4.2 / §6).
 //
@@ -36,7 +36,7 @@ void calculate_PVC_col(double*  col_array,
 					   size_t*  P123_col_array,
 					   size_t   P123_dim);
 
-// Add the bare-3NF part W^(1)·(1+P)·C for one external packet column to a
+// Add the bare-3NF part (1+P)·W^(1)·C for one external packet column to a
 // pre-existing right-kernel column.  This is the single implementation used by
 // both calculate_CPVC_col and calculate_all_CPVC_rows.
 //
@@ -46,7 +46,7 @@ void calculate_PVC_col(double*  col_array,
 // Hence the identity term W1*C must sum alpha_j and use
 //   C_(alpha_j p_j,alpha_c p_c)
 //     = CT_RM[alpha_c*Nalpha+alpha_j][p_c*Np+p_j].
-void add_W1_one_plus_P_C_col(double*  col_array,
+void add_one_plus_P_W1_C_col(double*  col_array,
 							 size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
 							 size_t   Nalpha,      size_t Nq_WP,   size_t Np_WP,
 							 double** CT_RM_array,
@@ -58,11 +58,13 @@ void add_W1_one_plus_P_C_col(double*  col_array,
 
 // CPVC = C^T·P·V·C is the packet-space kernel that drives both the first Neumann
 // term and every later rescattering step. With 3NF enabled (tnf_ctx.tnf != null
-// and tnf->enabled()), the column also accumulates W^(1)·(1+P)·C, i.e. the full
-// AGS kernel column  A[:, col] = [C^T·(P·V + W^(1)·(1+P))·C][:, col].
+// and tnf->enabled()), the column also accumulates (1+P)·W^(1)·C, i.e. the full
+// AGS kernel column  A[:, col] = [C^T·(P·V + (1+P)·W^(1))·C][:, col].
 //
-// Operator ordering (locked, see docs/three_nf_equation_contract.md §5):
-// W^(1) on the LEFT, (1+P) on the RIGHT.
+// Operator ordering (locked, see docs/three_nf_equation_contract.md §3):
+// (1+P) on the LEFT of the bare spectator component W^(1).  This follows by
+// reducing the symmetrized AGS equation of Deltuva, Phys. Rev. C 80, 064002
+// (2009), Eq. (7a), with tG0=vG and G0(1+tG0)=G.
 void calculate_CPVC_col(double*  col_array,
 					    int* 	 row_to_nnz_array,
 					    int* 	 nnz_to_row_array,

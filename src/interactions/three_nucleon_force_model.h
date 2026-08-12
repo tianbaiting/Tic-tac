@@ -51,24 +51,24 @@ public:
 	// OPERATOR ORDERING CONVENTION (locked, see docs/treatise/chapters/15_3nf_physics.tex
 	// §operator-ordering and tests/cpp/test_faddeev_operator_order.cpp for the dense test):
 	//
-	// The full physical 3NF on the antisymmetrised 3N Hilbert space is
-	//     W = W^(1) + W^(2) + W^(3) = (1 + P_{123} + P_{132})·W^(1)
-	// which for antisymmetric bras and kets equals 3·W^(1) as a matrix element.
+	// The full physical 3NF is the sum of the three cyclic spectator components,
+	//     W = W^(1) + W^(2) + W^(3).
+	// This decomposition must not be used to commute a spectator component
+	// through P inside an unsaturated integral equation.
 	//
-	// HOWEVER, the Faddeev/AGS KERNEL acts in spectator-1 Faddeev space where the
-	// ket is a single Faddeev component. The kernel is (Witała 2008 PRC 77 034004
-	// eq. 3, Golak 2010 EPJA 43 241 §2):
-	//     K_AGS = P·V + W^(1)·(1 + P)
-	// i.e. W^(1) on the LEFT, (1+P) on the RIGHT, with P = P_{123} + P_{132}.
+	// Tic-tac solves the symmetrised elastic AGS equation of Deltuva,
+	// Phys. Rev. C 80, 064002 (2009), Eq. (7a), after the exact channel-resolvent
+	// reduction t G0 = V G and G0(1+t G0) = G.  Its kernel is
+	//     K_AGS = P·V + (1 + P)·W^(1)
+	// i.e. (1+P) is on the LEFT of W^(1), with P = P_{123} + P_{132}.
 	//
-	// One may NOT replace W^(1)(1+P) by (1+P)W^(1) in the kernel even though the
-	// two coincide for fully antisymmetric states — W^(1) is defined ONLY in the
-	// spectator-1 frame and is not the same object after a cyclic permutation.
+	// W^(1)(1+P) belongs to the distinct Faddeev breakup-component equation.  It
+	// may NOT replace (1+P)W^(1) here when [P,W^(1)] != 0.
 	//
 	// / [CN] 在 3N partial-wave 与 Jacobi 动量基下计算单个 W^(1) 矩阵元。p/q 为 Jacobi 动量
 	// (fm^{-1})，而非 WP bin 索引。
-	// 算符顺序约定（锁定）：AGS 核使用 W^(1)·(1+P)，W^(1) 在左、(1+P) 在右。完整的物理
-	// 3NF 在反对称化 3N 希尔伯特空间中为 W = (1+P+P²)·W^(1)，但核内不能将两者混用。
+	// 算符顺序约定（锁定）：弹性 AGS 核使用 (1+P)·W^(1)，(1+P) 在左；
+	// W^(1)·(1+P) 属于另一条 Faddeev 分量方程，二者不可在核内混用。
 	virtual double W1_element(int alpha_r, int alpha_c,
 							  double p_r, double q_r,
 							  double p_c, double q_c,
