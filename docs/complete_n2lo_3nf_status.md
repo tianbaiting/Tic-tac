@@ -1,8 +1,9 @@
 # Complete chiral N2LO 3NF: implementation and validation status
 
-**Audit date:** 2026-08-12  
-**Branch:** `fix/3nf-physics-contract`  
-**Audited commit:** `9d402b04bf986dda3d0ec043296b0d3dc9a9544e`
+**Audit date:** 2026-08-13
+**Branch:** `fix/3nf-physics-contract`
+**Audited commit:** `dfc293f` (with the convention-table update in the current
+documentation worktree)
 
 ## Scope and publication gate
 
@@ -38,6 +39,7 @@ The labels used below are:
 | Faddeev ordering discriminator | `build/tests/test_faddeev_operator_order` | **Superseded audit-start result:** the former test only proved conformity to the repository's incorrect assumed ordering.  It has been replaced by a primary-equation discriminator described below. |
 | 3NF matrix-element tests | `build/tests/test_3nf_matrix_elements` | **Verified result:** 432 passed, 0 failed; the complete `c4` requirement remains an expected failure/skip. |
 | Python regressions | `python3 -m unittest tests/test_190mev_data_pipeline.py tests/test_2nf_miller_baseline.py tests/test_3nf_matrix_elements.py tests/test_3nf_physics.py tests/test_3nf_regression.py tests/test_coupling_coefficients.py` | **Verified result:** 25 passed, 5 skipped.  The 40 checked 2NF amplitudes reproduce the stored baseline with `max|delta| = 0`. |
+| Full-vector/PWD oracle | `python3 -m unittest tests/test_full_vector_n2lo_oracle.py` | **Verified result:** 13/13 passed.  The generic five-angle projector agrees with the independently transcribed Golak integrands at `N=4` to 10 decimal places, reproduces the published Table 2 values at `N=12` within `3e-4` relative, and gives identical direct-Jj and unitary-9j-transformed LS projections. |
 | Full Python discovery | `python3 -m unittest ...` including `tests/test_pade_honesty.py` | **Environment limitation:** collection fails because the local Python environment does not provide `pytest`; this is separate from the clean `unittest` regression set above. |
 
 At audit start the worktree also contained three unrelated untracked user files:
@@ -55,13 +57,13 @@ are being preserved.
    Their Eq. (2.10) has a **positive** `+1/2 E` coefficient for each ordered
    `j != k` term.  Each unordered pair occurs twice, so the spectator-1
    component is `u1=E tau2·tau3`, not `(E/2) tau2·tau3`.  Production and the
-   independent Pauli enumeration now use this unit coefficient.  The complete
-   Fourier/PW normalization remains open.
+   independent Pauli enumeration now use this unit coefficient.
 
 2. **Literature fact:** Appendix A of the same paper contains the full partial-wave
    expressions.  In particular, the `cD` term is not restricted to the present
-   spectator-S-wave rank-zero piece, and the contact normalization/recoupling in
-   Eq. (A-4) still has to be traced into the Tic-tac normalization convention.
+   spectator-S-wave rank-zero piece.  Visual inspection of the rendered source
+   page confirms that Eq. (A-4) reads `6 E (4pi)^2`, not `E/2`.  The `6j`
+   values reduce this to `(4pi)^2 E tau23`.
 
 3. **Literature fact:** Golak et al., *Eur. Phys. J. A* **43**, 241
    ([arXiv:0911.4173](https://arxiv.org/abs/0911.4173),
@@ -76,14 +78,21 @@ are being preserved.
    projection of local three-nucleon forces.  Their Jacobi spectator convention
    differs from Tic-tac's and must be translated explicitly before reuse.
 
-5. **Verified citation defect:** Witala et al., *Phys. Rev. C* **77**, 034004
+5. **Verified result:** Tic-tac's 2NF convention applies `(2pi)^-3` to its one
+   relative coordinate.  A 3NF has the independent `p` and `q` coordinates,
+   so the raw PWD requires `(2pi)^-6`.  The WP cache later supplies only radial
+   measures and `hbarc` conversion.  Combining this with Epelbaum A-4 gives the
+   exact contact normalization `1/(4pi^4)`; the former `1/(8pi^3)` coefficient
+   was too large by `pi/2`.
+
+6. **Verified citation defect:** Witala et al., *Phys. Rev. C* **77**, 034004
    ([arXiv:0801.0367](https://arxiv.org/abs/0801.0367),
    [DOI](https://doi.org/10.1103/PhysRevC.77.034004)) do not establish the
    repository's asserted 3NF AGS kernel.  Their Eq. (3) is a basis-coupling
    formula, and their scattering equation is the 2NF-only Eq. (50).  The present
    citation in `docs/three_nf_equation_contract.md` is therefore invalid.
 
-6. **Literature fact and corrected implementation:** Deltuva, *Phys. Rev. C*
+7. **Literature fact and corrected implementation:** Deltuva, *Phys. Rev. C*
    **80**, 064002 ([arXiv:0912.0240](https://arxiv.org/abs/0912.0240),
    [DOI](https://doi.org/10.1103/PhysRevC.80.064002)), Eq. (7a), gives the
    symmetrised elastic AGS equation.  Using `tG0=vG` and
@@ -99,12 +108,12 @@ are being preserved.
 
 | Component | Current implementation | Assessment |
 |---|---|---|
-| `cE` contact | Spin scalar, pair-isospin eigenvalue, diagonal channel selection, regulator, unit spectator-component coefficient | Ordered-pair counting is independently verified and regression-locked; the complete Fourier/PW normalization and phases still need a primary-source benchmark. |
+| `cE` contact | Spin scalar, pair-isospin eigenvalue, diagonal channel selection, regulator, unit spectator-component coefficient, exact A-4/Fourier normalization | Verified by explicit Pauli states, the generic five-angle projector, visual A-4 inspection, and signed C++ golden values.  W1 cache schema v5 rejects pre-fix blocks. |
 | `cD` one-pion-contact | Pair-contact/spectator-S-wave rank-zero subset | Incomplete.  Required rank-two and higher-orbital structures are absent. |
 | `c1`, `c3` two-pion exchange | Diagonal rank-zero azimuthal/monopole approximation | Incomplete.  Off-diagonal and higher-rank angular-momentum couplings are absent. |
 | `c4` two-pion exchange | Constructor rejects nonzero `c4` | Missing by design; production cannot represent the complete N2LO force. |
 | Regulator | Squared nonlocal Gaussian associated with Epelbaum Eq. (3.19) | Present; convention and cutoff pairing must remain explicit in every benchmark. |
-| WP cache | Four-dimensional radial-bin quadrature with model/coupling/grid/truncation fields in the key | Present, but the key does not yet encode all physical constants or a stable operator-definition version.  Cache/direct parity is only tested for a one-point cell. |
+| WP cache | Four-dimensional radial-bin quadrature with model/coupling/grid/truncation fields and schema-v5 operator versioning in the key | Present, but fixed physical constants are not explicit key fields.  Cache/direct parity is only tested for a one-point cell. |
 | Scattering insertion | Code builds `W1*C` and then its sparse left-permuted `P*W1*C`, including the complete intermediate-channel contraction | Corrected to the primary-source kernel `(1+P)W1`.  The noncommuting test now derives the reference matrix directly from Deltuva Eq. (7a). |
 
 The implementation also exposes `w1_scale`.  It is correctly marked as a
@@ -112,8 +121,30 @@ diagnostic fault-injection control and must remain exactly one in physical runs.
 
 ## Independent-oracle status
 
-`tools/3nf_oracle/angular_oracle.py` is presently a diagnostic oracle, not the
-required independent unprojected oracle:
+The former `tools/3nf_oracle/angular_oracle.py` remains a diagnostic for the
+legacy approximate production kernels.  It is not the authoritative full
+operator oracle.
+
+The independent reference stack is now:
+
+- `full_vector_n2lo_oracle.py`: explicit 64-state spin-isospin matrices and
+  full Cartesian `c1,c3,c4,cD,cE` spectator-1 operators;
+- `full_vector_five_angle_pwd.py`: generic LS-coupled five-angle projection
+  with explicit magnetic-substate sums and no production recoupling reuse;
+- `golak_table2_benchmark.py`: a separate transcription of Golak Eq. (25)
+  that reproduces `G(1,1)=443.618 fm^5` and `G(2,1)=1200.219 fm^5`.
+
+Verified discriminators include Jacobi momentum conservation, all five LEC
+switches, reverse-kernel Hermiticity, `2<->3` symmetry, the contact eigenvalues,
+`c4` zero/nonzero cross products, and
+`<t23'=0|tau1.(tau2 x tau3)|t23=1>=-2 sqrt(3) i`.  The generic projector also
+returns the raw contact factor `(4pi)^2 E tau23` and the normalized
+`E tau23/(4pi^4)` result.  Its direct Jj angular states agree pointwise with
+the unitary 9j transformation of the LS basis, including a multicomponent
+P-wave channel; direct and recoupled matrix elements agree for `c1/c3` and an
+off-diagonal `c4/cD` discriminator.
+
+The legacy oracle limitations are retained here to prevent accidental reuse:
 
 - its `cE` coefficient and Fourier factor duplicate production conventions;
 - its `cD` calculation covers only the rank-zero S-wave subset;
@@ -122,11 +153,9 @@ required independent unprojected oracle:
   requires five after rotational reduction;
 - it contains no `c4` operator and no complete magnetic-quantum-number summation.
 
-Consequently, existing oracle passes do not validate the full operator.  The
-replacement oracle must start from full Jacobi vectors and explicit spin/isospin
-states, implement all five LEC terms independently of production PWD code, and
-reproduce both direct angular projections and published fixed-momentum matrix
-elements.
+Consequently, only the new full-vector/five-angle stack may serve as the
+production PWD reference.  This validates the reference operator and
+projection machinery, not the still-incomplete C++ production PWD.
 
 ## Numerical benchmark status
 
@@ -160,14 +189,14 @@ discriminator.
    Witala's reconstruction of elastic `U` from breakup-component `T` as the
    independent equation being solved.  The primary Eq. (7a) reduction and the
    noncommuting discriminator therefore remain authoritative.
-2. Lock the Jacobi spectator, momentum-transfer, permutation, state-normalization,
-   Fourier-transform, and spherical-harmonic phase conventions.
-3. Trace the remaining `cE` Fourier/state-normalization factors and complete
-   contact PWD to Epelbaum Eq. (A-4); the ordered-pair coefficient itself is
-   resolved and exact-golden tested.
-4. Implement a genuinely independent five-angle/full-vector magnetic-substate
-   oracle and reproduce Golak Table 2 before trusting production PWD values.
-5. Select and implement an exact full PWD strategy for `c1`, `c3`, `c4`, and
+2. **Resolved 2026-08-13:** the Jacobi, transfer, Pauli, Fourier, regulator,
+   radial-state, spherical-harmonic, and phase conventions are locked in
+   `docs/n2lo_3nf_conventions.md`.
+3. **Resolved 2026-08-13:** the `cE` ordered-pair, A-4 angular, Fourier, sign,
+   and regulator factors are exact-golden tested.  Old caches are invalidated.
+4. **Resolved 2026-08-13:** the full-vector and generic five-angle oracles
+   reproduce independent closed integrands and Golak Table 2.
+5. Select and implement an exact full production PWD for `c1`, `c3`, `c4`, and
    `cD`; translate any Hebeler factorization into Tic-tac's spectator convention.
 6. Version the W1 cache by the complete operator definition and all physical
    constants, then demonstrate cache-on/cache-off equality at quadrature order
@@ -178,9 +207,9 @@ discriminator.
 
 ## Acceptance decision
 
-The repository currently satisfies useful infrastructure and regression gates,
-but fails the decisive completeness and independent-validation gates.  The
-elastic scattering-equation ordering is now convention-locked and corrected.
-The next safe implementation milestone is the independent full-vector oracle;
-only after it agrees with published fixed-momentum values should the production
-PWD and cache format be replaced.
+The repository now satisfies the equation-ordering, full-vector-oracle,
+published raw-PWD, and exact-contact-normalization gates, but still fails the
+decisive production-completeness and physical-validation gates.  The next safe
+milestone is an exact LS-to-Jj production PWD validated channel-by-channel
+against the generic five-angle oracle.  No existing Ay curve is yet admissible
+as a complete-N2LO result.
