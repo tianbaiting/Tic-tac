@@ -10,13 +10,15 @@ Hebeler-factorized projector are supported.
 
 For each (p_bin, q_bin, p_bin', q_bin') the bin-averaged W^(1)_WP is
     W1_WP = [sum over N^4 quad points] w_p w_q w_p' w_q' * p*q*p'*q' * W1(p,q,p',q')
-            * 1/sqrt(dp*dq*dp'*dq') / hbarc^5
-mirroring src/interactions/w1_pw_cache.cpp:228-260. The W1 values come from the
-production C++ driver print_w1_element (so we test the REAL W1_element, not a
-re-transcription).
+            * 1/sqrt(dp*dq*dp'*dq') * hbarc,
+where this script's momenta and weights are in fm^-1.  This is exactly the
+production MeV-variable formula, whose final factor is hbarc^-5, after changing
+all four integration variables and the WP normalization.  The W1 values come
+from the production C++ driver print_w1_element (so we test the REAL W1_element,
+not a re-transcription).
 
-The c_E contact kernel is momentum-independent (only the regulator varies), so
-its bin average should converge instantly (midpoint ~ exact). The c_D and c1/c3
+The c_E contact operator is momentum-independent apart from the regulator, so
+its bin average generally converges rapidly. The c_D and c1/c3
 kernels have pion propagators that vary within the bin, so the midpoint may not
 be converged — this quantifies the discretization error.
 """
@@ -79,13 +81,16 @@ def bin_average(cE, cD, c1, c3, Lambda, bin_bounds, N, **driver_options):
     vals = batch_w1(cE, cD, c1, c3, Lambda, points, **driver_options)
     if len(vals) != len(points):
         raise RuntimeError(f"driver returned {len(vals)} values for {len(points)} points")
-    inv_hbarc5 = (1.0/HBARC)**5
     dp = p_hi - p_lo; dq = q_hi - q_lo; dpp = pp_hi - pp_lo; dqp = qp_hi - qp_lo
     bin_norm = 1.0 / math.sqrt(dp * dq * dpp * dqp)
     accum = 0.0
     for v, (p, q, pp, qp), (pwi, qwi, ppiw, qpiw) in zip(vals, points, weights):
         accum += (p * q * pp * qp) * (pwi * qwi * ppiw * qpiw) * v
-    return accum * bin_norm * inv_hbarc5
+    # The integration variables above are in fm^-1.  Converting the production
+    # cache formula from MeV variables gives hbarc^(8-2-5) = hbarc: four radial
+    # measures contribute hbarc^8, the WP normalization hbarc^-2, and the
+    # W1(fm^5)->MeV conversion hbarc^-5.
+    return accum * bin_norm * HBARC
 
 
 def convergence_table(cE, cD, c1, c3, Lambda, bin_bounds, label,

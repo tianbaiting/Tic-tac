@@ -38,7 +38,7 @@ The labels used below are:
 | Item | Evidence | Status |
 |---|---|---|
 | C++ build | `cmake --build build -j4` | **Verified result:** successful; existing compiler/HDF5 warnings remain. |
-| C++ tests | `ctest --test-dir build --output-on-failure` | **Verified result:** 12/12 passed. |
+| C++ tests | `ctest --test-dir build --output-on-failure` | **Verified result:** 13/13 passed. |
 | Direct 3NF oracle test | `build/tests/test_3nf_operator_oracle` | **Verified result:** 26 passed, 0 failed. |
 | Faddeev ordering discriminator | `build/tests/test_faddeev_operator_order` | **Superseded audit-start result:** the former test only proved conformity to the repository's incorrect assumed ordering.  It has been replaced by a primary-equation discriminator described below. |
 | 3NF matrix-element tests | `build/tests/test_3nf_matrix_elements` | **Verified result:** 432 passed, 0 failed; the complete `c4` requirement remains an expected failure/skip. |
@@ -48,6 +48,7 @@ The labels used below are:
 | Factorized Python PWD | `python3 -m unittest tests/test_factorized_scalar_pwd.py tests/test_factorized_n2lo_pwd.py` | **Verified result:** 5/5 passed.  The Hebeler Eq. (6) three-integral scalar kernel gives the exact `(4pi)^2` contact limit, agrees with the independent five-angle projector for P-wave and `l=0<->2` finite-rank kernels, reproduces Golak Table 2 for `c1/c3/c4` within `3e-4` relative, and matches complete `cD` S-wave and spectator-D transitions. |
 | Factorized C++ PWD | `build/tests/cpp/test_chiral_n2lo_factorized` | **Verified result:** signed `c1/c3/c4/cD/cE` values agree with the independently tested Python factorization to about `1e-17` absolute for S, P, pair-D, `J=3/2`, and `T=3/2` channels.  Exact forward/reverse Hermiticity holds, and the independent five-angle result approaches it from `N=4` to `N=6`. |
 | Complete W1 cell integration | `python3 -m unittest tests/test_factorized_wp_quadrature.py`; `output/validation/n2lo_3nf_wp_quadrature.json` | **Verified result:** for ordinary and deliberately wide cells, the legacy midpoint has relative errors from `2.28e-3` to `1.90e-1`.  The hardest wide `c4+cD` transition still has `3.84e-3` error at radial order two, while order four agrees with order six to `7.89e-7`. |
+| W1 cache off/miss/hit parity | `build/tests/cpp/test_chiral_n2lo_w1_cache` | **Verified result:** at radial order two, an uninitialized-cache direct build, an HDF5-cache miss/store build, and a subsequent all-block disk hit are bitwise identical.  A counting wrapper proves that the hit makes zero `W1_element` calls, and the wide `c4+cD` transition agrees with the independent Python cell integral to `5.2e-11` relative. |
 | Reduced solver interface smoke | `build/bin/Tic-tac ... three_nucleon_force=chiral_N2LO_full_factorized Np_WP=1 Nq_WP=1 ...` | **Verified interface result only:** factory construction, basis generation, permutation, W1 cache construction, AGS assembly, and Padé code completed without an interface error.  The selected energy file yielded no on-shell energies and the radial grids used one midpoint, so this is not solver-physics or convergence evidence. |
 | Full Python discovery | `python3 -m unittest ...` including `tests/test_pade_honesty.py` | **Environment limitation:** collection fails because the local Python environment does not provide `pytest`; this is separate from the clean `unittest` regression set above. |
 
@@ -124,7 +125,7 @@ are being preserved.
 | Complete five-angle reference | Explicit Jj angular-spin states, 8-state Pauli spin and isospin algebra, all five operator components, regulator, rotational volume, and `(2pi)^-6` | Implemented as `chiral_N2LO_full_5d_reference` and signed-oracle tested.  Correctness-first only: cost scales as `Nangle_3NF^5`, so it is not accepted for converged WPCD production grids. |
 | Factorized three-integral implementation | Hebeler Eq. (6) scalar kernel plus an automated Cartesian-vector/spherical-harmonic finite-rank expansion and explicit spin/isospin matrices | Complete in Python and C++ for `c1`, `c3`, `c4`, `cD`, and `cE`.  It retains three nontrivial integrals, caches momentum-independent angular/spin weights, applies the nonlocal regulator after PWD, and performs a unitary LS-to-Jj recoupling.  It is solver-selectable as `chiral_N2LO_full_factorized`; realistic WP cost and convergence remain open gates. |
 | Regulator | Squared nonlocal Gaussian associated with Epelbaum Eq. (3.19) | Present; convention and cutoff pairing must remain explicit in every benchmark. |
-| WP cache | Four-dimensional radial-bin quadrature with model/coupling/grid/truncation fields and schema-v6 operator versioning in the key | `Nangle_3NF`, the distinct reference model name, and numerical `gA`, `fpi`, `mpi`, `Lambda_chi`, and `hbarc` values prevent cross-projector/order/convention reuse.  Independent production-driver integration shows radial order four is converged below `8e-7` for the tested difficult cells.  Actual cache-on/cache-off parity at order at least two remains open. |
+| WP cache | Four-dimensional radial-bin quadrature with model/coupling/grid/truncation fields and schema-v6 operator versioning in the key | `Nangle_3NF`, the distinct reference model name, and numerical `gA`, `fpi`, `mpi`, `Lambda_chi`, and `hbarc` values prevent cross-projector/order/convention reuse.  Independent production-driver integration shows radial order four is converged below `8e-7` for the tested difficult cells.  Cache-off, miss/store, and hit paths are bitwise identical at order two. |
 | Scattering insertion | Code builds `W1*C` and then its sparse left-permuted `P*W1*C`, including the complete intermediate-channel contraction | Corrected to the primary-source kernel `(1+P)W1`.  The noncommuting test now derives the reference matrix directly from Deltuva Eq. (7a). |
 
 The implementation also exposes `w1_scale`.  It is correctly marked as a
@@ -232,14 +233,17 @@ discriminator.
    three-integral factorization is translated and independently validated in
    Python for all five components, then ported to a solver-selectable C++ model.
    Signed C++ comparisons cover S, P, pair-D, `J=3/2`, and `T=3/2` sectors.
-   A machine-readable broader channel/momentum table and WP convergence remain
-   required; no unsupported dimensional reduction is accepted.
-6. **Partly resolved:** W1 schema v6 hashes all chiral constants and the angular
-   order.  Direct integration through the production C++ driver demonstrates
+   A machine-readable broader channel/momentum table and realistic-grid
+   WP/solver convergence remain required; no unsupported dimensional reduction
+   is accepted.
+6. **Resolved for representative-cell cache parity and quadrature:** W1 schema
+   v6 hashes all chiral constants and the angular order.  Direct integration
+   through the production C++ driver demonstrates
    that the midpoint is not reliable and that radial order four agrees with
-   order six below `8e-7` in the hardest tested wide transition.  Demonstrate
-   actual cache-on/cache-off equality at quadrature order at least two and
-   repeat the ladder on realistic production bins before fixing a default.
+   order six below `8e-7` in the hardest tested wide transition.  Cache-off,
+   miss/store, and hit paths are bitwise equal at order two, with the disk hit
+   making no operator calls.  Repeat the ladder on realistic production grids
+   before fixing a default.
 7. Demonstrate stable two-body binding, Padé honesty, WP/rank/J convergence,
    symmetry/Hermiticity/permutation checks, zero-LEC and 2NF-only limits, and a
    reproducible low-energy nd Ay comparison with uncertainty/convergence tables.
@@ -251,9 +255,9 @@ published raw-PWD, exact-contact-normalization, complete slow-C++-reference,
 factorized matrix-element implementation gates.  Representative W1 cell
 integration is also converged at radial order four, but the repository still
 fails the decisive cache/solver convergence and physical-validation gates.  The
-next safe milestone is actual W1 cache-on/cache-off equality, followed by
-reduced-grid direct-solve and physical truncation ladders.  No existing Ay curve
-is yet admissible as a complete-N2LO result.
+next safe milestone is reduced-grid direct-solve/Padé agreement, followed by
+physical truncation ladders.  No existing Ay curve is yet admissible as a
+complete-N2LO result.
 
 ## GLM-5.2 review disposition
 

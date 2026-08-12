@@ -1458,11 +1458,11 @@ void solve_faddeev_equations(cdouble*  U_array,
 	tnf_ctx.w1_scale   = run_parameters.w1_scale;
 	tnf_ctx.w1_cache   = nullptr;
 
-	// [EN] Pre-evaluate W^(1) on the WP bin-midpoint grid so the CPVC hot path
-	// becomes O(1) lookups instead of full PW recoupling + GL quadrature per call.
+	// [EN] Pre-integrate W^(1) over the WP radial cells so the CPVC hot path
+	// becomes O(1) lookups instead of full PW recoupling + quadrature per call.
 	// Skipped when 3NF is null/disabled or w1_scale=0 (the hot-path early-exit guards
 	// the same conditions, so cache build would just waste memory).
-	// / [CN] 提前在 WP bin 中点网格上算好 W^(1)，让 CPVC 热路径变成 O(1) 查表。
+	// / [CN] 提前对 WP 径向 bin 积分 W^(1)，让 CPVC 热路径变成 O(1) 查表。
 	W1_PW_cache w1_cache_storage;
 	if (tnf != nullptr && tnf->enabled() && run_parameters.w1_scale != 0.0) {
 		printf(" - Pre-building W^(1) PW cache (Np=%zu, Nq=%zu, Nalpha=%d) ... \n",

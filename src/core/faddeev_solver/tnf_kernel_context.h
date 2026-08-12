@@ -25,7 +25,7 @@ struct tnf_kernel_context {
 	const double*                    q_WP_array;   // WP boundaries, size Nq_WP+1
 	double**                         CT_RM_array;  // C^T row-major = C column-major, [Nalpha*Nalpha]
 	double                           w1_scale;     // Overall scale factor applied to W^(1) output (diagnostic knob)
-	const W1_PW_cache*               w1_cache;     // optional: bin-midpoint-evaluated W1 lookup table (nullptr -> fall back to direct W1_element)
+	const W1_PW_cache*               w1_cache;     // optional: radial-cell-integrated W1 lookup table (nullptr -> midpoint diagnostic fallback)
 };
 
 #endif // TNF_KERNEL_CONTEXT_H

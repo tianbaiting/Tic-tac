@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "generated_utc": "2026-08-12T17:42:00Z",
+  "schema_version": 2,
+  "generated_utc": "2026-08-12T17:52:48Z",
   "projector": "chiral_N2LO_full_factorized",
   "transfer_quadrature_order": 6,
   "constants": {
@@ -11,7 +11,7 @@
     "cE": -0.205,
     "Lambda_3NF_MeV": 500.0
   },
-  "normalization": "W1_WP in MeV using radial WP measure and hbarc^-5",
+  "normalization": "W1_WP in MeV; fm^-1 integration variables give the production MeV-variable formula after the net hbarc^(8-2-5)=hbarc conversion",
   "cases": [
     {
       "label": "ordinary_diagonal_3S1",
@@ -25,10 +25,10 @@
       },
       "reference_order": 6,
       "values_MeV": {
-        "1": 1.33615059e-16,
-        "2": 1.33920394e-16,
-        "4": 1.33920081e-16,
-        "6": 1.33920080e-16
+        "1": 7.888137758214e-3,
+        "2": 7.906163648674e-3,
+        "4": 7.906145143556e-3,
+        "6": 7.906145060969e-3
       },
       "relative_error": {
         "1": 2.28e-3,
@@ -49,9 +49,9 @@
       },
       "reference_order": 4,
       "values_MeV": {
-        "1": 4.09431874e-17,
-        "2": 4.23352908e-17,
-        "4": 4.23319914e-17
+        "1": 2.417134007805e-3,
+        "2": 2.499318633492e-3,
+        "4": 2.499123849049e-3
       },
       "relative_error": {
         "1": 3.28e-2,
@@ -71,10 +71,10 @@
       },
       "reference_order": 6,
       "values_MeV": {
-        "1": 1.12106248e-15,
-        "2": 1.17304002e-15,
-        "4": 1.17226457e-15,
-        "6": 1.17226481e-15
+        "1": 6.618337302007e-2,
+        "2": 6.925193430821e-2,
+        "4": 6.920615458333e-2,
+        "6": 6.920616905557e-2
       },
       "relative_error": {
         "1": 4.37e-2,
@@ -95,10 +95,10 @@
       },
       "reference_order": 6,
       "values_MeV": {
-        "1": 4.36717483e-16,
-        "2": 5.41433856e-16,
-        "4": 5.39364229e-16,
-        "6": 5.39363804e-16
+        "1": 2.578218129729e-2,
+        "2": 3.196424777580e-2,
+        "4": 3.184206467245e-2,
+        "6": 3.184203956289e-2
       },
       "relative_error": {
         "1": 1.90e-1,

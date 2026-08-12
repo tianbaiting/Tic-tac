@@ -14,8 +14,9 @@ class three_nucleon_force_model;
 // The chiral N2LO 3NF W^(1) matrix element is independent of the outer column index
 // inside the CPVC hot path: the same momentum/quantum-number tuple is recomputed
 // O(Np_WP * num_Pade_iter) times per outer (alpha_c, q_c, p_c). Caching the
-// midpoint-evaluated W1 once and looking it up in the inner loop eliminates the
-// per-Padé-iter overhead.
+// radial-cell-integrated W1 once and looking it up in the inner loop eliminates
+// the per-Padé-iter overhead.  Quadrature order one is the legacy midpoint
+// diagnostic; higher orders are genuine four-dimensional cell averages.
 //
 // Storage layout (block-major):
 //   blocks ↔ allowed (alpha_r, alpha_c) pairs (J_3N, T_3N, parity match)
@@ -23,8 +24,8 @@ class three_nucleon_force_model;
 // Memory footprint = num_blocks * Nq^2 * Np^2 * 8 B; see total_bytes().
 //
 // / [CN] 稠密 W^(1) PW 缓存。在 CPVC 热路径中 W1 与外层列下标无关，但当前实现按
-// 每个外层迭代/每次 Padé 重新评估同一动量与量子数组合。该缓存按 bin 中点把 W1 一
-// 次性算好，热路径只做 O(1) 查表。
+// 每个外层迭代/每次 Padé 重新评估同一动量与量子数组合。该缓存对 bin 做径向积分后把 W1
+// 一次性算好，热路径只做 O(1) 查表；一点阶数仅用于旧中点法诊断。
 class W1_PW_cache {
 public:
     void build(const three_nucleon_force_model& tnf,

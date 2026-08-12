@@ -46,7 +46,7 @@ class TestFactorizedWpQuadrature(unittest.TestCase):
         self.assertGreater(relative_error[1], 0.15)
         self.assertGreater(relative_error[2], 3.0e-3)
         self.assertLess(relative_error[4], 1.0e-5)
-        self.assertAlmostEqual(reference / 5.39363804e-16, 1.0, places=8)
+        self.assertAlmostEqual(reference / 3.184203956289e-2, 1.0, places=10)
 
 
 if __name__ == "__main__":

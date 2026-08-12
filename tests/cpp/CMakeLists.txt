@@ -90,6 +90,43 @@ add_executable(test_chiral_n2lo_factorized
 target_link_libraries(test_chiral_n2lo_factorized ${GSL_LIBRARIES})
 add_test(NAME chiral_n2lo_factorized COMMAND test_chiral_n2lo_factorized)
 
+# Complete factorized W1 cell integration through the actual in-memory and
+# hash-keyed HDF5 cache paths.  A counting wrapper proves the second build is a
+# disk hit rather than a repeated direct evaluation.
+add_executable(test_chiral_n2lo_w1_cache
+    test_chiral_n2lo_w1_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_factorized.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_p123.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_w1.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_layer.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
+)
+target_include_directories(test_chiral_n2lo_w1_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/core/state_space
+    ${CMAKE_SOURCE_DIR}/src/interactions
+    ${CMAKE_SOURCE_DIR}/src/utils
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party
+    ${CMAKE_SOURCE_DIR}/include
+    ${HDF5_INCLUDE_DIRS}
+)
+target_link_libraries(test_chiral_n2lo_w1_cache
+    OpenMP::OpenMP_CXX
+    ${GSL_LIBRARIES}
+    ${HDF5_CXX_LIBRARIES}
+    ${HDF5_LIBRARIES}
+    ${HDF5_HL_LIBRARIES}
+)
+add_test(NAME chiral_n2lo_w1_cache COMMAND test_chiral_n2lo_w1_cache)
+
 # L4: Faddeev/AGS operator-ordering dense test (3NF audit B4)
 add_executable(test_faddeev_operator_order
     test_faddeev_operator_order.cpp
