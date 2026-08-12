@@ -205,6 +205,65 @@ class FullVectorN2LOOracleTests(unittest.TestCase):
         self.assertAlmostEqual(normalized.real, expected, places=12)
         self.assertLess(abs(normalized.imag), 1e-12)
 
+    def test_jj_to_ls_unitary_recoupling_matches_direct_angular_state(self):
+        channel = PWD.JjChannel(
+            l_pair=1,
+            s_pair=1,
+            j_pair=1,
+            lambda_spectator=1,
+            two_j_spectator=1,
+            two_total_J=1,
+            t_pair=1,
+        )
+        p_direction = np.array([0.3, 0.4, 0.5])
+        q_direction = np.array([-0.2, 0.7, 0.1])
+        expansion = channel.ls_expansion()
+        self.assertGreater(len(expansion), 1)
+        self.assertAlmostEqual(sum(coefficient**2 for _, coefficient in expansion), 1.0, places=13)
+        for two_m_j in (-1, 1):
+            direct = PWD.angular_spin_state_jj(
+                channel, p_direction, q_direction, two_m_j
+            )
+            recoupled = sum(
+                coefficient
+                * PWD.angular_spin_state(
+                    ls_channel, p_direction, q_direction, two_m_j
+                )
+                for ls_channel, coefficient in expansion
+            )
+            np.testing.assert_allclose(direct, recoupled, atol=3e-14, rtol=2e-13)
+
+    def test_direct_jj_projection_matches_unitary_ls_transform(self):
+        projector = PWD.FiveAngleProjector(PWD._OP.N2LOConstants.tictac())
+        momenta = (0.4, 0.7, 0.9, 1.1)
+        lecs = PWD._OP.N2LOLECs(-0.81, -3.2, 5.4, -0.2, -0.205)
+        cases = (
+            (
+                PWD.JjChannel(1, 1, 1, 1, 1, 1, 1),
+                PWD.JjChannel(1, 1, 1, 1, 1, 1, 1),
+            ),
+            (
+                PWD.JjChannel(0, 1, 1, 0, 1, 1, 0),
+                PWD.JjChannel(0, 0, 0, 0, 1, 1, 1),
+            ),
+        )
+        for bra, ket in cases:
+            with self.subTest(bra=bra, ket=ket):
+                direct = projector.project_jj_direct(
+                    bra, ket, momenta, lecs, order=2
+                )
+                recoupled = projector.project_jj_recoupled(
+                    bra, ket, momenta, lecs, order=2
+                )
+                for name in direct:
+                    np.testing.assert_allclose(
+                        direct[name], recoupled[name], atol=8e-13, rtol=3e-13
+                    )
+        self.assertGreater(
+            abs(projector.project_jj_direct(*cases[1], momenta, lecs, order=2)["c4"]),
+            1.0,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

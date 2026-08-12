@@ -25,7 +25,7 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 from scipy.special import sph_harm
 from sympy import Rational
-from sympy.physics.wigner import clebsch_gordan
+from sympy.physics.wigner import clebsch_gordan, wigner_9j
 
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -69,6 +69,13 @@ def _cg(
 
 def _m_values(two_j: int) -> range:
     return range(-two_j, two_j + 1, 2)
+
+
+@lru_cache(maxsize=None)
+def _w9j(two_args: Tuple[int, ...]) -> float:
+    if len(two_args) != 9:
+        raise ValueError("a Wigner 9j symbol needs nine arguments")
+    return float(wigner_9j(*(Rational(value, 2) for value in two_args)))
 
 
 def _product_index(two_m1: int, two_m2: int, two_m3: int) -> int:
@@ -122,6 +129,73 @@ class LSChannel:
             raise ValueError("L and S cannot couple to the requested J")
         if 2 * self.total_L + self.two_total_S < self.two_total_J:
             raise ValueError("L and S cannot couple to the requested J")
+
+
+@dataclass(frozen=True)
+class JjChannel:
+    """Tic-tac/Miller Jj channel (l,s,j,lambda,I,J,t,T)."""
+
+    l_pair: int
+    s_pair: int
+    j_pair: int
+    lambda_spectator: int
+    two_j_spectator: int
+    two_total_J: int
+    t_pair: int
+    two_total_T: int = 1
+
+    def __post_init__(self) -> None:
+        if (self.l_pair + self.s_pair + self.t_pair) % 2 != 1:
+            raise ValueError("channel violates pair-23 antisymmetry: (-1)^(l+s+t) must be -1")
+        if not abs(self.l_pair - self.s_pair) <= self.j_pair <= self.l_pair + self.s_pair:
+            raise ValueError("pair l and s cannot couple to j_pair")
+        if self.two_j_spectator not in (
+            abs(2 * self.lambda_spectator - 1),
+            2 * self.lambda_spectator + 1,
+        ):
+            raise ValueError("spectator lambda and spin 1/2 cannot couple to j_spectator")
+        if abs(2 * self.j_pair - self.two_j_spectator) > self.two_total_J:
+            raise ValueError("j_pair and j_spectator cannot couple to total J")
+        if 2 * self.j_pair + self.two_j_spectator < self.two_total_J:
+            raise ValueError("j_pair and j_spectator cannot couple to total J")
+
+    def ls_expansion(self) -> Tuple[Tuple[LSChannel, float], ...]:
+        """Return |Jj> = sum_(L,S) coefficient |LS> via the unitary 9j."""
+        result = []
+        for total_l in range(
+            abs(self.l_pair - self.lambda_spectator),
+            self.l_pair + self.lambda_spectator + 1,
+        ):
+            for two_total_s in range(abs(2 * self.s_pair - 1), 2 * self.s_pair + 2, 2):
+                if abs(2 * total_l - two_total_s) > self.two_total_J:
+                    continue
+                if 2 * total_l + two_total_s < self.two_total_J:
+                    continue
+                coefficient = math.sqrt(
+                    (2 * self.j_pair + 1)
+                    * (self.two_j_spectator + 1)
+                    * (2 * total_l + 1)
+                    * (two_total_s + 1)
+                ) * _w9j((
+                    2 * self.l_pair, 2 * self.s_pair, 2 * self.j_pair,
+                    2 * self.lambda_spectator, 1, self.two_j_spectator,
+                    2 * total_l, two_total_s, self.two_total_J,
+                ))
+                if abs(coefficient) > 2e-15:
+                    result.append((LSChannel(
+                        self.l_pair,
+                        self.s_pair,
+                        self.lambda_spectator,
+                        total_l,
+                        two_total_s,
+                        self.two_total_J,
+                        self.t_pair,
+                        self.two_total_T,
+                    ), coefficient))
+        norm = sum(coefficient * coefficient for _, coefficient in result)
+        if not math.isclose(norm, 1.0, abs_tol=2e-13):
+            raise ArithmeticError(f"Jj-to-LS expansion has norm {norm}")
+        return tuple(result)
 
 
 def _angles(vector: np.ndarray) -> Tuple[float, float]:
@@ -197,6 +271,87 @@ def angular_spin_state(
     return result
 
 
+def _pair_spectator_spin_product(
+    s_pair: int,
+    two_m_pair: int,
+    two_m_spectator: int,
+) -> np.ndarray:
+    """Return |m1> tensor |(1/2,1/2)s_pair,m_pair> in particle order 1,2,3."""
+    result = np.zeros(8, dtype=complex)
+    for two_m2 in (-1, 1):
+        for two_m3 in (-1, 1):
+            inner = _cg(1, 1, 2 * s_pair, two_m2, two_m3, two_m_pair)
+            if inner != 0.0:
+                result[_product_index(two_m_spectator, two_m2, two_m3)] += inner
+    return result
+
+
+def angular_spin_state_jj(
+    channel: JjChannel,
+    p_direction: np.ndarray,
+    q_direction: np.ndarray,
+    two_m_j: int,
+) -> np.ndarray:
+    """Direct Miller/Tic-tac Jj-coupled angular-spin state for fixed M_J."""
+    theta_p, phi_p = _angles(p_direction)
+    theta_q, phi_q = _angles(q_direction)
+    result = np.zeros(8, dtype=complex)
+    for m_l in range(-channel.l_pair, channel.l_pair + 1):
+        y_l = sph_harm(m_l, channel.l_pair, phi_p, theta_p)
+        for two_m_pair in _m_values(2 * channel.s_pair):
+            two_m_j_pair = 2 * m_l + two_m_pair
+            if abs(two_m_j_pair) > 2 * channel.j_pair:
+                continue
+            pair_cg = _cg(
+                2 * channel.l_pair,
+                2 * channel.s_pair,
+                2 * channel.j_pair,
+                2 * m_l,
+                two_m_pair,
+                two_m_j_pair,
+            )
+            if pair_cg == 0.0:
+                continue
+            for m_lambda in range(-channel.lambda_spectator, channel.lambda_spectator + 1):
+                y_lambda = sph_harm(
+                    m_lambda,
+                    channel.lambda_spectator,
+                    phi_q,
+                    theta_q,
+                )
+                for two_m_spectator in (-1, 1):
+                    two_m_j_spectator = 2 * m_lambda + two_m_spectator
+                    spectator_cg = _cg(
+                        2 * channel.lambda_spectator,
+                        1,
+                        channel.two_j_spectator,
+                        2 * m_lambda,
+                        two_m_spectator,
+                        two_m_j_spectator,
+                    )
+                    total_cg = _cg(
+                        2 * channel.j_pair,
+                        channel.two_j_spectator,
+                        channel.two_total_J,
+                        two_m_j_pair,
+                        two_m_j_spectator,
+                        two_m_j,
+                    )
+                    coefficient = pair_cg * spectator_cg * total_cg
+                    if coefficient != 0.0:
+                        result += (
+                            coefficient
+                            * y_l
+                            * y_lambda
+                            * _pair_spectator_spin_product(
+                                channel.s_pair,
+                                two_m_pair,
+                                two_m_spectator,
+                            )
+                        )
+    return result
+
+
 def _isospin_state(channel: LSChannel, two_m_t: int) -> np.ndarray:
     return coupled_three_half_state(channel.t_pair, channel.two_total_T, two_m_t)
 
@@ -218,6 +373,53 @@ class FiveAngleProjector:
         lecs: _OP.N2LOLECs,
         order: int,
         two_m_t: int = 1,
+    ) -> Dict[str, complex]:
+        return self._project(
+            bra, ket, momenta, lecs, order, two_m_t, angular_spin_state
+        )
+
+    def project_jj_direct(
+        self,
+        bra: JjChannel,
+        ket: JjChannel,
+        momenta: Tuple[float, float, float, float],
+        lecs: _OP.N2LOLECs,
+        order: int,
+        two_m_t: int = 1,
+    ) -> Dict[str, complex]:
+        """Project directly in the Tic-tac Jj basis using explicit m sums."""
+        return self._project(
+            bra, ket, momenta, lecs, order, two_m_t, angular_spin_state_jj
+        )
+
+    def project_jj_recoupled(
+        self,
+        bra: JjChannel,
+        ket: JjChannel,
+        momenta: Tuple[float, float, float, float],
+        lecs: _OP.N2LOLECs,
+        order: int,
+        two_m_t: int = 1,
+    ) -> Dict[str, complex]:
+        """Project in LS channels and transform with the unitary 9j map."""
+        totals = {name: 0.0j for name in ("c1", "c3", "c4", "cD", "cE")}
+        for ls_bra, bra_coefficient in bra.ls_expansion():
+            for ls_ket, ket_coefficient in ket.ls_expansion():
+                block = self.project(ls_bra, ls_ket, momenta, lecs, order, two_m_t)
+                factor = bra_coefficient * ket_coefficient
+                for name, value in block.items():
+                    totals[name] += factor * value
+        return totals
+
+    def _project(
+        self,
+        bra: LSChannel | JjChannel,
+        ket: LSChannel | JjChannel,
+        momenta: Tuple[float, float, float, float],
+        lecs: _OP.N2LOLECs,
+        order: int,
+        two_m_t: int,
+        state_builder,
     ) -> Dict[str, complex]:
         """Project all five components; momenta are (p,q,p',q') in fm^-1."""
         if bra.two_total_J != ket.two_total_J:
@@ -257,7 +459,7 @@ class FiveAngleProjector:
         for cq, sq, wq in zip(cosines, sines, cosine_weights):
             q_in = q * np.array([sq, 0.0, cq])
             ket_spin = {
-                two_m_j: angular_spin_state(ket, p_in, q_in, two_m_j)
+                two_m_j: state_builder(ket, p_in, q_in, two_m_j)
                 for two_m_j in m_j_values
             }
             for cpp, spp, wpp in zip(cosines, sines, cosine_weights):
@@ -269,7 +471,7 @@ class FiveAngleProjector:
                                 [sqp * math.cos(phiqp), sqp * math.sin(phiqp), cqp]
                             )
                             bra_spin = {
-                                two_m_j: angular_spin_state(bra, p_out, q_out, two_m_j)
+                                two_m_j: state_builder(bra, p_out, q_out, two_m_j)
                                 for two_m_j in m_j_values
                             }
                             q1, q2, q3 = _OP.SpectatorOneN2LOOracle.transfers(
