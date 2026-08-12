@@ -69,7 +69,7 @@ double recoupling_3nf_2pe_scalar(
 // c_E three-nucleon contact recoupling coefficient.
 //
 // Epelbaum 2002 eq. (2.10): the c_E 3N contact is
-//   V^(1)_cont = -E · (τ_2 · τ_3),   E = c_E / (f_π⁴ Λ_χ)
+//   V^(1)_cont = +E · (τ_2 · τ_3),   E = c_E / (f_π⁴ Λ_χ)
 // It is a PURE SPIN SCALAR — there is NO σ_2·σ_3 operator. The matrix element
 // depends only on the pair isospin T_2N.
 //

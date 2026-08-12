@@ -1,5 +1,12 @@
 # 3NF partial-wave formulas for chiral_N2LO_3NF rewrite
 
+> **2026-08-12 correction:** an earlier transcription below assigned a minus
+> sign and retained an extra one-half in the `c_E` spectator component.
+> Epelbaum Eq. (2.10) is `+1/2 sum_(j!=k) E tau_j.tau_k`; the ordered sum
+> contains each pair twice, so `V4^(1)=+E tau_2.tau_3`. The corrected formula
+> in §1.1 is authoritative; any later historical discussion of `-1/2` is
+> superseded pending a full rewrite of this notebook.
+
 Source transcription for subsequent rewrite of `W1_contact`, `W1_1pe_contact`,
 `W1_2pe` in `src/interactions/chiral_N2LO_3NF.h`. The current code returns a
 scalar momentum-space integrand at angle-averaged (monopole) arguments; this
@@ -132,9 +139,10 @@ Mapping to the paper equations uses (l, λ, s, t, j, I, J, T) ↔
 [E2002] eq. (2.10), (2.11), (2.12):
 
 ```
-  V^(1)_cont = -½ E   Σ_{j ≠ k}  (τ_j · τ_k),     j,k ∈ {2,3} here.
-             = -½ E × 2 × (τ_2 · τ_3)
-             = -E (τ_2 · τ_3)      (spectator=1 component)
+  V_cont = +½ E Σ_{j ≠ k in {1,2,3}} (τ_j · τ_k)
+         = E[(τ_1·τ_2)+(τ_2·τ_3)+(τ_3·τ_1)]
+
+  V^(1)_cont = +E (τ_2 · τ_3)      (spectator-1 component)
 
   with E = cE / (fπ⁴ Λ_χ).
 ```
@@ -142,12 +150,9 @@ Mapping to the paper equations uses (l, λ, s, t, j, I, J, T) ↔
 Operator-wise: **spin-scalar** (no σ), isospin = `τ_2 · τ_3`, momentum =
 constant (no derivatives). Rank-0.
 
-Note on sign/coefficient: [E2002] normalizes V^(1) via
-`V^(1) = ⅓ V` after antisymmetrization and summation over `i ≠ j ≠ k`.
-The `-½` factor above comes from the `-½ E` in eq. (2.10). Current code
-uses the convention `+ cE/(fπ⁴ Λ_χ) × (τ_2 · τ_3) × f_reg² `, which
-differs by sign relative to [E2002] directly, but matches the Navrátil
-sign convention used in `epelbaum_reference.md`. Flag this for review.
+The factor `1/2` in the full force removes the double counting of ordered
+pairs. It is therefore absent from each component in the decomposition
+`V4=V4^(1)+V4^(2)+V4^(3)`. No sign conversion is applied inside the kernel.
 
 ### 1.2 Rank decomposition
 

@@ -42,7 +42,8 @@
 //
 // W^(1) is the spectator-1 decomposition: particle 1 is the spectator, particles 2 and 3
 // form the interacting pair. The full 3NF is recovered via W = (1+P+P²) W^(1) where
-// P = P₁₂₃ + P₁₃₂. The AGS KERNEL uses W^(1)·(1+P) (left W^(1), right (1+P)) —
+// P = P₁₂₃ + P₁₃₂. The elastic AGS kernel uses (1+P)·W^(1), as obtained from
+// Deltuva PRC 80, 064002 Eq. (7a) after the channel-resolvent reduction —
 // see three_nucleon_force_model.h and tests/cpp/test_faddeev_operator_order.cpp.
 //
 // References:
@@ -150,7 +151,7 @@ public:
 
 	// Status string for run-metadata output.
 	virtual std::string capabilities() const {
-		return std::string("c_E=implemented+independently-verified, ")
+			return std::string("c_E=ordered-pair coefficient verified; Fourier/PWD normalization provisional, ")
 		     + "c_D=rank-0 spectator-S-wave verified; higher-l/rank-2 blocked, "
 		     + "c_1/c_3=rank-0 monopole approximation, "
 		     + "c_1/c_3 rank-2="
@@ -217,27 +218,25 @@ private:
 	// the factored pieces
 	//   W^(1)_CT(α',p',q'; α,p,q)
 	//     = A_cE(α', α)                          [recoupling_3nf_contact_cE]
-	//     × [ -½ c_E / (f_π⁴ Λ_χ) ]              [kernel_contact]
+	//     × [ c_E / (f_π⁴ Λ_χ) ]                 [kernel_contact]
 	//     × f_R(p',q') f_R(p,q)                  [regulator_gauss, squared Gaussian]
 	//
 	// Per Epelbaum 2002 eq. (2.10)/(A-4), the c_E contact is a PURE SPIN SCALAR.
-	// Its spin-isospin recoupling A_cE depends only on the pair isospin T_2N and
-	// the spectator 1/2 ↔ T_3N coupling — NO σ_2·σ_3 factor. The previous
+	// Its spin-isospin recoupling A_cE is simply the pair eigenvalue
+	// 2*T_2N*(T_2N+1)-3 — NO σ_2·σ_3 factor and no spectator recoupling. The previous
 	// implementation reused recoupling_3nf_scalar (now recoupling_3nf_2pe_scalar)
 	// which erroneously multiplies by σ_2·σ_3 = -3 for S_2N=0 or +1 for S_2N=1.
 	// See docs/3nf_audit_2026-06-21.md §B1 for the bug analysis.
 	//
-	// For 3S1 (S_2N=1, T_2N=0): A_cE = (+1)·(-1)·(-3)·(-1/2) = -3/2 (NEW, correct)
-	//                            old: (+1)·(-3) = -3            (BUG: extra σ·σ)
-	// For 1S0 (S_2N=0, T_2N=1): A_cE = (-1)·(+1)·(+1)·(+1/4) = -1/4 (NEW, correct)
-	//                            old: (-3)·(+1) = -3              (BUG: extra σ·σ × wrong 6j)
+	// For 3S1 (T_2N=0): A_cE=-3.  For 1S0 (T_2N=1): A_cE=+1.
+	// Their ratio is -3, independently reproduced with explicit Pauli matrices.
 	//
 	// References:
 	//   Epelbaum et al. PRC 66 (2002) 064001, eqs. (2.10), (3.19), (A-4);
 	//   tools/check_3nf_normalization/formula_reference.md §1.
 	//
 	// / [CN] 3N 接触项 (c_E)：由重耦合系数（Epelbaum A-4，纯 τ·τ）、LEC 核
-	// (-½ c_E/(f_π⁴ Λ_χ))、E2002 eq. 3.19 平方高斯正规化子组合而成。
+	// (c_E/(f_π⁴ Λ_χ))、E2002 eq. 3.19 平方高斯正规化子组合而成。
 	// c_E 是纯自旋标量——不依赖 σ_2·σ_3（修复 B1）。
 	double W1_contact(int alpha_r, int alpha_c,
 					  double p_r, double q_r,
@@ -264,7 +263,9 @@ private:
 		const double f_bra = chiral_3nf::regulator_gauss(p_r, q_r, m_Lambda);
 		const double f_ket = chiral_3nf::regulator_gauss(p_c, q_c, m_Lambda);
 
-		// LEC kernel: -½ c_E / (fπ⁴ Λ_χ) (E2002 eq. 2.10, spectator-1 component).
+		// Spectator component: E tau_2·tau_3, E=c_E/(fpi^4 Lambda_chi).
+		// The +1/2 in E2002 Eq. (2.10) cancels the two ordered occurrences
+		// of each pair in sum_(j!=k).
 		const double lec = chiral_3nf::kernel_contact(m_c_E, m_fpi4, m_Lambda_chi);
 
 		return recoup * lec * f_bra * f_ket;

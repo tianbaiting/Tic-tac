@@ -124,14 +124,15 @@ def vnorm(a):
 
 
 # -----------------------------------------------------------------------------
-# Oracle: c_E contact (closed-form, calibration).
-# Matches kernel_contact: +0.5 * c_E / (fpi^4 * Lambda_chi) * fourier_norm.
+# Legacy diagnostic: c_E contact (closed-form, calibration).
+# The ordered-pair 1/2 in E2002 Eq. (2.10) is exhausted by the two appearances
+# of each unordered pair, so spectator component 1 is E*tau2.tau3.
 # -----------------------------------------------------------------------------
 def oracle_cE(cE, Lambda, p, q, pp, qp, S_pair, T_pair):
     """Independent c_E contact matrix element. NO angular integral (contact)."""
     tau23 = tau2_dot_tau3(T_pair)
     fR = regulator_gauss(p, q, Lambda) * regulator_gauss(pp, qp, Lambda)
-    lec = 0.5 * cE / (FPI**4 * LAMBDA_CHI)
+    lec = cE / (FPI**4 * LAMBDA_CHI)
     return tau23 * lec * fR * FOURIER_NORM
 
 

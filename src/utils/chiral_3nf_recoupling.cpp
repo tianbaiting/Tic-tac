@@ -76,7 +76,7 @@ double recoupling_3nf_contact_cE(
 {
     // [EN] c_E three-nucleon contact term recoupling (Epelbaum 2002 eq. 2.10).
     //
-    // V^(1)_cont = -E · (τ_2 · τ_3),   E = c_E / (f_π⁴ Λ_χ)
+    // V^(1)_cont = +E · (τ_2 · τ_3),   E = c_E / (f_π⁴ Λ_χ)
     //
     // The operator τ_2·τ_3 acts ONLY on the pair (2,3); the spectator (particle 1)
     // with isospin 1/2 is a passive spectator in the strictest sense. The pair

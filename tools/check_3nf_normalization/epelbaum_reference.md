@@ -1,5 +1,12 @@
 # Per-LEC ⟨W⟩_3H reference values
 
+> **Caution (2026-08-12):** this historical rescaling note conflates different
+> fitted interactions/regulators with a pure sign convention. It is not an
+> admissible absolute-normalization oracle. Epelbaum Eq. (2.10) has a positive
+> contact sign, and the spectator component is `+E tau_2.tau_3`. Published
+> triton expectation values may be compared only after the entire Hamiltonian,
+> regulator, LEC definitions, and state normalization are matched.
+
 **Primary source**: Epelbaum, Nogga, Glöckle, Kamada, Meißner, Witała,
 Phys. Rev. C 66, 064001 (2002). arXiv:nucl-th/0208023.
 Table 2 (³H column, Λ=500 MeV NNLO row).

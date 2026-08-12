@@ -247,25 +247,35 @@ void test_2pe_rank2_fail_closed_3S1_3D1() {
 
 // Golden values from oracle_cE_sympy.py (committed JSON).
 // Oracle uses the SAME convention as the C++ W1_element:
-//   W_cE = tau23 × (0.5 c_E / (f_π⁴ Λ_χ)) × 1/(8π³) × f_R²
+//   W_cE = tau23 × (c_E / (f_π⁴ Λ_χ)) × 1/(8π³) × f_R²
 // The INDEPENDENT part is the tau23 eigenvalue, derived via explicit Pauli
 // matrix sum on |(½½)T⟩ rather than the closed form 2T(T+1)−3.
-// Constants: f_π = 92.4 MeV, Λ_χ = 700 MeV, ħc = 197.327 MeV·fm.
+// Constants: f_π = 92.2 MeV, Λ_χ = 700 MeV, ħc = 197.327 MeV·fm.
 static constexpr double GOLDEN_cE_p_fm   = 0.5;
 static constexpr double GOLDEN_cE_q_fm   = 0.5;
 static constexpr double GOLDEN_cE_pp_fm  = 0.5;
 static constexpr double GOLDEN_cE_qp_fm  = 0.5;
 static constexpr double GOLDEN_cE_cE     = -0.02914;
 static constexpr double GOLDEN_cE_Lambda = 500.0;  // MeV
-// Values from oracle_cE_sympy.py run on 2026-06-21.
-// Small (≤1%) discrepancy with C++ is due to f_π/Λ_χ constant precision.
-static constexpr double GOLDEN_cE_3S1    = +1.023657e-03;  // fm⁵
-static constexpr double GOLDEN_cE_1S0    = -3.412191e-04;  // fm⁵
+// Values from oracle_cE_sympy.py regenerated on 2026-08-12 after correcting
+// the ordered-pair factor in Epelbaum Eq. (2.10).
+static constexpr double GOLDEN_cE_3S1    = +2.0651374515022864e-03;  // fm⁵
+static constexpr double GOLDEN_cE_1S0    = -6.883791505007622e-04;   // fm⁵
 // Ratio is convention-invariant: tau23(T=0)/tau23(T=1) = -3/+1 = -3.
 // This is the CRITICAL test that exposes the original B1 bug: the old code
 // returned sigma*sigma × tau*tau which would have given
 //   V(3S1)/V(1S0) = (+1)(-3) / [(-3)(+1)] = +1   (wrong, should be -3)
 static constexpr double GOLDEN_cE_RATIO_3S1_over_1S0 = -3.0;
+
+// Epelbaum Eq. (2.10) is +1/2 sum_(j!=k) E tau_j.tau_k.  The ordered sum
+// contains each of the three unordered pairs twice, so a decomposition
+// V4=u1+u2+u3 requires u1=E tau_2.tau_3.  Strip the explicitly separate
+// Fourier factor and verify that production has not retained an extra 1/2.
+void test_cE_spectator_component_ordered_pair_counting() {
+    const double stripped = chiral_3nf::kernel_contact(1.0, 1.0, 1.0)
+                          / chiral_3nf::fourier_norm_3nf;
+    check_close("cE spectator component exhausts ordered-pair 1/2", stripped, 1.0, 1e-14);
+}
 
 void test_golden_cE_3S1_diagonal() {
     chiral_N2LO_3NF tnf(0.0, GOLDEN_cE_cE, GOLDEN_cE_Lambda,
@@ -280,9 +290,7 @@ void test_golden_cE_3S1_diagonal() {
     }
     double got = tnf.W1_element(a, a, GOLDEN_cE_p_fm, GOLDEN_cE_q_fm,
                                  GOLDEN_cE_pp_fm, GOLDEN_cE_qp_fm, pw);
-    // 2% tolerance to absorb minor f_π / Λ_χ precision differences between
-    // the C++ constants.h and the Python oracle hardcoded values.
-    check_close("golden cE 3S1 diagonal", got, GOLDEN_cE_3S1, 0.02 * std::abs(GOLDEN_cE_3S1));
+    check_close("golden cE 3S1 diagonal", got, GOLDEN_cE_3S1, 1e-12);
 }
 
 void test_golden_cE_1S0_diagonal() {
@@ -298,7 +306,7 @@ void test_golden_cE_1S0_diagonal() {
     }
     double got = tnf.W1_element(a, a, GOLDEN_cE_p_fm, GOLDEN_cE_q_fm,
                                  GOLDEN_cE_pp_fm, GOLDEN_cE_qp_fm, pw);
-    check_close("golden cE 1S0 diagonal", got, GOLDEN_cE_1S0, 0.02 * std::abs(GOLDEN_cE_1S0));
+    check_close("golden cE 1S0 diagonal", got, GOLDEN_cE_1S0, 1e-12);
 }
 
 // CRITICAL STRUCTURAL TEST: V_cE(3S1) / V_cE(1S0) must equal
@@ -693,6 +701,7 @@ int main() {
     test_2pe_rank2_fail_closed_3S1_3D1();
 
     std::printf("\n--- Golden value tests (independent SymPy oracle) ---\n");
+    test_cE_spectator_component_ordered_pair_counting();
     test_golden_cE_3S1_diagonal();
     test_golden_cE_1S0_diagonal();
     test_golden_cE_ratio_3S1_over_1S0();

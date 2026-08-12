@@ -91,21 +91,18 @@ inline double regulator_gauss(double p, double q, double Lambda) noexcept
 }
 
 // -----------------------------------------------------------------------------
-// 3N contact scalar LEC factor (Navrátil/Witała convention):
+// 3N contact scalar LEC factor (Epelbaum 2002 convention):
 //
-//     V^(1)_cont prefactor = +½ c_E / (f_π⁴ Λ_χ)
+//     V^(1)_cont prefactor = +c_E / (f_π⁴ Λ_χ)
 //
-// Sign convention note: [E2002] eq. 2.10 writes V^(1)_cont = -½ E Σ(τ_j·τ_k),
-// but the code LEC values are in the Navrátil/Witała convention (matching the
-// chiral_N2LO 2NF LECs that ship with Tic-tac and the Witała triton
-// benchmarks). This convention absorbs the overall sign into the LEC
-// definition — see epelbaum_reference.md lines 26-30. Diagnostic confirms:
-// with -½ the magnitude matches Epelbaum Table 2 but the sign is flipped;
-// with +½ the sign matches. See formula_reference.md §1.5 for the sign
-// analysis and the commit fixing this (post-Task-5 triangulation).
+// [E2002] Eq. (2.10) writes the full contact force as
+// +½ sum_(j!=k) E tau_j·tau_k.  Each unordered pair occurs twice, so the
+// spectator-1 component in V4=sum_i V4^(i) is
+// V4^(1)=E tau_2·tau_3, with E=c_E/(f_pi^4 Lambda_chi) from Eq. (2.12).
+// The 1/2 is exhausted by the ordered-pair sum and must not remain in W^(1).
 //
 // Input:
-//   c_E         — dimensionless LEC (Navrátil/Witała convention)
+//   c_E         — dimensionless LEC in the stated Epelbaum convention
 //   fpi4_fm     — f_π⁴ in fm⁻⁴ (i.e. (fπ/ħc)⁴ with fπ in MeV)
 //   Lambda_chi  — chiral breaking scale Λ_χ in fm⁻¹
 //
@@ -116,7 +113,7 @@ inline double regulator_gauss(double p, double q, double Lambda) noexcept
 inline double kernel_contact(double c_E, double fpi4_fm, double Lambda_chi) noexcept
 {
     // 1/(8π³) mirrors chiral_LO_internal.cpp:59 Fourier convention.
-    return fourier_norm_3nf * (+0.5 * c_E / (fpi4_fm * Lambda_chi));
+    return fourier_norm_3nf * (c_E / (fpi4_fm * Lambda_chi));
 }
 
 // -----------------------------------------------------------------------------
