@@ -38,8 +38,30 @@ Optional for plotting:
 
 ## Build
 
+There are two build entrypoints over the same `src/` + `include/` tree:
+
+- **`make`** (repository root) builds the executable `./tic-tac`. This is the
+  canonical CMake-parity build target.
+- **`make -C CPP`** builds `./CPP/run`. This is the executable the maintained
+  Python workflows (`examples/*.py`) and the regression tests expect, so it is
+  the recommended target for day-to-day work:
+
 ```bash
-make
+make -C CPP
+```
+
+The two are the same sources compiled with the same flags; `CPP/makefile` is a
+thin wrapper that delegates to the root `Makefile` with `TARGET=CPP/run`. Both
+honour the same `TICTAC_USE_NEW_CACHE_LAYER` switch (default `1`, matching the
+CMake `option(... ON)`); pass `TICTAC_USE_NEW_CACHE_LAYER=0` to build the legacy
+no-cache path.
+
+When using the `anaroot-env` conda environment for HDF5/GSL/BLAS, point the
+Makefile at it with `CONDA_PREFIX` (the conda BLAS additionally requires
+`-lcblas`, which the Makefile adds automatically in that case):
+
+```bash
+CONDA_PREFIX=/data/tian/conda/envs/anaroot-env make -C CPP -j
 ```
 
 If you need command help from solver:
