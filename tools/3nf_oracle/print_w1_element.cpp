@@ -7,8 +7,10 @@
 // full multi-dimensional angular quadrature of the un-reduced momentum-space
 // operator — NOT a re-transcription of the C++ kernel formula.
 //
-// Usage:
+// Usage (legacy approximation):
 //   print_w1_element cE cD c1 c3 Lambda_MeV
+// Usage (complete factorized projector):
+//   print_w1_element --factorized cE cD c1 c3 c4 Lambda_MeV Ntransfer
 //   then feed lines:  alpha_r alpha_c p_r q_r p_c q_c
 //   (momenta in fm^-1). End with EOF (Ctrl-D).
 //
@@ -16,7 +18,9 @@
 
 #include <cstdio>
 #include <iostream>
+#include <memory>
 #include "chiral_N2LO_3NF.h"
+#include "chiral_N2LO_3NF_factorized.h"
 #include "make_pw_symm_states.h"
 
 static pw_3N_statespace make_test_pw_states() {
@@ -30,30 +34,33 @@ static pw_3N_statespace make_test_pw_states() {
     return pw;
 }
 
-static int find_alpha(const pw_3N_statespace& pw,
-                      int L2, int S2, int J2, int T2,
-                      int l1, int two_j1, int two_J3, int two_T3) {
-    for (int a = 0; a < pw.Nalpha; ++a) {
-        if (pw.L_2N_array[a]==L2 && pw.S_2N_array[a]==S2 && pw.J_2N_array[a]==J2 &&
-            pw.T_2N_array[a]==T2 && pw.L_1N_array[a]==l1 && pw.two_J_1N_array[a]==two_j1 &&
-            pw.two_J_3N_array[a]==two_J3 && pw.two_T_3N_array[a]==two_T3) return a;
-    }
-    return -1;
-}
-
 int main(int argc, char** argv) {
-    if (argc != 6) {
-        std::fprintf(stderr, "usage: %s cE cD c1 c3 Lambda_MeV\n", argv[0]);
-        return 2;
-    }
-    double cE = std::stod(argv[1]);
-    double cD = std::stod(argv[2]);
-    double c1 = std::stod(argv[3]);
-    double c3 = std::stod(argv[4]);
-    double Lambda = std::stod(argv[5]);
+	const bool factorized = argc == 9 && std::string(argv[1]) == "--factorized";
+	if (argc != 6 && !factorized) {
+		std::fprintf(stderr,
+			"usage: %s cE cD c1 c3 Lambda_MeV\n"
+			"   or: %s --factorized cE cD c1 c3 c4 Lambda_MeV Ntransfer\n",
+			argv[0], argv[0]);
+		return 2;
+	}
+	const int offset = factorized ? 1 : 0;
+	double cE = std::stod(argv[1 + offset]);
+	double cD = std::stod(argv[2 + offset]);
+	double c1 = std::stod(argv[3 + offset]);
+	double c3 = std::stod(argv[4 + offset]);
+	double c4 = factorized ? std::stod(argv[6]) : 0.0;
+	double Lambda = factorized ? std::stod(argv[7]) : std::stod(argv[5]);
+	int transfer_order = factorized ? std::stoi(argv[8]) : 0;
 
-    chiral_N2LO_3NF tnf(cD, cE, Lambda, c1, c3, /*c4=*/0.0);
-    pw_3N_statespace pw = make_test_pw_states();
+	std::unique_ptr<three_nucleon_force_model> tnf;
+	if (factorized) {
+		tnf = std::make_unique<chiral_N2LO_3NF_factorized>(
+			cD, cE, Lambda, c1, c3, c4, transfer_order);
+	} else {
+		tnf = std::make_unique<chiral_N2LO_3NF>(
+			cD, cE, Lambda, c1, c3, /*c4=*/0.0);
+	}
+	pw_3N_statespace pw = make_test_pw_states();
 
     // emit the channel table (one line per alpha) so the Python oracle can
     // resolve quantum numbers without re-deriving the state space.
@@ -69,7 +76,7 @@ int main(int argc, char** argv) {
     while (std::cin >> ar >> ac >> pr >> qr >> pc >> qc) {
         int ar_i = (int)ar, ac_i = (int)ac;
         if (ar_i < 0 || ac_i < 0) continue;
-        double v = tnf.W1_element(ar_i, ac_i, pr, qr, pc, qc, pw);
+		double v = tnf->W1_element(ar_i, ac_i, pr, qr, pc, qc, pw);
         std::printf("W1 %d %d %.10f %.10f %.10f %.10f %.12e\n",
                     ar_i, ac_i, pr, qr, pc, qc, v);
     }

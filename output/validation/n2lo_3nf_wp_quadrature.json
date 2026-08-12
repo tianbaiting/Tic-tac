@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "generated_utc": "2026-08-12T17:42:00Z",
+  "projector": "chiral_N2LO_full_factorized",
+  "transfer_quadrature_order": 6,
+  "constants": {
+    "c1_GeV_inverse": -0.81,
+    "c3_GeV_inverse": -3.2,
+    "c4_GeV_inverse": 5.4,
+    "cD": -0.2,
+    "cE": -0.205,
+    "Lambda_3NF_MeV": 500.0
+  },
+  "normalization": "W1_WP in MeV using radial WP measure and hbarc^-5",
+  "cases": [
+    {
+      "label": "ordinary_diagonal_3S1",
+      "alpha_row": 4,
+      "alpha_column": 4,
+      "bounds_fm_inverse": {
+        "p_row": [0.4, 0.6],
+        "q_row": [0.3, 0.5],
+        "p_column": [0.5, 0.7],
+        "q_column": [0.4, 0.6]
+      },
+      "reference_order": 6,
+      "values_MeV": {
+        "1": 1.33615059e-16,
+        "2": 1.33920394e-16,
+        "4": 1.33920081e-16,
+        "6": 1.33920080e-16
+      },
+      "relative_error": {
+        "1": 2.28e-3,
+        "2": 2.35e-6,
+        "4": 1.04e-8,
+        "6": 0.0
+      }
+    },
+    {
+      "label": "ordinary_c4_cD_3S1_to_1S0",
+      "alpha_row": 4,
+      "alpha_column": 0,
+      "bounds_fm_inverse": {
+        "p_row": [0.4, 0.6],
+        "q_row": [0.3, 0.5],
+        "p_column": [0.5, 0.7],
+        "q_column": [0.4, 0.6]
+      },
+      "reference_order": 4,
+      "values_MeV": {
+        "1": 4.09431874e-17,
+        "2": 4.23352908e-17,
+        "4": 4.23319914e-17
+      },
+      "relative_error": {
+        "1": 3.28e-2,
+        "2": 7.79e-5,
+        "4": 0.0
+      }
+    },
+    {
+      "label": "wide_diagonal_3S1",
+      "alpha_row": 4,
+      "alpha_column": 4,
+      "bounds_fm_inverse": {
+        "p_row": [0.2, 0.8],
+        "q_row": [0.2, 0.8],
+        "p_column": [0.2, 0.8],
+        "q_column": [0.2, 0.8]
+      },
+      "reference_order": 6,
+      "values_MeV": {
+        "1": 1.12106248e-15,
+        "2": 1.17304002e-15,
+        "4": 1.17226457e-15,
+        "6": 1.17226481e-15
+      },
+      "relative_error": {
+        "1": 4.37e-2,
+        "2": 6.61e-4,
+        "4": 2.09e-7,
+        "6": 0.0
+      }
+    },
+    {
+      "label": "wide_c4_cD_3S1_to_1S0",
+      "alpha_row": 4,
+      "alpha_column": 0,
+      "bounds_fm_inverse": {
+        "p_row": [0.2, 0.8],
+        "q_row": [0.2, 0.8],
+        "p_column": [0.2, 0.8],
+        "q_column": [0.2, 0.8]
+      },
+      "reference_order": 6,
+      "values_MeV": {
+        "1": 4.36717483e-16,
+        "2": 5.41433856e-16,
+        "4": 5.39364229e-16,
+        "6": 5.39363804e-16
+      },
+      "relative_error": {
+        "1": 1.90e-1,
+        "2": 3.84e-3,
+        "4": 7.89e-7,
+        "6": 0.0
+      }
+    }
+  ],
+  "conclusion": {
+    "midpoint_is_converged": false,
+    "order_2_is_sub_permil_for_tested_diagonal_cells": true,
+    "order_2_is_not_sub_permil_for_wide_c4_cD_transition": true,
+    "order_4_relative_error_max_tested": 7.89e-7,
+    "production_default_decision": "retain order 2 until end-to-end observable ladders; use order 4 as the matrix-element reference setting"
+  }
+}
