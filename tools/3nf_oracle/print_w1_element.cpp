@@ -11,6 +11,8 @@
 //   print_w1_element cE cD c1 c3 Lambda_MeV
 // Usage (complete factorized projector):
 //   print_w1_element --factorized cE cD c1 c3 c4 Lambda_MeV Ntransfer
+// Optional extended validation space:
+//   ... Ntransfer --space J2max two_J3max isospin_breaking_1S0
 //   then feed lines:  alpha_r alpha_c p_r q_r p_c q_c
 //   (momenta in fm^-1). End with EOF (Ctrl-D).
 //
@@ -23,24 +25,34 @@
 #include "chiral_N2LO_3NF_factorized.h"
 #include "make_pw_symm_states.h"
 
-static pw_3N_statespace make_test_pw_states() {
+static pw_3N_statespace make_test_pw_states(
+        int J_2N_max = 1,
+        int two_J_3N_max = 1,
+        bool isospin_breaking_1S0 = false) {
     run_params rp = {};
-    rp.J_2N_max = 1;
-    rp.two_J_3N_max = 1;
+    rp.J_2N_max = J_2N_max;
+    rp.two_J_3N_max = two_J_3N_max;
     rp.tensor_force = true;
-    rp.isospin_breaking_1S0 = false;
+    rp.isospin_breaking_1S0 = isospin_breaking_1S0;
     pw_3N_statespace pw = {};
     construct_symmetric_pw_states(pw, rp);
     return pw;
 }
 
 int main(int argc, char** argv) {
-	const bool factorized = argc == 9 && std::string(argv[1]) == "--factorized";
+	const bool extended_space = argc == 13;
+	const bool factorized = (argc == 9 || extended_space)
+		&& std::string(argv[1]) == "--factorized";
 	if (argc != 6 && !factorized) {
 		std::fprintf(stderr,
 			"usage: %s cE cD c1 c3 Lambda_MeV\n"
-			"   or: %s --factorized cE cD c1 c3 c4 Lambda_MeV Ntransfer\n",
+			"   or: %s --factorized cE cD c1 c3 c4 Lambda_MeV Ntransfer\n"
+			"       [--space J2max two_J3max isospin_breaking_1S0]\n",
 			argv[0], argv[0]);
+		return 2;
+	}
+	if (extended_space && std::string(argv[9]) != "--space") {
+		std::fprintf(stderr, "expected --space before extended-space arguments\n");
 		return 2;
 	}
 	const int offset = factorized ? 1 : 0;
@@ -51,6 +63,9 @@ int main(int argc, char** argv) {
 	double c4 = factorized ? std::stod(argv[6]) : 0.0;
 	double Lambda = factorized ? std::stod(argv[7]) : std::stod(argv[5]);
 	int transfer_order = factorized ? std::stoi(argv[8]) : 0;
+	int J_2N_max = extended_space ? std::stoi(argv[10]) : 1;
+	int two_J_3N_max = extended_space ? std::stoi(argv[11]) : 1;
+	bool isospin_breaking_1S0 = extended_space ? std::stoi(argv[12]) != 0 : false;
 
 	std::unique_ptr<three_nucleon_force_model> tnf;
 	if (factorized) {
@@ -60,7 +75,8 @@ int main(int argc, char** argv) {
 		tnf = std::make_unique<chiral_N2LO_3NF>(
 			cD, cE, Lambda, c1, c3, /*c4=*/0.0);
 	}
-	pw_3N_statespace pw = make_test_pw_states();
+	pw_3N_statespace pw = make_test_pw_states(
+		J_2N_max, two_J_3N_max, isospin_breaking_1S0);
 
     // emit the channel table (one line per alpha) so the Python oracle can
     // resolve quantum numbers without re-deriving the state space.

@@ -46,6 +46,7 @@ The labels used below are:
 | Complete C++ reference PWD | `build/tests/cpp/test_chiral_n2lo_full_reference` | **Verified result:** all signed component and combined checks passed.  Direct Jj `c1`, `c3`, `c4`, `cD`, and `cE` values agree with the independent Python projector at the same `Nangle_3NF=2` to roughly `1e-17` absolute.  Both low-order forward and reverse values are frozen separately; no post-hoc Hermitian averaging is used. |
 | Factorized Python PWD | `python3 -m unittest tests/test_factorized_scalar_pwd.py tests/test_factorized_n2lo_pwd.py` | **Verified result:** 5/5 passed.  The Hebeler Eq. (6) three-integral scalar kernel gives the exact `(4pi)^2` contact limit, agrees with the independent five-angle projector for P-wave and `l=0<->2` finite-rank kernels, reproduces Golak Table 2 for `c1/c3/c4` within `3e-4` relative, and matches complete `cD` S-wave and spectator-D transitions. |
 | Factorized C++ PWD | `build/tests/cpp/test_chiral_n2lo_factorized` | **Verified result:** signed `c1/c3/c4/cD/cE` values agree with the independently tested Python factorization to about `1e-17` absolute for S, P, pair-D, `J=3/2`, and `T=3/2` channels.  Exact forward/reverse Hermiticity holds, and the independent five-angle result approaches it from `N=4` to `N=6`. |
+| Broad N2LO matrix table | `tools/3nf_oracle/generate_n2lo_matrix_table.py`; `output/validation/n2lo_3nf_matrix_elements.json`; `python3 -m unittest tests/test_n2lo_matrix_validation.py` | **Verified result:** 26/26 signed matrix elements, 130/130 separate component checks, and 13/13 forward/reverse pairs pass.  The table contains 58 nonzero and 72 selection-rule-zero comparisons, both signs for every `c1/c3/c4/cD/cE` component, three momentum regimes, S/P/pair-D/spectator-D channels, both parities, and `J=1/2,3/2`, `T=1/2,3/2`.  Production C++ versus the separate Python factorization differs by at most `1.17e-15 fm^5`; the independent full-vector five-angle result differs by at most `2.83e-6 fm^5`, within its explicit order-6-to-8 error estimate.  Production order 8 versus 10 differs by at most `3.10e-8 fm^5`. |
 | Factorized W1 performance | `output/validation/n2lo_3nf_factorized_performance.json` | **Verified implementation result:** a fixed single-thread 200-channel-pair pass fell from `233.55 s` at `208159a` to `65.50 s` at `b39901e` (3.57x).  Subsequent magnetic factorization reduced the production `Np=4,Nq=3`, 101-block radial-order-one W1 build from `102.3 s` to `31.0 s`; channel batching reduced the radial-order-two build from `162.4 s` to `87.8 s`.  Solver U files and Padé sidecars are byte-identical across both optimizations, and all 13 C++ plus 20 related Python/oracle tests pass. |
 | Complete W1 cell integration | `python3 -m unittest tests/test_factorized_wp_quadrature.py`; `output/validation/n2lo_3nf_wp_quadrature.json` | **Verified result:** for ordinary and deliberately wide cells, the legacy midpoint has relative errors from `2.28e-3` to `1.90e-1`.  The hardest wide `c4+cD` transition still has `3.84e-3` error at radial order two, while order four agrees with order six to `7.89e-7`. |
 | W1 cache off/miss/hit parity | `build/tests/cpp/test_chiral_n2lo_w1_cache` | **Verified result:** at radial order two, an uninitialized-cache direct build, an HDF5-cache miss/store build, and a subsequent all-block disk hit are bitwise identical.  A counting wrapper proves that the hit makes zero `W1_element` calls, and the wide `c4+cD` transition agrees with the independent Python cell integral to `5.2e-11` relative. |
@@ -247,16 +248,19 @@ discriminator.
    and regulator factors are exact-golden tested.  Old caches are invalidated.
 4. **Resolved 2026-08-13:** the full-vector and generic five-angle oracles
    reproduce independent closed integrands and Golak Table 2.
-5. **Resolved at the matrix-element implementation level:** a second C++ direct-Jj
+5. **Resolved at the matrix-element implementation and broad-table level:** a second C++ direct-Jj
    five-angle implementation contains every `c1`, `c3`, `c4`, `cD`, and `cE`
    structure and is available through the factory with explicit slow-reference
    naming.  `Nangle_3NF` is printed, parsed, and hashed.  The Hebeler
    three-integral factorization is translated and independently validated in
    Python for all five components, then ported to a solver-selectable C++ model.
-   Signed C++ comparisons cover S, P, pair-D, `J=3/2`, and `T=3/2` sectors.
-   A machine-readable broader channel/momentum table and realistic-grid
-   WP/solver convergence remain required; no unsupported dimensional reduction
-   is accepted.
+   The machine-readable table now covers 26 signed forward/reverse matrix
+   elements and 130 component comparisons across diagonal/off-diagonal, S/P/D,
+   tensor, both-parity, multiple-momentum, `J=1/2,3/2`, and `T=1/2,3/2`
+   sectors.  Production, a separately implemented finite-rank PWD, and the
+   independent full-vector five-angle projector are all retained in every row,
+   including their last quadrature steps.  Realistic-grid WP/solver convergence
+   remains required; no unsupported dimensional reduction is accepted.
 6. **Resolved for representative-cell cache parity and quadrature:** W1 schema
    v6 hashes all chiral constants and the angular order.  Direct integration
    through the production C++ driver demonstrates
@@ -279,13 +283,12 @@ discriminator.
 
 The repository now satisfies the equation-ordering, full-vector-oracle,
 published raw-PWD, exact-contact-normalization, complete slow-C++-reference,
-factorized matrix-element implementation gates.  Representative W1 cell
-integration is also converged at radial order four, but the repository still
-fails the decisive cache/solver convergence and physical-validation gates.  The
-next safe milestone is profiling and reducing the high-orbital W1 block-build
-cost, then repeating the solver comparison with converged radial/angular orders
-and a physically stable two-body grid before physical truncation ladders.  No
-existing Ay curve is yet admissible as a complete-N2LO result.
+factorized matrix-element implementation, and broad machine-readable matrix-table
+gates.  Representative W1 cell integration is also converged at radial order
+four, but the repository still fails the decisive realistic-grid solver
+convergence and physical-validation gates.  A physically stable two-body grid
+and converged radial/angular/J ladders must precede the low-energy nd Ay
+comparison.  No existing Ay curve is yet admissible as a complete-N2LO result.
 
 ## GLM-5.2 review disposition
 
