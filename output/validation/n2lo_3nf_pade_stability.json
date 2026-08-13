@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "generated_utc": "2026-08-13T05:35:00Z",
+  "purpose": "numerical-stability and honesty validation of diagonal Pade resummation for the complete factorized N2LO 3NF solver",
+  "source_commit": "5e003d6",
+  "implementation": {
+    "before": "ratio of two complex determinants",
+    "after": "row-scaled solve for denominator coefficients with LAPACK zgesv, rank-revealing zgelsy fallback, and Horner evaluation",
+    "mathematical_definition_changed": false,
+    "convergence_policy": {
+      "stable_final_updates": 3,
+      "relative_tolerance": 1e-05,
+      "absolute_tolerance": 1e-07,
+      "tolerances_changed": false
+    },
+    "pade_max_order": {
+      "default": 14,
+      "allowed_range": [1, 64],
+      "recorded_in_run_parameters": true
+    }
+  },
+  "reduced_dense_crosscheck": {
+    "configuration": {
+      "Np_WP": 4,
+      "Nq_WP": 3,
+      "J_2N_max": 1,
+      "two_J_3N_max": 1,
+      "Np_per_WP_W1": 2,
+      "Nq_per_WP_W1": 2,
+      "Nangle_3NF": 2,
+      "three_nucleon_force": "chiral_N2LO_full_factorized",
+      "deuteron_binding_mev": -0.011400617,
+      "num_complex_amplitudes": 12
+    },
+    "same_neumann_coefficients_before_after": {
+      "equal": true,
+      "legacy_sha256": "a6a6b7b585771f2b1b831509f8b00db14cdda594f9637fe8a5c892c79bb7a428",
+      "stable_order14_sha256": "a6a6b7b585771f2b1b831509f8b00db14cdda594f9637fe8a5c892c79bb7a428"
+    },
+    "comparisons": [
+      {
+        "left": "legacy determinant ratio, configured order 14, labelled optimal truncation at orders 6--8",
+        "right": "dense direct inversion",
+        "max_absolute_difference_mev": 5.08983766489635e-09,
+        "max_relative_difference": 7.258258223177942e-08,
+        "rms_absolute_difference_mev": 2.2153926392465037e-09
+      },
+      {
+        "left": "stable coefficient solve at order 14",
+        "right": "dense direct inversion",
+        "max_absolute_difference_mev": 5.791295797706375e-15,
+        "max_relative_difference": 3.8809061842631866e-14,
+        "rms_absolute_difference_mev": 1.7310058107911581e-15
+      },
+      {
+        "left": "stable coefficient solve at order 24",
+        "right": "dense direct inversion",
+        "max_absolute_difference_mev": 1.5888048875393087e-14,
+        "max_relative_difference": 4.813536468216911e-14,
+        "rms_absolute_difference_mev": 4.609018223055479e-15
+      },
+      {
+        "left": "stable coefficient solve at order 14",
+        "right": "stable coefficient solve at order 24",
+        "max_absolute_difference_mev": 1.3406266258851168e-14,
+        "max_relative_difference": 4.1777445449966764e-14,
+        "rms_absolute_difference_mev": 3.8808299284730016e-15
+      }
+    ],
+    "convergence": [
+      {
+        "implementation": "legacy determinant ratio",
+        "configured_max_order": 14,
+        "num_truly_converged": 0,
+        "num_max_order_truncated": 12,
+        "selected_order_min": 6,
+        "selected_order_max": 8
+      },
+      {
+        "implementation": "stable coefficient solve",
+        "configured_max_order": 14,
+        "num_truly_converged": 12,
+        "num_max_order_truncated": 0,
+        "selected_order_min": 14,
+        "selected_order_max": 14
+      },
+      {
+        "implementation": "stable coefficient solve",
+        "configured_max_order": 24,
+        "num_truly_converged": 12,
+        "num_max_order_truncated": 0,
+        "selected_order_min": 24,
+        "selected_order_max": 24
+      }
+    ],
+    "sha256": {
+      "legacy_u": "678c5751c83d09aad8cfd775c0aac8ba868f64f535709da00c48c6e3638e6859",
+      "stable_order14_u": "3a97a2be75f3b42cb95a74d6490f32569b128c1983b0b91406040e4087fceca4",
+      "stable_order24_u": "6524f1617f902301aa2c5818228632b19f1febac60633b2ca391e904cf638b9a",
+      "dense_u": "ae0614760e49249e7a5c89e360bde1245c8c3a46d95223c5fda1f94fc9a0f966",
+      "stable_order14_convergence": "28faff7710941b123f84017c477bbc56647d4de1d0335487cbe20eda66ce28b9",
+      "stable_order24_convergence": "a38c631c6f964668855aa898c0b58eee3e9ffb8cbac7ef52c0643c08ed58d545"
+    }
+  },
+  "cached_grid_ladder": [
+    {
+      "Np_WP": 4,
+      "Nq_WP": 3,
+      "radial_order": 1,
+      "num_amplitudes": 12,
+      "num_truly_converged_at_default_order14": 12,
+      "deuteron_binding_mev": -0.011400617
+    },
+    {
+      "Np_WP": 6,
+      "Nq_WP": 4,
+      "radial_order": 1,
+      "num_amplitudes": 16,
+      "num_truly_converged_at_default_order14": 16,
+      "deuteron_binding_mev": -0.13180385
+    },
+    {
+      "Np_WP": 8,
+      "Nq_WP": 6,
+      "radial_order": 1,
+      "num_amplitudes": 24,
+      "num_truly_converged_at_default_order14": 24,
+      "deuteron_binding_mev": -0.71215136
+    },
+    {
+      "Np_WP": 10,
+      "Nq_WP": 8,
+      "radial_order": 1,
+      "num_amplitudes": 24,
+      "num_truly_converged_at_default_order14": 24,
+      "deuteron_binding_mev": -1.2585708
+    }
+  ],
+  "tests": {
+    "ctest": "13/13 passed",
+    "python_oracle_unittest": "43 passed, 5 skipped",
+    "three_nf_disabled_solver_regression": "2/2 passed; 40 amplitudes, max absolute difference from frozen baseline 6.574e-09"
+  },
+  "limitations": [
+    "The Padé numerical-stability defect is resolved on the tested reduced grids, but these grids are not a publication-level WPCD convergence study.",
+    "The deuteron binding energy remains strongly grid dependent and unphysical across the cached ladder.",
+    "Radial order one is the legacy midpoint diagnostic, and Nangle_3NF=2 is not an angular-convergence certificate.",
+    "Only one positive-parity J=1/2 block is included in this report."
+  ]
+}

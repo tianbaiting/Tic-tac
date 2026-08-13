@@ -50,8 +50,9 @@ The labels used below are:
 | Complete W1 cell integration | `python3 -m unittest tests/test_factorized_wp_quadrature.py`; `output/validation/n2lo_3nf_wp_quadrature.json` | **Verified result:** for ordinary and deliberately wide cells, the legacy midpoint has relative errors from `2.28e-3` to `1.90e-1`.  The hardest wide `c4+cD` transition still has `3.84e-3` error at radial order two, while order four agrees with order six to `7.89e-7`. |
 | W1 cache off/miss/hit parity | `build/tests/cpp/test_chiral_n2lo_w1_cache` | **Verified result:** at radial order two, an uninitialized-cache direct build, an HDF5-cache miss/store build, and a subsequent all-block disk hit are bitwise identical.  A counting wrapper proves that the hit makes zero `W1_element` calls, and the wide `c4+cD` transition agrees with the independent Python cell integral to `5.2e-11` relative. |
 | Reduced solver interface smoke | `build/bin/Tic-tac ... three_nucleon_force=chiral_N2LO_full_factorized Np_WP=1 Nq_WP=1 ...` | **Verified interface result only:** factory construction, basis generation, permutation, W1 cache construction, AGS assembly, and Padé code completed without an interface error.  The selected energy file yielded no on-shell energies and the radial grids used one midpoint, so this is not solver-physics or convergence evidence. |
-| Reduced complete-3NF dense/Padé cross-check | `tools/3nf_oracle/compare_reduced_solver_outputs.py`; `output/validation/n2lo_3nf_reduced_solver_crosscheck.json` | **Verified algorithm-level result:** for one `J=1/2`, positive-parity block at `Np=4`, `Nq=3`, radial order one and angular order two, all 12 complex Padé amplitudes agree with dense inversion to `max|delta U|=2.12e-9 MeV` and maximum relative difference `7.41e-8`.  A repeated cache-hit Padé run is byte-identical.  The honesty sidecar nevertheless marks 12/12 elements maximum-order truncated, and the deuteron energy is an unphysical `-0.0114 MeV`; this is not a converged physics result. |
-| Reduced WPCD convergence diagnostic | `tools/3nf_oracle/summarize_factorized_solver_convergence.py`; `output/validation/n2lo_3nf_reduced_wpcd_convergence.json` | **Verified negative result:** with `J_2N_max=1`, transfer order two, and midpoint W1 integration, increasing `(Np,Nq)` through `(4,3)`, `(6,4)`, `(8,6)`, and `(10,8)` moves the deuteron energy from `-0.0114` to `-1.2586 MeV`, so the 2NF/WP basis is still far from converged.  Different q grids have different on-shell bin midpoints and their U values are not compared directly.  At the identical `(4,3)` grid, radial order one versus two changes the 12 amplitudes by as much as `0.1335 MeV` and `67.4%` relative.  Every recorded Padé element remains code 2 (maximum-order truncated). |
+| Historical reduced complete-3NF dense/Padé cross-check | `tools/3nf_oracle/compare_reduced_solver_outputs.py`; `output/validation/n2lo_3nf_reduced_solver_crosscheck.json` | **Superseded Padé-stability baseline:** before commit `5e003d6`, one `J=1/2`, positive-parity block at `Np=4`, `Nq=3`, radial order one, and angular order two agreed with dense inversion to `max|delta U|=2.12e-9 MeV`, but the determinant-ratio evaluator marked all 12 elements maximum-order truncated.  The grid and unphysical `-0.0114 MeV` deuteron energy remain useful negative WPCD evidence; the Padé status has been superseded by the next row. |
+| Stable Padé resummation | `output/validation/n2lo_3nf_pade_stability.json`; commit `5e003d6` | **Verified numerical result:** replacing the high-order ratio of determinants with a row-scaled denominator-coefficient solve leaves the Neumann coefficients byte-identical and does not change the fixed three-step, `1e-5` relative plus `1e-7` absolute convergence test.  At radial order two, all 12 amplitudes are genuinely converged at both `[14/14]` and `[24/24]`; `[14/14]` agrees with dense inversion to `max|delta U|=5.79e-15 MeV`, and orders 14 versus 24 differ by at most `1.34e-14 MeV`.  Cached `(4,3)`, `(6,4)`, `(8,6)`, and `(10,8)` reruns give `76/76` code-1 amplitudes at the unchanged default order 14. |
+| Reduced WPCD convergence diagnostic | `tools/3nf_oracle/summarize_factorized_solver_convergence.py`; `output/validation/n2lo_3nf_reduced_wpcd_convergence.json` | **Verified negative grid result:** with `J_2N_max=1`, transfer order two, and midpoint W1 integration, increasing `(Np,Nq)` through `(4,3)`, `(6,4)`, `(8,6)`, and `(10,8)` moves the deuteron energy from `-0.0114` to `-1.2586 MeV`, so the 2NF/WP basis is still far from converged.  Different q grids have different on-shell bin midpoints and their U values are not compared directly.  At identical `(4,3)`, radial order one versus two changes the 12 amplitudes by as much as `0.1335 MeV` and `67.4%` relative.  The archived JSON contains pre-`5e003d6` code-2 sidecars; cached post-fix reruns resolve those Padé codes without resolving the WPCD drift. |
 | Full Python discovery | `python3 -m unittest ...` including `tests/test_pade_honesty.py` | **Environment limitation:** collection fails because the local Python environment does not provide `pytest`; this is separate from the clean `unittest` regression set above. |
 
 At audit start the worktree also contained three unrelated untracked user files:
@@ -212,6 +213,16 @@ OpenMP threads took roughly 6.5 minutes; a later all-hit W1 load took about
 dense solve in about 0.31 seconds.  The large, strongly channel-dependent first
 build cost is an explicit scalability issue for higher-order realistic grids.
 
+The former code-2 Padé tails were traced to numerical evaluation rather than to
+the discrete Faddeev equation.  The old implementation formed two complex
+determinants and divided them; by order 24, the individual products overflowed,
+underflowed, or became `0/0` even though the rational approximant was finite.
+Commit `5e003d6` instead solves directly for the denominator coefficients,
+uses a rank-revealing fallback for defective tables, and evaluates numerator
+and denominator by Horner's rule.  No convergence tolerance was relaxed.  The
+same stored Neumann histories now produce stable final tails and dense-level
+agreement, while the separate WPCD and radial-quadrature failures remain.
+
 ## Open convention ledger
 
 No physical kernel or normalization should be changed until each item below has
@@ -254,11 +265,13 @@ discriminator.
    miss/store, and hit paths are bitwise equal at order two, with the disk hit
    making no operator calls.  Repeat the ladder on realistic production grids
    before fixing a default.
-7. **Partly resolved at diagnostic grid only:** the complete-force Padé and
-   dense paths agree below `2.2e-9 MeV` for 12 amplitudes, but all 12 Padé
-   elements remain honestly marked maximum-order truncated and the coarse-grid
-   deuteron binding is unphysical.  Demonstrate stable two-body binding, Padé
-   honesty, WP/rank/J convergence, symmetry/Hermiticity/permutation checks,
+7. **Padé numerical stability resolved at diagnostic grids; physics convergence
+   still open:** the unchanged default `[14/14]` sequence now gives `76/76`
+   genuinely converged amplitudes across the cached grid ladder.  On the radial-
+   order-two `(4,3)` case, it agrees with dense inversion below `5.8e-15 MeV`
+   and with `[24/24]` below `1.4e-14 MeV`.  The coarse-grid deuteron binding is
+   still unphysical and strongly grid dependent.  Demonstrate stable two-body
+   binding, WP/rank/J convergence, symmetry/Hermiticity/permutation checks,
    zero-LEC and 2NF-only limits, and a reproducible low-energy nd Ay comparison
    with uncertainty/convergence tables.
 
