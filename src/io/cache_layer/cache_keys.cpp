@@ -46,8 +46,8 @@ bool P123Key::operator==(const P123Key& o) const {
         && Nphi == o.Nphi && Nx == o.Nx
         && tensor_force == o.tensor_force
         && isospin_breaking_1S0 == o.isospin_breaking_1S0
-        && quantize_1e9(chebyshev_s) == quantize_1e9(o.chebyshev_s)
-        && quantize_1e9(chebyshev_t) == quantize_1e9(o.chebyshev_t);
+        && p_grid_hash == o.p_grid_hash
+        && q_grid_hash == o.q_grid_hash;
 }
 
 bool W1Key::operator==(const W1Key& o) const {
@@ -91,9 +91,9 @@ std::string canonical_json(const P123Key& k) {
        << ",\"Nq_WP\":" << k.Nq_WP
        << ",\"Nx\":" << k.Nx
        << ",\"P_3N\":" << k.P_3N
-       << ",\"chebyshev_s\":" << fmt_double_q(k.chebyshev_s)
-       << ",\"chebyshev_t\":" << fmt_double_q(k.chebyshev_t)
        << ",\"isospin_breaking_1S0\":" << (k.isospin_breaking_1S0 ? "true" : "false")
+       << ",\"p_grid_hash\":" << json_escape(k.p_grid_hash)
+       << ",\"q_grid_hash\":" << json_escape(k.q_grid_hash)
        << ",\"schema_version\":" << k.schema_version
        << ",\"tensor_force\":" << (k.tensor_force ? "true" : "false")
        << ",\"two_J_3N\":" << k.two_J_3N

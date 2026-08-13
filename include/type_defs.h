@@ -135,6 +135,12 @@ typedef struct run_params{
 	int			P123_omp_num_threads;
 	double 		chebyshev_t;
 	double 		chebyshev_s;
+	// Optional independent Chebyshev controls.  Zero means inherit the legacy
+	// common value above, preserving every existing input file and command line.
+	double      p_chebyshev_t;
+	double      p_chebyshev_s;
+	double      q_chebyshev_t;
+	double      q_chebyshev_s;
 	bool        parallel_run;
 	bool		P123_recovery;
 	bool 		tensor_force;

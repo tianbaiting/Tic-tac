@@ -94,6 +94,13 @@ public:
 		}
 	}
 
+	// Models may opt in only when their finite-order implementation obeys
+	// W(ar,ac; pr,qr,pc,qc) = W(ac,ar; pc,qc,pr,qr) exactly.  The W1 packet
+	// builder can then integrate one orientation and transpose the reverse
+	// channel block.  The conservative default protects diagnostic projectors
+	// whose finite quadrature is not Hermitian at a fixed order.
+	virtual bool W1_is_exactly_hermitian() const { return false; }
+
 	// [EN] LEC accessors used by W1_PW_cache to build a complete cache key
 	// (3NF audit B5: previously the cache key omitted c_1, c_3, c_4, allowing
 	// two runs with different 2NF (e.g. N2LOopt vs Idaho_N3LO) but identical

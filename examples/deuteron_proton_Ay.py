@@ -58,6 +58,10 @@ class SolverRunConfig:
     potential_model: str
     timeout_s: int
     calculate_p123: bool
+    p_chebyshev_s: float = 0.0
+    p_chebyshev_t: float = 0.0
+    q_chebyshev_s: float = 0.0
+    q_chebyshev_t: float = 0.0
 
 
 def _rel_to_cpp(path: Path, root: Path) -> str:
@@ -114,6 +118,10 @@ def write_solver_inputs(cfg: SolverRunConfig) -> tuple[Path, Path, Path, Path]:
                 f"Nq_per_WP={cfg.nq_per_wp}",
                 f"chebyshev_s={cfg.chebyshev_s}",
                 f"chebyshev_t={cfg.chebyshev_t}",
+                f"p_chebyshev_s={cfg.p_chebyshev_s}",
+                f"p_chebyshev_t={cfg.p_chebyshev_t}",
+                f"q_chebyshev_s={cfg.q_chebyshev_s}",
+                f"q_chebyshev_t={cfg.q_chebyshev_t}",
                 "p_grid_type=chebyshev",
                 "q_grid_type=chebyshev",
                 f"P123_omp_num_threads={cfg.threads}",
@@ -218,6 +226,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nq-per-wp", type=int, default=6)
     parser.add_argument("--chebyshev-s", type=float, default=150.0)
     parser.add_argument("--chebyshev-t", type=float, default=1.0)
+    parser.add_argument("--p-chebyshev-s", type=float, default=0.0)
+    parser.add_argument("--p-chebyshev-t", type=float, default=0.0)
+    parser.add_argument("--q-chebyshev-s", type=float, default=0.0)
+    parser.add_argument("--q-chebyshev-t", type=float, default=0.0)
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--potential-model", default="LO_internal")
     parser.add_argument("--timeout", type=int, default=1800, help="Solver timeout in seconds")
@@ -253,6 +265,10 @@ def main() -> int:
         potential_model=args.potential_model,
         timeout_s=args.timeout,
         calculate_p123=(not args.reuse_p123),
+        p_chebyshev_s=args.p_chebyshev_s,
+        p_chebyshev_t=args.p_chebyshev_t,
+        q_chebyshev_s=args.q_chebyshev_s,
+        q_chebyshev_t=args.q_chebyshev_t,
     )
 
     # Execute solver and summarize where outputs landed.

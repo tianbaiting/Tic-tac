@@ -31,6 +31,7 @@ public:
 		double p_r, double q_r, double p_c, double q_c,
 		const pw_3N_statespace& pw_states,
 		std::vector<double>& values) const override;
+	bool W1_is_exactly_hermitian() const override { return true; }
 
 	double lec_c1_gev() const override { return m_c1_gev; }
 	double lec_c3_gev() const override { return m_c3_gev; }

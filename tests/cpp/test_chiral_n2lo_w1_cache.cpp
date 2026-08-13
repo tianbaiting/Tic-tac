@@ -47,6 +47,10 @@ public:
 
 	bool enabled() const override { return m_inner.enabled(); }
 	std::string name() const override { return m_inner.name(); }
+	bool W1_is_exactly_hermitian() const override
+	{
+		return m_inner.W1_is_exactly_hermitian();
+	}
 
 	double W1_element(int alpha_r, int alpha_c,
 	                  double p_r, double q_r, double p_c, double q_c,
@@ -111,8 +115,8 @@ struct test_space
 run_params make_cache_parameters()
 {
 	run_params parameters{};
-	parameters.Np_WP = 1;
-	parameters.Nq_WP = 1;
+	parameters.Np_WP = 2;
+	parameters.Nq_WP = 2;
 	parameters.J_2N_max = 1;
 	parameters.two_J_3N_max = 1;
 	parameters.Np_per_WP_W1 = 2;
@@ -142,13 +146,29 @@ int main()
 	// A deliberately wide cell in each radial variable, expressed in the MeV
 	// convention consumed by W1_PW_cache.  The independent Python integration
 	// uses the equivalent [0.2,0.8] fm^-1 bounds.
-	const double p_boundaries[2] = {0.2 * hbarc, 0.8 * hbarc};
-	const double q_boundaries[2] = {0.2 * hbarc, 0.8 * hbarc};
+	const double p_boundaries[3] = {0.2 * hbarc, 0.8 * hbarc, 1.1 * hbarc};
+	const double q_boundaries[3] = {0.2 * hbarc, 0.8 * hbarc, 1.3 * hbarc};
 
 	// No cache layer has been initialized yet: this is the direct quadrature path.
 	W1_PW_cache cache_off;
-	cache_off.build(tnf, p_boundaries, 1, q_boundaries, 1, pw, parameters);
-	expect_true("cache-off evaluates W1", tnf.calls() > 0);
+	cache_off.build(tnf, p_boundaries, 2, q_boundaries, 2, pw, parameters);
+	const std::size_t radial_cells = 2 * 2 * 2 * 2;
+	const std::size_t quadrature_tuples = 2 * 2 * 2 * 2;
+	const std::size_t expected_hermitian_calls =
+		3 * (1 + radial_cells * quadrature_tuples);
+	expect_true("cache-off evaluates only Hermitian triangle",
+	            tnf.calls() == expected_hermitian_calls);
+	for (std::size_t iqr = 0; iqr < 2; ++iqr) {
+		for (std::size_t iqc = 0; iqc < 2; ++iqc) {
+			for (std::size_t ipr = 0; ipr < 2; ++ipr) {
+				for (std::size_t ipc = 0; ipc < 2; ++ipc) {
+					expect_true("cache-off reverse block is exact transpose",
+					            cache_off.get(0, 1, ipr, iqr, ipc, iqc)
+					            == cache_off.get(1, 0, ipc, iqc, ipr, iqr));
+				}
+			}
+		}
+	}
 
 	char root_template[] = "/tmp/tictac-w1-cache-test-XXXXXX";
 	char* cache_root = ::mkdtemp(root_template);
@@ -161,14 +181,15 @@ int main()
 	// First initialized build is a miss and writes every allowed channel block.
 	tnf.reset_calls();
 	W1_PW_cache cache_store;
-	cache_store.build(tnf, p_boundaries, 1, q_boundaries, 1, pw, parameters);
-	expect_true("cache miss evaluates W1", tnf.calls() > 0);
+	cache_store.build(tnf, p_boundaries, 2, q_boundaries, 2, pw, parameters);
+	expect_true("cache miss evaluates only Hermitian triangle",
+	            tnf.calls() == expected_hermitian_calls);
 	expect_true("cache miss stores W1 blocks", tictac::cache::summary().n_w1 > 0);
 
 	// The identical second build must be served entirely from the HDF5 cache.
 	tnf.reset_calls();
 	W1_PW_cache cache_hit;
-	cache_hit.build(tnf, p_boundaries, 1, q_boundaries, 1, pw, parameters);
+	cache_hit.build(tnf, p_boundaries, 2, q_boundaries, 2, pw, parameters);
 	expect_true("cache hit makes zero W1 calls", tnf.calls() == 0);
 
 	for (int alpha_r = 0; alpha_r < pw.Nalpha; ++alpha_r) {

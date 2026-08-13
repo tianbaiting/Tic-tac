@@ -5,7 +5,10 @@ namespace tictac::cache {
 // Bump when on-disk format or physics definition changes.
 // Version is part of the hash key, so old caches are preserved (not overwritten)
 // when this is bumped.
-constexpr int P123_SCHEMA_VERSION = 1;
+// Bumped 1 -> 2 on 2026-08-13: hash the realised p/q boundary arrays.  The v1
+// key could alias custom or independently tuned grids that shared Np/Nq and
+// the legacy common Chebyshev parameters.
+constexpr int P123_SCHEMA_VERSION = 2;
 // Bumped 3 → 4 on 2026-06-21 (3NF audit B5): added c_1, c_3, c_4 and grid
 // hashes to W1Key so caches cannot be wrongly reused across different
 // Hamiltonians / momentum grids. Old v3 caches are read as misses.
@@ -14,6 +17,10 @@ constexpr int P123_SCHEMA_VERSION = 1;
 // blocks have a cE coefficient larger by pi/2 and must remain cache misses.
 // Bumped 5 -> 6 on 2026-08-13: complete-reference angular order and all
 // dimensionful/dimensionless chiral kernel constants are now part of W1Key.
-constexpr int W1_SCHEMA_VERSION   = 6;
+// Bumped 6 -> 7 on 2026-08-13: exact-Hermitian factorized W1 blocks are now
+// constructed in one orientation and transpose-filled.  Invalidate older
+// independently accumulated reverse blocks so every cache pair has the same
+// exact symmetry contract.
+constexpr int W1_SCHEMA_VERSION   = 7;
 
 }  // namespace tictac::cache

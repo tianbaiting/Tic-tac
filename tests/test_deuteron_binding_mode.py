@@ -95,6 +95,68 @@ class TestDeuteronBindingMode(unittest.TestCase):
             self.assertIn("requires three_nucleon_force=none", combined_output)
             self.assertFalse((output_dir / "deuteron_binding.json").exists())
 
+    def test_independent_p_and_q_chebyshev_controls(self) -> None:
+        binding_flags = (
+            "solve_faddeev=false",
+            "calculate_and_store_P123=false",
+            "deuteron_binding_only=true",
+            "Nq_WP=4",
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+
+            def run_case(name: str, *grid_flags: str) -> tuple[Path, dict]:
+                output_dir = root / name
+                output_dir.mkdir()
+                result = self.run_solver(output_dir, *binding_flags, *grid_flags)
+                self.assertEqual(
+                    result.returncode, 0, result.stderr + result.stdout[-1000:]
+                )
+                payload = json.loads(
+                    (output_dir / "deuteron_binding.json").read_text(encoding="utf-8")
+                )
+                return output_dir, payload
+
+            common_dir, common = run_case("common", "chebyshev_s=100")
+            split_dir, split = run_case(
+                "split", "chebyshev_s=100", "p_chebyshev_s=300", "q_chebyshev_s=100"
+            )
+            inherited_dir, inherited = run_case(
+                "inherited", "chebyshev_s=300", "q_chebyshev_s=100"
+            )
+            q_changed_dir, q_changed = run_case(
+                "q_changed",
+                "chebyshev_s=100",
+                "p_chebyshev_s=300",
+                "q_chebyshev_s=300",
+            )
+
+            self.assertNotAlmostEqual(
+                common["energy_mev"], split["energy_mev"], places=12
+            )
+            self.assertAlmostEqual(
+                split["energy_mev"], inherited["energy_mev"], places=14
+            )
+            self.assertAlmostEqual(
+                split["energy_mev"], q_changed["energy_mev"], places=14
+            )
+
+            self.assertEqual(split["p_chebyshev_s"], 300)
+            self.assertEqual(split["q_chebyshev_s"], 100)
+            self.assertEqual(inherited["p_chebyshev_s"], 300)
+            self.assertEqual(inherited["q_chebyshev_s"], 100)
+
+            q_filename = "q_kinematics_Nq_4.txt"
+            self.assertEqual(
+                (split_dir / q_filename).read_bytes(),
+                (inherited_dir / q_filename).read_bytes(),
+            )
+            self.assertNotEqual(
+                (split_dir / q_filename).read_bytes(),
+                (q_changed_dir / q_filename).read_bytes(),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

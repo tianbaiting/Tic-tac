@@ -12,7 +12,11 @@ struct P123Key {
     int    Nphi, Nx;
     bool   tensor_force;
     bool   isospin_breaking_1S0;
-    double chebyshev_s, chebyshev_t;
+    // SHA-256 over the exact (N+1)-boundary double arrays.  P123 depends on
+    // the realised packet grids, not on how those grids were requested; these
+    // fields therefore cover Chebyshev, independently tuned p/q, and custom
+    // grids without cache aliases.
+    std::string p_grid_hash, q_grid_hash;
 
     bool operator==(const P123Key& o) const;
 };

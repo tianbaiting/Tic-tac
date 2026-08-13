@@ -309,7 +309,15 @@ private:
 			   << "  \"Np_per_WP\": " << run_parameters_.Np_per_WP << ",\n"
 			   << "  \"p_grid_type\": \"" << run_parameters_.p_grid_type << "\",\n"
 			   << "  \"chebyshev_t\": " << run_parameters_.chebyshev_t << ",\n"
-			   << "  \"chebyshev_s\": " << run_parameters_.chebyshev_s << "\n"
+			   << "  \"chebyshev_s\": " << run_parameters_.chebyshev_s << ",\n"
+			   << "  \"p_chebyshev_t\": "
+			   << (run_parameters_.p_chebyshev_t > 0.0 ? run_parameters_.p_chebyshev_t : run_parameters_.chebyshev_t) << ",\n"
+			   << "  \"p_chebyshev_s\": "
+			   << (run_parameters_.p_chebyshev_s > 0.0 ? run_parameters_.p_chebyshev_s : run_parameters_.chebyshev_s) << ",\n"
+			   << "  \"q_chebyshev_t\": "
+			   << (run_parameters_.q_chebyshev_t > 0.0 ? run_parameters_.q_chebyshev_t : run_parameters_.chebyshev_t) << ",\n"
+			   << "  \"q_chebyshev_s\": "
+			   << (run_parameters_.q_chebyshev_s > 0.0 ? run_parameters_.q_chebyshev_s : run_parameters_.chebyshev_s) << "\n"
 			   << "}\n";
 		output.close();
 		std::cout << " - Stored deuteron binding diagnostic at " << output_path << std::endl;

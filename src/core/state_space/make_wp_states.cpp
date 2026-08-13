@@ -106,8 +106,10 @@ void make_chebyshev_distribution(int N_WP,
 
 void make_p_bin_grid(fwp_statespace& fwp_states, run_params run_parameters){
 	if (run_parameters.p_grid_type=="chebyshev"){
-		double scale 			 = run_parameters.chebyshev_s;
-		double sparseness_degree = run_parameters.chebyshev_t;
+		double scale = run_parameters.p_chebyshev_s > 0.0
+			? run_parameters.p_chebyshev_s : run_parameters.chebyshev_s;
+		double sparseness_degree = run_parameters.p_chebyshev_t > 0.0
+			? run_parameters.p_chebyshev_t : run_parameters.chebyshev_t;
 		make_chebyshev_distribution(fwp_states.Np_WP, fwp_states.p_WP_array,
 									scale,
 									sparseness_degree);
@@ -121,8 +123,10 @@ void make_p_bin_grid(fwp_statespace& fwp_states, run_params run_parameters){
 }
 void make_q_bin_grid(fwp_statespace& fwp_states, run_params run_parameters){
 	if (run_parameters.q_grid_type=="chebyshev"){
-		double scale 			 = run_parameters.chebyshev_s;
-		double sparseness_degree = run_parameters.chebyshev_t;
+		double scale = run_parameters.q_chebyshev_s > 0.0
+			? run_parameters.q_chebyshev_s : run_parameters.chebyshev_s;
+		double sparseness_degree = run_parameters.q_chebyshev_t > 0.0
+			? run_parameters.q_chebyshev_t : run_parameters.chebyshev_t;
 		make_chebyshev_distribution(fwp_states.Nq_WP, fwp_states.q_WP_array,
 									scale,
 									sparseness_degree);

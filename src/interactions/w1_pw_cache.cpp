@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <omp.h>
+#include <stdexcept>
 
 #if TICTAC_USE_NEW_CACHE_LAYER
 #include "io/cache_layer/cache_layer.h"
@@ -235,21 +236,54 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
 #endif
         missing_blocks.push_back(blk);
     }
-    if (missing_blocks.empty()) return;
+	if (missing_blocks.empty()) return;
 
-    std::vector<std::pair<int, int>> missing_channels;
-    missing_channels.reserve(missing_blocks.size());
-    for (const std::size_t blk : missing_blocks) {
-        missing_channels.push_back(m_blocks[blk]);
-    }
+	// The complete factorized projector is exactly Hermitian at fixed transfer
+	// order.  Evaluate only one orientation of a missing channel pair; if its
+	// reverse slab was loaded from cache, evaluate neither.  Other models retain
+	// the complete ordered-block path.
+	std::vector<std::size_t> evaluation_blocks;
+	evaluation_blocks.reserve(missing_blocks.size());
+	if (tnf.W1_is_exactly_hermitian()) {
+		std::vector<unsigned char> is_missing(num_blocks, 0);
+		for (const std::size_t blk : missing_blocks) is_missing[blk] = 1;
+		for (const std::size_t blk : missing_blocks) {
+			const int a_r = m_blocks[blk].first;
+			const int a_c = m_blocks[blk].second;
+			const int reverse = m_block_index[
+				static_cast<std::size_t>(a_c) * m_Nalpha
+				+ static_cast<std::size_t>(a_r)];
+			if (reverse < 0 || static_cast<std::size_t>(reverse) == blk) {
+				evaluation_blocks.push_back(blk);
+			} else if (is_missing[static_cast<std::size_t>(reverse)] != 0
+			           && blk < static_cast<std::size_t>(reverse)) {
+				evaluation_blocks.push_back(blk);
+			}
+		}
+		if (evaluation_blocks.size() < missing_blocks.size()) {
+			std::fprintf(stderr,
+				"[3NF W1] exact Hermiticity: evaluating %zu of %zu missing "
+				"channel blocks and transpose-filling %zu.\n",
+				evaluation_blocks.size(), missing_blocks.size(),
+				missing_blocks.size() - evaluation_blocks.size());
+		}
+	} else {
+		evaluation_blocks = missing_blocks;
+	}
+
+	std::vector<std::pair<int, int>> evaluation_channels;
+	evaluation_channels.reserve(evaluation_blocks.size());
+	for (const std::size_t blk : evaluation_blocks) {
+		evaluation_channels.push_back(m_blocks[blk]);
+	}
 
     // Populate expensive momentum-independent angular tables in parallel.
     // Without this warm-up, every momentum-batch worker begins with the same
     // first channel and waits on the single-flight table builder, serializing
     // initialization even though distinct channel tables are independent.
     #pragma omp parallel for schedule(dynamic)
-    for (std::size_t index = 0; index < missing_channels.size(); ++index) {
-        const auto channel = missing_channels[index];
+	for (std::size_t index = 0; index < evaluation_channels.size(); ++index) {
+		const auto channel = evaluation_channels[index];
         static_cast<void>(tnf.W1_element(
             channel.first, channel.second,
             p_nodes_MeV.front() * inv_hbarc,
@@ -269,7 +303,7 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
         const std::size_t iqc = remaining % m_Nq;
         const std::size_t iqr = remaining / m_Nq;
 
-        std::vector<double> accum(missing_blocks.size(), 0.0);
+		std::vector<double> accum(evaluation_blocks.size(), 0.0);
         std::vector<double> w1_values;
         for (int kqr = 0; kqr < Nq_quad; ++kqr) {
             const double q_r_MeV = q_nodes_MeV[iqr * Nq_quad + kqr];
@@ -288,8 +322,8 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
                         const double w_pc    = p_w_MeV   [ipc * Np_quad + kpc];
                         const double p_c_fm  = p_c_MeV * inv_hbarc;
 
-                        tnf.W1_elements_for_channels(
-                            missing_channels, p_r_fm, q_r_fm, p_c_fm, q_c_fm,
+						tnf.W1_elements_for_channels(
+							evaluation_channels, p_r_fm, q_r_fm, p_c_fm, q_c_fm,
                             pw_states, w1_values);
                         const double radial_weight =
                             (p_r_MeV * q_r_MeV * p_c_MeV * q_c_MeV)
@@ -304,11 +338,43 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
 
         const double bin_norm = p_inv_sqrtD[ipr] * q_inv_sqrtD[iqr]
                               * p_inv_sqrtD[ipc] * q_inv_sqrtD[iqc];
-        for (std::size_t index = 0; index < missing_blocks.size(); ++index) {
-            m_data[missing_blocks[index] * per_block + cell]
-                = accum[index] * bin_norm * inv_hbarc5;
-        }
-    }
+		for (std::size_t index = 0; index < evaluation_blocks.size(); ++index) {
+			m_data[evaluation_blocks[index] * per_block + cell]
+				= accum[index] * bin_norm * inv_hbarc5;
+		}
+	}
+
+	if (tnf.W1_is_exactly_hermitian()) {
+		std::vector<unsigned char> was_evaluated(num_blocks, 0);
+		for (const std::size_t blk : evaluation_blocks) was_evaluated[blk] = 1;
+		for (const std::size_t blk : missing_blocks) {
+			if (was_evaluated[blk] != 0) continue;
+			const int a_r = m_blocks[blk].first;
+			const int a_c = m_blocks[blk].second;
+			const int reverse = m_block_index[
+				static_cast<std::size_t>(a_c) * m_Nalpha
+				+ static_cast<std::size_t>(a_r)];
+			if (reverse < 0) {
+				throw std::runtime_error(
+					"exact-Hermitian W1 channel has no reverse block");
+			}
+			double* target = &m_data[blk * per_block];
+			const double* source = &m_data[static_cast<std::size_t>(reverse) * per_block];
+			for (std::size_t iqr = 0; iqr < m_Nq; ++iqr) {
+				for (std::size_t iqc = 0; iqc < m_Nq; ++iqc) {
+					for (std::size_t ipr = 0; ipr < m_Np; ++ipr) {
+						for (std::size_t ipc = 0; ipc < m_Np; ++ipc) {
+							const std::size_t target_cell =
+								((iqr * m_Nq + iqc) * m_Np + ipr) * m_Np + ipc;
+							const std::size_t source_cell =
+								((iqc * m_Nq + iqr) * m_Np + ipc) * m_Np + ipr;
+							target[target_cell] = source[source_cell];
+						}
+					}
+				}
+			}
+		}
+	}
 
 #if TICTAC_USE_NEW_CACHE_LAYER
     for (const std::size_t blk : missing_blocks) {

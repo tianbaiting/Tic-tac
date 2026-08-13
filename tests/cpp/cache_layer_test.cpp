@@ -28,13 +28,13 @@ static int failures = 0;
 
 static P123Key make_p123_key() {
     P123Key k{};
-    k.schema_version = 1;
+    k.schema_version = 2;
     k.Np_WP = 30; k.Nq_WP = 30;
     k.J_2N_max = 2; k.two_J_3N = 1; k.P_3N = 1;
     k.Nphi = 24; k.Nx = 24;
     k.tensor_force = true;
     k.isospin_breaking_1S0 = false;
-    k.chebyshev_s = 1.5; k.chebyshev_t = 1.0;
+    k.p_grid_hash = "p-grid-a"; k.q_grid_hash = "q-grid-a";
     return k;
 }
 
@@ -79,9 +79,15 @@ void test_p123_canonical_json_keys_sorted() {
     auto pos_Np = j.find("\"Np_WP\"");
     auto pos_Nq = j.find("\"Nq_WP\"");
     auto pos_P3 = j.find("\"P_3N\"");
+    auto pos_p_grid = j.find("\"p_grid_hash\"");
+    auto pos_q_grid = j.find("\"q_grid_hash\"");
+    auto pos_schema = j.find("\"schema_version\"");
     EXPECT(pos_J2 < pos_Np);
     EXPECT(pos_Np < pos_Nq);
     EXPECT(pos_Nq < pos_P3);
+    EXPECT(pos_P3 < pos_p_grid);
+    EXPECT(pos_p_grid < pos_q_grid);
+    EXPECT(pos_q_grid < pos_schema);
 }
 
 void test_p123_hash_stable() {
@@ -97,6 +103,19 @@ void test_p123_hash_changes_on_field_change() {
     auto k2 = make_p123_key();
     k2.Np_WP = 50;
     EXPECT(tictac::cache::hash_full(k1) != tictac::cache::hash_full(k2));
+}
+
+void test_p123_grid_hashes_change_identity() {
+    auto base = make_p123_key();
+    auto changed_p = base;
+    changed_p.p_grid_hash = "p-grid-b";
+    EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(changed_p));
+    EXPECT(!(base == changed_p));
+
+    auto changed_q = base;
+    changed_q.q_grid_hash = "q-grid-b";
+    EXPECT(tictac::cache::hash_full(base) != tictac::cache::hash_full(changed_q));
+    EXPECT(!(base == changed_q));
 }
 
 void test_w1_double_quantization() {
@@ -394,6 +413,7 @@ int main() {
     test_p123_canonical_json_keys_sorted();
     test_p123_hash_stable();
     test_p123_hash_changes_on_field_change();
+    test_p123_grid_hashes_change_identity();
     test_w1_double_quantization();
     test_w1_double_above_quantum_changes_hash();
     test_w1_a_indices_change_hash();

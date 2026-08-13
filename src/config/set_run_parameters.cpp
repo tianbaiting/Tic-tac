@@ -83,6 +83,10 @@ std::string create_input_printout_string(run_params run_parameters){
 	if(run_parameters.parallel_run==true){
 	output_string << "Channel index:                   " << type_to_string(run_parameters.channel_idx) 		  	  		<< "\n";
 	}
+	output_string << "p chebyshev sparseness:          " << type_to_string(run_parameters.p_chebyshev_t > 0.0 ? run_parameters.p_chebyshev_t : run_parameters.chebyshev_t) << "\n";
+	output_string << "p chebyshev scale:               " << type_to_string(run_parameters.p_chebyshev_s > 0.0 ? run_parameters.p_chebyshev_s : run_parameters.chebyshev_s) << "\n";
+	output_string << "q chebyshev sparseness:          " << type_to_string(run_parameters.q_chebyshev_t > 0.0 ? run_parameters.q_chebyshev_t : run_parameters.chebyshev_t) << "\n";
+	output_string << "q chebyshev scale:               " << type_to_string(run_parameters.q_chebyshev_s > 0.0 ? run_parameters.q_chebyshev_s : run_parameters.chebyshev_s) << "\n";
 	output_string << "Deuteron binding only:           " << type_to_string(run_parameters.deuteron_binding_only) << "\n";
 	return output_string.str();
 }
@@ -114,6 +118,18 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 	}
 	else if (option == "chebyshev_s"){
 		run_parameters.chebyshev_s = std::stod(input);
+	}
+	else if (option == "p_chebyshev_t"){
+		run_parameters.p_chebyshev_t = std::stod(input);
+	}
+	else if (option == "p_chebyshev_s"){
+		run_parameters.p_chebyshev_s = std::stod(input);
+	}
+	else if (option == "q_chebyshev_t"){
+		run_parameters.q_chebyshev_t = std::stod(input);
+	}
+	else if (option == "q_chebyshev_s"){
+		run_parameters.q_chebyshev_s = std::stod(input);
 	}
 	else if (option == "Np_per_WP"){
 		run_parameters.Np_per_WP = std::stoi(input);
@@ -423,6 +439,14 @@ void show_usage(){
 			  << seperationLine
 			  << std::endl;
 	
+	std::cout << "p_chebyshev_s/t,          Optional independent Chebyshev scale and sparseness for\n"
+			  << "q_chebyshev_s/t:          the p and q grids. Zero inherits chebyshev_s/t, so old\n"
+			  << "                          inputs are unchanged. Positive values override only the\n"
+			  << "                          named grid.\n"
+			  << "Example:                  p_chebyshev_s=300 q_chebyshev_s=100\n"
+			  << seperationLine
+			  << std::endl;
+
 	std::cout << "Np_per_WP:                Sets number of quadrature points in each p-momentum wave\n"
 			  << "                          packet. Used in NN potential matrix construction\n"
 			  << "Example:                  Np_per_WP=8 -> 8 Gauss-Legendre points in each wave-packet\n"
@@ -715,6 +739,10 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.Nx 			 	        = 48;
 	run_parameters.chebyshev_t		        = 1;
 	run_parameters.chebyshev_s		        = 100;
+	run_parameters.p_chebyshev_t          = 0;
+	run_parameters.p_chebyshev_s          = 0;
+	run_parameters.q_chebyshev_t          = 0;
+	run_parameters.q_chebyshev_s          = 0;
 	run_parameters.Np_per_WP	 	        = 8;
 	run_parameters.Nq_per_WP	 	        = 8;
 	run_parameters.Np_per_WP_W1             = 2;  // safer baseline; production must check N=2 vs N=4
@@ -828,6 +856,14 @@ void set_run_parameters(int& argc, char* argv[], run_params& run_parameters){
 	}
 	if ( run_parameters.two_J_3N_max%2==0 ||  run_parameters.two_J_3N_max<=0 ){
 		raise_error("Cannot have even two_J_3N_max!");
+	}
+
+	if (run_parameters.chebyshev_s <= 0.0 || run_parameters.chebyshev_t <= 0.0) {
+		raise_error("chebyshev_s and chebyshev_t must be positive");
+	}
+	if (run_parameters.p_chebyshev_s < 0.0 || run_parameters.p_chebyshev_t < 0.0
+		|| run_parameters.q_chebyshev_s < 0.0 || run_parameters.q_chebyshev_t < 0.0) {
+		raise_error("independent p/q Chebyshev parameters must be zero (inherit) or positive");
 	}
 
 	if (run_parameters.deuteron_binding_only) {

@@ -25,7 +25,6 @@ Options:
 import argparse
 import hashlib
 import json
-import math
 import os
 import re
 import shutil
@@ -57,28 +56,16 @@ LEGACY_DEFAULTS = dict(
     Nx=24,
     tensor_force=True,
     isospin_breaking_1S0=False,
-    chebyshev_s=1.5,
-    chebyshev_t=1.0,
 )
 
-P123_SCHEMA_VERSION = 1
-WRITER_VERSION = "legacy_imported_v1"
+P123_SCHEMA_VERSION = 2
+WRITER_VERSION = "legacy_imported_v2_grid_hash"
 
 
 # ---------------------------------------------------------------------------
 # Canonical JSON — must mirror cache_keys.cpp: canonical_json(const P123Key&)
 # Keys are in lexicographic order (same as sorted()).
 # ---------------------------------------------------------------------------
-def _quantize_1e9(x: float) -> float:
-    """Quantize to 1e-9 precision, matching C++ floor(x*1e9+0.5)/1e9."""
-    return math.floor(x * 1e9 + 0.5) / 1e9
-
-
-def _fmt_double_q(x: float) -> str:
-    """%.9f formatting of quantized value, matching C++ fmt_double_q."""
-    return "%.9f" % _quantize_1e9(x)
-
-
 def canonical_p123_json(
     schema_version: int,
     Np_WP: int,
@@ -90,18 +77,17 @@ def canonical_p123_json(
     Nx: int,
     tensor_force: bool,
     isospin_breaking_1S0: bool,
-    chebyshev_s: float,
-    chebyshev_t: float,
+    p_grid_hash: str,
+    q_grid_hash: str,
 ) -> str:
     """
     Produce canonical JSON matching C++ canonical_json(P123Key).
-    Keys are sorted lexicographically; doubles use %.9f after 1e-9 quantization;
-    booleans are lowercase true/false.
+    Keys are sorted lexicographically and booleans are lowercase true/false.
     """
     # Manually assemble in lex-sorted key order (same as C++ explicit order):
     # J_2N_max, Nphi, Np_WP, Nq_WP, Nx, P_3N,
-    # chebyshev_s, chebyshev_t, isospin_breaking_1S0,
-    # schema_version, tensor_force, two_J_3N
+    # isospin_breaking_1S0, p_grid_hash, q_grid_hash, schema_version,
+    # tensor_force, two_J_3N
     pairs = [
         ("J_2N_max", str(J_2N_max)),
         ("Nphi", str(Nphi)),
@@ -109,9 +95,9 @@ def canonical_p123_json(
         ("Nq_WP", str(Nq_WP)),
         ("Nx", str(Nx)),
         ("P_3N", str(P_3N)),
-        ("chebyshev_s", _fmt_double_q(chebyshev_s)),
-        ("chebyshev_t", _fmt_double_q(chebyshev_t)),
         ("isospin_breaking_1S0", "true" if isospin_breaking_1S0 else "false"),
+        ("p_grid_hash", json.dumps(p_grid_hash, separators=(",", ":"))),
+        ("q_grid_hash", json.dumps(q_grid_hash, separators=(",", ":"))),
         ("schema_version", str(schema_version)),
         ("tensor_force", "true" if tensor_force else "false"),
         ("two_J_3N", str(two_J_3N)),
@@ -122,6 +108,19 @@ def canonical_p123_json(
 
 def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def legacy_grid_hash(path: str, dataset_name: str, expected_size: int) -> str:
+    """Hash boundary doubles exactly as the C++ cache key does."""
+    with h5py.File(path, "r") as legacy_file:
+        records = legacy_file[dataset_name][:]
+    values = records["mesh point"]
+    if values.size != expected_size:
+        raise ValueError(
+            f"{dataset_name!r} has {values.size} values; expected {expected_size}"
+        )
+    native_doubles = values.astype("=f8", copy=False)
+    return hashlib.sha256(native_doubles.tobytes(order="C")).hexdigest()
 
 
 def hash_short(full_hex: str) -> str:
@@ -219,8 +218,11 @@ def migrate_file(
     Nx = LEGACY_DEFAULTS["Nx"]
     tensor_force = LEGACY_DEFAULTS["tensor_force"]
     isospin_breaking_1S0 = LEGACY_DEFAULTS["isospin_breaking_1S0"]
-    chebyshev_s = LEGACY_DEFAULTS["chebyshev_s"]
-    chebyshev_t = LEGACY_DEFAULTS["chebyshev_t"]
+    try:
+        p_grid_hash = legacy_grid_hash(src_path, "p boundaries", Np + 1)
+        q_grid_hash = legacy_grid_hash(src_path, "q boundaries", Nq + 1)
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        return f"  SKIP  {src_path}  (cannot hash legacy grids: {error})"
 
     key_json = canonical_p123_json(
         schema_version=P123_SCHEMA_VERSION,
@@ -233,8 +235,8 @@ def migrate_file(
         Nx=Nx,
         tensor_force=tensor_force,
         isospin_breaking_1S0=isospin_breaking_1S0,
-        chebyshev_s=chebyshev_s,
-        chebyshev_t=chebyshev_t,
+        p_grid_hash=p_grid_hash,
+        q_grid_hash=q_grid_hash,
     )
 
     key_hash_full = sha256_hex(key_json)

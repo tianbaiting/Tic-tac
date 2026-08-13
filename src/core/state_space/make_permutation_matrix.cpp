@@ -1385,7 +1385,9 @@ void calculate_permutation_matrices_for_all_3N_channels(double** P123_sparse_val
 static tictac::cache::P123Key build_p123_cache_key(
 	const run_params& run_parameters,
 	int Np_WP, int Nq_WP, int J_2N_max,
-	int two_J_3N, int P_3N)
+	int two_J_3N, int P_3N,
+	const double* p_array_WP_bounds,
+	const double* q_array_WP_bounds)
 {
 	tictac::cache::P123Key k{};
 	k.schema_version       = tictac::cache::P123_SCHEMA_VERSION;
@@ -1398,8 +1400,12 @@ static tictac::cache::P123Key build_p123_cache_key(
 	k.Nx                   = run_parameters.Nx;
 	k.tensor_force         = run_parameters.tensor_force;
 	k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
-	k.chebyshev_s          = run_parameters.chebyshev_s;
-	k.chebyshev_t          = run_parameters.chebyshev_t;
+	k.p_grid_hash          = tictac::cache::hash_full_raw(
+		reinterpret_cast<const unsigned char*>(p_array_WP_bounds),
+		static_cast<std::size_t>(Np_WP + 1) * sizeof(double));
+	k.q_grid_hash          = tictac::cache::hash_full_raw(
+		reinterpret_cast<const unsigned char*>(q_array_WP_bounds),
+		static_cast<std::size_t>(Nq_WP + 1) * sizeof(double));
 	return k;
 }
 #endif
@@ -1434,7 +1440,8 @@ void fill_P123_arrays(double** P123_sparse_val_array,
 
 #if TICTAC_USE_NEW_CACHE_LAYER
 	tictac::cache::P123Key cache_key =
-		build_p123_cache_key(run_parameters, Np_WP, Nq_WP, J_2N_max, two_J_3N, P_3N);
+		build_p123_cache_key(run_parameters, Np_WP, Nq_WP, J_2N_max,
+			two_J_3N, P_3N, p_array_WP_bounds, q_array_WP_bounds);
 
 	{
 		tictac::cache::P123Arrays out{};
