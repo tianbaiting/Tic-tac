@@ -749,45 +749,33 @@ complex scalar_kernel_value(
 	return propagators;
 }
 
-complex uncoupled_orbital_kernel(
-	const std::array<int, 8>& angular,
+struct reduced_orbital_kernel {
+	int lbar_min;
+	std::vector<complex> integrals;
+};
+
+reduced_orbital_kernel build_reduced_orbital_kernel(
+	const std::array<int, 4>& orbital,
 	double p, double q, double pp, double qp,
 	scalar_kernel_kind kind, int order, double pion_mass)
 {
-	const int bra_l_pair = angular[0];
-	const int bra_m_pair = angular[1];
-	const int bra_lambda = angular[2];
-	const int bra_m_lambda = angular[3];
-	const int ket_l_pair = angular[4];
-	const int ket_m_pair = angular[5];
-	const int ket_lambda = angular[6];
-	const int ket_m_lambda = angular[7];
-	if (ket_m_pair - bra_m_pair != bra_m_lambda - ket_m_lambda) return 0.0;
+	const int bra_l_pair = orbital[0];
+	const int bra_lambda = orbital[1];
+	const int ket_l_pair = orbital[2];
+	const int ket_lambda = orbital[3];
 	const int lbar_min = std::max(std::abs(bra_l_pair - ket_l_pair),
 	                              std::abs(bra_lambda - ket_lambda));
 	const int lbar_max = std::min(bra_l_pair + ket_l_pair,
 	                              bra_lambda + ket_lambda);
-	if (lbar_min > lbar_max) return 0.0;
+	reduced_orbital_kernel result{lbar_min, {}};
+	if (lbar_min > lbar_max) return result;
+	result.integrals.reserve(static_cast<std::size_t>(lbar_max - lbar_min + 1));
 	const auto grid = get_quadrature_grid(order);
 	const double dp_lo = std::abs(pp - p);
 	const double dp_hi = pp + p;
 	const double dq_lo = std::abs(qp - q);
 	const double dq_hi = qp + q;
-	const double phase = ((ket_m_pair + bra_m_lambda) % 2 == 0) ? 1.0 : -1.0;
-	const double prefactor = phase * 2.0 * std::pow(2.0 * pi_value, 4)
-	                       / (p * pp * q * qp);
-	complex total{0.0, 0.0};
 	for (int lbar = lbar_min; lbar <= lbar_max; ++lbar) {
-		const double pair_cg = clebsch_gordan(
-			2 * bra_l_pair, 2 * ket_l_pair, 2 * lbar,
-			-2 * bra_m_pair, 2 * ket_m_pair,
-			2 * (-bra_m_pair + ket_m_pair));
-		const double spectator_cg = clebsch_gordan(
-			2 * bra_lambda, 2 * ket_lambda, 2 * lbar,
-			-2 * bra_m_lambda, 2 * ket_m_lambda,
-			2 * (-bra_m_lambda + ket_m_lambda));
-		const double angular_coefficient = pair_cg * spectator_cg / (2.0 * lbar + 1.0);
-		if (angular_coefficient == 0.0) continue;
 		complex integral{0.0, 0.0};
 		for (int idp = 0; idp < order; ++idp) {
 			const double delta_p = 0.5 * ((dp_hi - dp_lo) * grid->nodes[idp] + dp_hi + dp_lo);
@@ -826,9 +814,9 @@ complex uncoupled_orbital_kernel(
 					* pair_bipolar * spectator_bipolar * relative_integral;
 			}
 		}
-		total += angular_coefficient * integral;
+		result.integrals.push_back(integral);
 	}
-	return prefactor * total;
+	return result;
 }
 
 struct orbital_cache_key {
@@ -843,11 +831,72 @@ struct orbital_cache_key {
 
 using orbital_cache = std::map<orbital_cache_key, complex>;
 
+struct reduced_orbital_cache_key {
+	std::array<int, 4> orbital;
+	scalar_kernel_kind kind;
+
+	bool operator<(const reduced_orbital_cache_key& other) const
+	{
+		return std::tie(orbital, kind) < std::tie(other.orbital, other.kind);
+	}
+};
+
+using reduced_orbital_cache =
+	std::map<reduced_orbital_cache_key, reduced_orbital_kernel>;
+
+complex uncoupled_orbital_kernel(
+	const std::array<int, 8>& angular,
+	double p, double q, double pp, double qp,
+	scalar_kernel_kind kind, int order, double pion_mass,
+	reduced_orbital_cache& cache)
+{
+	const int bra_l_pair = angular[0];
+	const int bra_m_pair = angular[1];
+	const int bra_lambda = angular[2];
+	const int bra_m_lambda = angular[3];
+	const int ket_l_pair = angular[4];
+	const int ket_m_pair = angular[5];
+	const int ket_lambda = angular[6];
+	const int ket_m_lambda = angular[7];
+	if (ket_m_pair - bra_m_pair != bra_m_lambda - ket_m_lambda) return 0.0;
+	const reduced_orbital_cache_key key{{
+		bra_l_pair, bra_lambda, ket_l_pair, ket_lambda
+	}, kind};
+	auto found = cache.find(key);
+	if (found == cache.end()) {
+		found = cache.emplace(
+			key,
+			build_reduced_orbital_kernel(
+				key.orbital, p, q, pp, qp, kind, order, pion_mass)
+		).first;
+	}
+	const reduced_orbital_kernel& reduced = found->second;
+	complex total{0.0, 0.0};
+	for (std::size_t index = 0; index < reduced.integrals.size(); ++index) {
+		const int lbar = reduced.lbar_min + static_cast<int>(index);
+		const double pair_cg = clebsch_gordan(
+			2 * bra_l_pair, 2 * ket_l_pair, 2 * lbar,
+			-2 * bra_m_pair, 2 * ket_m_pair,
+			2 * (-bra_m_pair + ket_m_pair));
+		const double spectator_cg = clebsch_gordan(
+			2 * bra_lambda, 2 * ket_lambda, 2 * lbar,
+			-2 * bra_m_lambda, 2 * ket_m_lambda,
+			2 * (-bra_m_lambda + ket_m_lambda));
+		const double angular_coefficient = pair_cg * spectator_cg / (2.0 * lbar + 1.0);
+		total += angular_coefficient * reduced.integrals[index];
+	}
+	const double phase = ((ket_m_pair + bra_m_lambda) % 2 == 0) ? 1.0 : -1.0;
+	const double prefactor = phase * 2.0 * std::pow(2.0 * pi_value, 4)
+	                       / (p * pp * q * qp);
+	return prefactor * total;
+}
+
 complex project_cartesian_algebra(
 	const ls_channel& bra, const ls_channel& ket,
 	double p, double q, double pp, double qp,
 	algebra_kind algebra, scalar_kernel_kind kernel,
-	int order, double pion_mass, orbital_cache& cache)
+	int order, double pion_mass, orbital_cache& cache,
+	reduced_orbital_cache& reduced_cache)
 {
 	const auto weights = get_weight_table(bra, ket, algebra);
 	const std::array<double, 4> radial{{pp, qp, p, q}};
@@ -864,7 +913,8 @@ complex project_cartesian_algebra(
 			found = cache.emplace(
 				cache_key,
 				uncoupled_orbital_kernel(
-					key.angular, p, q, pp, qp, kernel, order, pion_mass)
+					key.angular, p, q, pp, qp, kernel, order, pion_mass,
+					reduced_cache)
 			).first;
 		}
 		result += item.second * radial_factor * found->second;
@@ -883,7 +933,7 @@ std::array<complex, 5> project_ls_components(
 	const ls_channel& bra, const ls_channel& ket,
 	double p, double q, double pp, double qp,
 	double c_D, double c_E, double c1_fm, double c3_fm, double c4_fm,
-	int order, orbital_cache& cache)
+	int order, orbital_cache& cache, reduced_orbital_cache& reduced_cache)
 {
 	std::array<complex, 5> result{};
 	result.fill(0.0);
@@ -899,20 +949,20 @@ std::array<complex, 5> project_ls_components(
 		if (c1_fm != 0.0) {
 			const complex spin = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::q23,
-				scalar_kernel_kind::two_pion, order, pion_mass, cache);
+				scalar_kernel_kind::two_pion, order, pion_mass, cache, reduced_cache);
 			result[0] = common * (-4.0 * c1_fm * pion_mass * pion_mass) * iso23 * spin;
 		}
 		if (c3_fm != 0.0) {
 			const complex spin = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::q23,
-				scalar_kernel_kind::c3, order, pion_mass, cache);
+				scalar_kernel_kind::c3, order, pion_mass, cache, reduced_cache);
 			result[1] = common * (2.0 * c3_fm) * iso23 * spin;
 		}
 	}
 	if (c4_fm != 0.0 && std::abs(iso_cross) > 1.0e-15) {
 		const complex spin = project_cartesian_algebra(
 			bra, ket, p, q, pp, qp, algebra_kind::c4,
-			scalar_kernel_kind::two_pion, order, pion_mass, cache);
+			scalar_kernel_kind::two_pion, order, pion_mass, cache, reduced_cache);
 		result[2] = common * c4_fm * iso_cross * spin;
 	}
 	if (c_D != 0.0) {
@@ -921,12 +971,12 @@ std::array<complex, 5> project_ls_components(
 		if (std::abs(iso12) > 1.0e-15) {
 			spin12 = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::d12,
-				scalar_kernel_kind::one_pion, order, pion_mass, cache);
+				scalar_kernel_kind::one_pion, order, pion_mass, cache, reduced_cache);
 		}
 		if (std::abs(iso13) > 1.0e-15) {
 			spin13 = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::d13,
-				scalar_kernel_kind::one_pion, order, pion_mass, cache);
+				scalar_kernel_kind::one_pion, order, pion_mass, cache, reduced_cache);
 		}
 		const double d_lec = c_D / (f_pi * f_pi * lambda_chi);
 		result[3] = -gA * d_lec / (8.0 * f_pi * f_pi)
@@ -935,7 +985,7 @@ std::array<complex, 5> project_ls_components(
 	if (c_E != 0.0 && std::abs(iso23) > 1.0e-15) {
 		const complex scalar = project_cartesian_algebra(
 			bra, ket, p, q, pp, qp, algebra_kind::identity,
-			scalar_kernel_kind::contact, order, pion_mass, cache);
+			scalar_kernel_kind::contact, order, pion_mass, cache, reduced_cache);
 		const double e_lec = c_E / (std::pow(f_pi, 4) * lambda_chi);
 		result[4] = e_lec * iso23 * scalar;
 	}
@@ -983,6 +1033,7 @@ double chiral_N2LO_3NF_factorized::W1_element(
 	std::array<complex, 5> totals{};
 	totals.fill(0.0);
 	orbital_cache cache;
+	reduced_orbital_cache reduced_cache;
 	const double c1_fm = m_c1_gev * hbarc / 1000.0;
 	const double c3_fm = m_c3_gev * hbarc / 1000.0;
 	const double c4_fm = m_c4_gev * hbarc / 1000.0;
@@ -990,7 +1041,8 @@ double chiral_N2LO_3NF_factorized::W1_element(
 		for (const auto& ket_ls : *ket_expansion) {
 			const auto components = project_ls_components(
 				bra_ls.first, ket_ls.first, p_c, q_c, p_r, q_r,
-				m_c_D, m_c_E, c1_fm, c3_fm, c4_fm, m_transfer_order, cache);
+				m_c_D, m_c_E, c1_fm, c3_fm, c4_fm, m_transfer_order,
+				cache, reduced_cache);
 			const double coefficient = bra_ls.second * ket_ls.second;
 			for (int component = 0; component < 5; ++component) {
 				totals[component] += coefficient * components[component];
