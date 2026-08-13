@@ -127,6 +127,30 @@
         "interpretation": "The one- and 16-thread points improve slightly while the 96-thread point regresses within observed run-to-run variation; no material speedup is claimed.",
         "U_and_convergence_files_bitwise_identical": true
       },
+      "analytic_cE_contact": {
+        "status": "accepted exact reduction",
+        "W1_cache_schema": 8,
+        "selection_rule": "alpha_r=alpha_c with pair_l=spectator_l=0",
+        "closed_form": "tau23*cE*regulator_bra*regulator_ket/(4*pi^4*fpi^4*Lambda_chi)",
+        "high_order_machine_table_rows_checked": 26,
+        "max_absolute_difference_from_factorized_python_oracle_fm5": 4.1806835771e-16,
+        "generic_order2_artifact_example": {
+          "description": "Raw constant-kernel scalar PWD for a spectator-D LS channel that is exactly zero",
+          "generic_transfer_order2": -10.65808519346,
+          "generic_transfer_order4_absolute_value_below": 1.0e-10,
+          "analytic": 0.0
+        },
+        "seconds_by_threads": {"1": 126.0, "16": 16.9, "96": 13.0},
+        "max_absolute_low_order_U_change_mev": 0.0043557725626,
+        "max_relative_low_order_U_change": 0.03829752547,
+        "U_change_interpretation": "The old transfer-order-two run contained nonzero contact leakage in higher orbital channels. The change is an intentional low-order quadrature correction, not a physical Ay result.",
+        "U_files_bitwise_identical_across_1_16_96_threads": true
+      },
+      "cD_cost_probe_before_analytic_x_reduction": {
+        "full_cD_seconds": {"1": 126.0, "96": 13.0},
+        "cD_zero_seconds": {"1": 113.4, "96": 12.5},
+        "interpretation": "At transfer order two the cD path contributes about 10 percent of single-thread W1 wall time and is not the dominant remaining cost."
+      },
       "verification": {
         "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
         "radial_order_two_u_and_convergence_files": "byte-identical across channel batching",

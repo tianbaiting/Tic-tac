@@ -21,6 +21,8 @@ constexpr int P123_SCHEMA_VERSION = 2;
 // constructed in one orientation and transpose-filled.  Invalidate older
 // independently accumulated reverse blocks so every cache pair has the same
 // exact symmetry contract.
-constexpr int W1_SCHEMA_VERSION   = 7;
+// Bumped 7 -> 8 on 2026-08-13: the factorized cE contact is evaluated by its
+// exact diagonal closed form rather than by the generic transfer quadrature.
+constexpr int W1_SCHEMA_VERSION   = 8;
 
 }  // namespace tictac::cache

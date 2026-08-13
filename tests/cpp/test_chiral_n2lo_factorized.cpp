@@ -87,6 +87,14 @@ int main()
 		1, 2, p_bra, q_bra, p_ket, q_ket, space.pw), 6.533793487265248e-4);
 	expect_close("S diagonal cE", cE.W1_element(
 		1, 1, p_bra, q_bra, p_ket, q_ket, space.pw), 8.6321225934281e-3);
+	expect_close("off-diagonal cE selection", cE.W1_element(
+		1, 2, p_bra, q_bra, p_ket, q_ket, space.pw), 0.0);
+	expect_close("pair-P diagonal cE selection", cE.W1_element(
+		0, 0, p_bra, q_bra, p_ket, q_ket, space.pw), 0.0);
+	expect_close("pair-D diagonal cE selection", cE.W1_element(
+		3, 3, p_bra, q_bra, p_ket, q_ket, space.pw), 0.0);
+	expect_close("spectator-P diagonal cE selection", cE.W1_element(
+		5, 5, p_bra, q_bra, p_ket, q_ket, space.pw), 0.0);
 
 	chiral_N2LO_3NF_factorized c1_order6(
 		0.0, 0.0, 500.0, -0.81, 0.0, 0.0, 6);

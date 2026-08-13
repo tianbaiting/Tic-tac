@@ -932,7 +932,7 @@ double regulator(double p, double q, double cutoff)
 std::array<complex, 5> project_ls_components(
 	const ls_channel& bra, const ls_channel& ket,
 	double p, double q, double pp, double qp,
-	double c_D, double c_E, double c1_fm, double c3_fm, double c4_fm,
+	double c_D, double c1_fm, double c3_fm, double c4_fm,
 	int order, orbital_cache& cache, reduced_orbital_cache& reduced_cache)
 {
 	std::array<complex, 5> result{};
@@ -982,13 +982,6 @@ std::array<complex, 5> project_ls_components(
 		result[3] = -gA * d_lec / (8.0 * f_pi * f_pi)
 		          * (iso12 * spin12 + iso13 * spin13);
 	}
-	if (c_E != 0.0 && std::abs(iso23) > 1.0e-15) {
-		const complex scalar = project_cartesian_algebra(
-			bra, ket, p, q, pp, qp, algebra_kind::identity,
-			scalar_kernel_kind::contact, order, pion_mass, cache, reduced_cache);
-		const double e_lec = c_E / (std::pow(f_pi, 4) * lambda_chi);
-		result[4] = e_lec * iso23 * scalar;
-	}
 	return result;
 }
 
@@ -1002,24 +995,38 @@ double evaluate_factorized_element(
 	const jj_channel bra = make_jj_channel(alpha_r, pw_states);
 	const jj_channel ket = make_jj_channel(alpha_c, pw_states);
 	if (bra.two_total_J != ket.two_total_J || bra.two_total_T != ket.two_total_T) return 0.0;
-	const auto bra_expansion = get_ls_expansion(bra);
-	const auto ket_expansion = get_ls_expansion(ket);
 	std::array<complex, 5> totals{};
 	totals.fill(0.0);
 	const double c1_fm = c1_gev * hbarc / 1000.0;
 	const double c3_fm = c3_gev * hbarc / 1000.0;
 	const double c4_fm = c4_gev * hbarc / 1000.0;
-	for (const auto& bra_ls : *bra_expansion) {
-		for (const auto& ket_ls : *ket_expansion) {
-			const auto components = project_ls_components(
-				bra_ls.first, ket_ls.first, p_c, q_c, p_r, q_r,
-				c_D, c_E, c1_fm, c3_fm, c4_fm, transfer_order,
-				cache, reduced_cache);
-			const double coefficient = bra_ls.second * ket_ls.second;
-			for (int component = 0; component < 5; ++component) {
-				totals[component] += coefficient * components[component];
+	if (c_D != 0.0 || c1_fm != 0.0 || c3_fm != 0.0 || c4_fm != 0.0) {
+		const auto bra_expansion = get_ls_expansion(bra);
+		const auto ket_expansion = get_ls_expansion(ket);
+		for (const auto& bra_ls : *bra_expansion) {
+			for (const auto& ket_ls : *ket_expansion) {
+				const auto components = project_ls_components(
+					bra_ls.first, ket_ls.first, p_c, q_c, p_r, q_r,
+					c_D, c1_fm, c3_fm, c4_fm, transfer_order,
+					cache, reduced_cache);
+				const double coefficient = bra_ls.second * ket_ls.second;
+				for (int component = 0; component < 4; ++component) {
+					totals[component] += coefficient * components[component];
+				}
 			}
 		}
+	}
+	if (c_E != 0.0 && alpha_r == alpha_c
+	    && pw_states.L_2N_array[alpha_r] == 0
+	    && pw_states.L_1N_array[alpha_r] == 0) {
+		const double f_pi = fpi / hbarc;
+		const double lambda_chi = 700.0 / hbarc;
+		const int t_pair = pw_states.T_2N_array[alpha_r];
+		const double tau23 = 2.0 * t_pair * (t_pair + 1.0) - 3.0;
+		const double e_lec = c_E / (std::pow(f_pi, 4) * lambda_chi);
+		// Epelbaum A-4 gives the raw (4pi)^2 contact projection.  The common
+		// (2pi)^-6 factor below converts it to tau23*E/(4pi^4).
+		totals[4] = tau23 * e_lec * std::pow(4.0 * pi_value, 2);
 	}
 	complex total{0.0, 0.0};
 	for (complex value : totals) total += value;
@@ -1035,12 +1042,13 @@ double evaluate_factorized_element(
 
 void prepare_factorized_channel(
 	int alpha_r, int alpha_c, const pw_3N_statespace& pw_states,
-	double c_D, double c_E, double c1_gev, double c3_gev, double c4_gev,
+	double c_D, double c1_gev, double c3_gev, double c4_gev,
 	int transfer_order)
 {
 	const jj_channel bra = make_jj_channel(alpha_r, pw_states);
 	const jj_channel ket = make_jj_channel(alpha_c, pw_states);
 	if (bra.two_total_J != ket.two_total_J || bra.two_total_T != ket.two_total_T) return;
+	if (c_D == 0.0 && c1_gev == 0.0 && c3_gev == 0.0 && c4_gev == 0.0) return;
 	static_cast<void>(get_quadrature_grid(transfer_order));
 	const auto bra_expansion = get_ls_expansion(bra);
 	const auto ket_expansion = get_ls_expansion(ket);
@@ -1065,10 +1073,6 @@ void prepare_factorized_channel(
 			if (c_D != 0.0 && std::abs(iso13) > 1.0e-15) {
 				static_cast<void>(get_weight_table(
 					bra_ls.first, ket_ls.first, algebra_kind::d13));
-			}
-			if (c_E != 0.0 && std::abs(iso23) > 1.0e-15) {
-				static_cast<void>(get_weight_table(
-					bra_ls.first, ket_ls.first, algebra_kind::identity));
 			}
 		}
 	}
@@ -1108,7 +1112,7 @@ void chiral_N2LO_3NF_factorized::prepare_W1_channel(
 {
 	prepare_factorized_channel(
 		alpha_r, alpha_c, pw_states,
-		m_c_D, m_c_E, m_c1_gev, m_c3_gev, m_c4_gev, m_transfer_order);
+		m_c_D, m_c1_gev, m_c3_gev, m_c4_gev, m_transfer_order);
 }
 
 double chiral_N2LO_3NF_factorized::W1_element(

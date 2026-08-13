@@ -110,6 +110,13 @@
       "candidate_linear_extrapolation_hours_for_one_sector_at_96_threads": 24.2811,
       "interpretation": "The 96-thread point minimizes measured wall time, but its 10.45 percent parallel efficiency and the higher-order convergence multipliers leave dense W1 construction infeasible for the full paired run."
     },
+    "analytic_cE_contact_correction": {
+      "W1_cache_schema": 8,
+      "high_order_oracle_max_absolute_difference_fm5": 4.1806835771e-16,
+      "transfer_order2_U_max_absolute_change_mev": 0.0043557725626,
+      "transfer_order2_U_max_relative_change": 0.03829752547,
+      "interpretation": "The exact contact selection rule removes low-transfer-order leakage into higher orbital channels. It invalidates the old order-two U values as a physics baseline but leaves the timing projection at about 13 seconds on 96 threads."
+    },
     "channel_zero_scan": {
       "description": "All ordered channel pairs were evaluated at three generic nonzero momentum tuples with all c1/c3/c4/cD/cE components enabled.",
       "positive_parity_nonzero_pairs": 100,
