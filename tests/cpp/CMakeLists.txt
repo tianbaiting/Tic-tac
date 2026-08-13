@@ -273,3 +273,16 @@ target_include_directories(test_semantic_views PRIVATE
     ${CMAKE_SOURCE_DIR}/src/core/state_space
 )
 add_test(NAME semantic_views COMMAND test_semantic_views)
+
+# Phase 2: semantic RunConfig adapter round-trip. Verifies the semantic
+# partition is a faithful, lossless 1:1 mapping of every run_params field.
+add_executable(test_run_config
+    test_run_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/config/run_config.cpp
+)
+target_include_directories(test_run_config PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/config
+)
+add_test(NAME run_config COMMAND test_run_config)
