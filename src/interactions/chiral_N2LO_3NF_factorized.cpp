@@ -23,6 +23,46 @@
 
 namespace {
 
+// ===========================================================================
+// [EN] Internal component map of the factorized N2LO 3NF projector.
+// The helpers below are grouped (in place, by line range) into the mathematical
+// responsibilities named in the task (Phase 8). They are NOT physically split
+// into separate translation units on purpose: this projector feeds the W1 cache
+// whose outputs are under a byte-for-byte regression contract, and cross-TU
+// moves would change inlining (the build has no -flto) and perturb floating
+// point at the ULP level. The two algorithms stay distinct -- this factorized
+// (Hebeler three-integral) projector is a separate class/file from the
+// independent 5D reference (chiral_N2LO_3NF_full_reference). / [CN] 因子化 N2LO
+// 3NF 投影器内部组件图（按行号分组）。为满足 W1 缓存的逐比特回归约束，这些内部
+// 辅助函数不跨翻译单元拆分（无 -flto，跨单元会改变内联并扰动 ULP 浮点）。
+//   channel types / jj<->LS recoupling .... state8, ls_channel, jj_channel,
+//                                            channel_key, ls_expansion_table,
+//                                            get_ls_expansion
+//   spin / isospin algebra .................. inner_product, spin_axis,
+//                                            isospin_matrix_element,
+//                                            get_isospin_matrix_elements,
+//                                            spin_basis_state,
+//                                            spin_matrix_element,
+//                                            get_spin_matrix_element
+//   angular harmonics (Y_lm, bipolar) ...... spherical_harmonic,
+//                                            bipolar_harmonic, harmonic_term,
+//                                            cartesian_y1_coefficient,
+//                                            multiply_once/axes,
+//                                            get_harmonic_terms, channel_terms
+//   Cartesian operator algebra (c1..cE) .... q_transfer_dot_terms,
+//                                            q2_q3_dot_terms, c4_cartesian_terms,
+//                                            cartesian_terms, project_cartesian
+//   orbital / radial kernel ................ legendre_polynomial,
+//                                            scalar_kernel_value,
+//                                            reduced_orbital_kernel,
+//                                            uncoupled_orbital_kernel,
+//                                            regulator, project_ls_components,
+//                                            evaluate_factorized_element
+//   memoized weight / quadrature caches .... get_weight_table, get_quadrature_grid,
+//                                            orbital_cache, reduced_orbital_cache
+//   channel warm-up ....................... prepare_factorized_channel
+// ===========================================================================
+
 using complex = std::complex<double>;
 using vector3 = std::array<double, 3>;
 using state8 = std::array<complex, 8>;
