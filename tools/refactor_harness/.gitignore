@@ -1,0 +1,9 @@
+out_run_2nf/
+out_run_3nf/
+cache_run_2nf/
+cache_run_3nf/
+out_golden/
+out_2nf/
+cache_golden/
+cache_2nf/
+current_hashes.txt
