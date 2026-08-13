@@ -164,17 +164,42 @@ python3 examples/convert_dsigma_units.py --to-unit fm2/sr
 
 ## How Experiment vs Simulation Is Computed
 
+The observable chain follows the physical partial-wave reconstruction, not a
+heuristic reduced-`U` combination:
+
+```
+U^{Jpi}  -->  M(theta)  -->  spin-1 observables
+```
+
+1. **On-shell `U` from the solver.** Each `J^pi` channel emits
+   `U_PW_elements_*.txt`, the elastic on-shell `U^{Jpi}_{alpha' alpha}` matrix
+   elements (in the `(l,j)` spectator `jj`-coupling scheme) at the on-shell
+   `q` bins.
+2. **Scattering amplitude `M(theta)`.** `examples/pw_amplitudes.py` resums the
+   partial-wave series over all available `J^pi` channels,
+   ```
+   M(theta; m_d', m_p'; m_d, m_p)
+       = -(2*pi)^2 * mu_{pd} / q_on
+         * sum_{J,pi} sum_{alpha' alpha} U^{Jpi}_{alpha' alpha} * G_{alpha' alpha}(theta),
+   ```
+   with `G` the `jj`-coupling geometric factor built from Clebsch-Gordan
+   coefficients and `Y_{l,m}(theta, phi=0)`.
+3. **Polarization observables.** From the spin-density matrix of the spin-1
+   deuteron,
+   ```
+   T_{kq}(theta) = Tr[ M . tau_{kq}^(d) . M^dagger ] / Tr[ M . M^dagger ],
+   ```
+   giving `dSigma/dOmega ~ Tr[M M^dagger]`, `iT11`, `T20`, `T21`, `T22`.
+   The `tau_{kq}` are the rank-1 spin tensors (treatise Ch. 13).
+
 - Experiment data:
   - `data/DataOfCrosssectionAndPol/CompletSetOFT/T.txt` for `iT11(theta)`
   - `data/DataOfCrosssectionAndPol/DSigamaOverDOmega.txt` for `dSigma/dOmega(theta)`
-- Simulation data:
-  - Parse `U00,U01,U10,U11` from solver `U_PW_elements_*.txt` (all available `JP` channels from the latest run family)
-  - Combine channels at the same energy with `|U|^2` weights (across `JP` and parity)
-  - Build angle-dependent observables from reduced-U invariants with fixed formulas
-  - Do not fit model coefficients to experimental curves
-  - Report MAE/RMSE/max error and relative RMSE
+- Model coefficients are never fit to experimental curves; comparison reports
+  MAE/RMSE/max error and relative RMSE.
 
-Details and formulas: `docs/dpol_p_190MeV_validation.md`
+Details and formulas: `docs/dpol_p_190MeV_validation.md`,
+`docs/dpol_p_multi_energy_observables.md`.
 
 ## Tests
 
