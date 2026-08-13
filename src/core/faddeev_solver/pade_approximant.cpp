@@ -1,6 +1,6 @@
 #include "pade_approximant.h"
 
-#include "utils/matrix_routines.h"
+#include <lapacke.h>
 
 #include <cmath>
 #include <algorithm>
@@ -11,30 +11,91 @@ cdouble pade_approximant(const cdouble* a_coeff_array,
                          std::size_t N,
                          std::size_t M,
                          cdouble z){
-	const std::size_t dim = M + 1;
-	std::vector<cdouble> P_array(dim * dim);
-	std::vector<cdouble> Q_array(dim * dim);
+	// Solve directly for Q(z)=1+q_1*z+...+q_M*z^M from
+	//   sum_{j=1}^M a_{N+i-j} q_j = -a_{N+i},  i=1,...,M.
+	// This is algebraically equivalent to the former det(P)/det(Q) formula,
+	// but avoids forming two determinants whose products overflow/underflow at
+	// useful diagonal orders (the reduced 3NF diagnostic already fails by
+	// [24/24] despite a finite, stable rational approximant).
+	std::vector<cdouble> denominator_coefficients(M + 1, cdouble(0.0, 0.0));
+	denominator_coefficients[0] = cdouble(1.0, 0.0);
 
-	for (std::size_t row_idx = 0; row_idx < M; row_idx++){
-		for (std::size_t col_idx = 0; col_idx < dim; col_idx++){
-			const cdouble value = a_coeff_array[N - M + 1 + row_idx + col_idx];
-			P_array[row_idx * dim + col_idx] = value;
-			Q_array[row_idx * dim + col_idx] = value;
+	if (M > 0){
+		std::vector<cdouble> system(M * M);
+		std::vector<cdouble> rhs(M);
+		for (std::size_t row = 0; row < M; ++row){
+			const std::size_t i = row + 1;
+			rhs[row] = -a_coeff_array[N + i];
+			double row_scale = std::abs(rhs[row]);
+			for (std::size_t col = 0; col < M; ++col){
+				const std::size_t j = col + 1;
+				const cdouble value = a_coeff_array[N + i - j];
+				system[row * M + col] = value;
+				row_scale = std::max(row_scale, std::abs(value));
+			}
+			if (row_scale > 0.0 && std::isfinite(row_scale)){
+				rhs[row] /= row_scale;
+				for (std::size_t col = 0; col < M; ++col){
+					system[row * M + col] /= row_scale;
+				}
+			}
+		}
+
+		// Keep pristine scaled inputs for the rank-revealing fallback because
+		// zgesv overwrites both arrays.
+		const std::vector<cdouble> system_copy = system;
+		const std::vector<cdouble> rhs_copy = rhs;
+		std::vector<lapack_int> pivots(M);
+		lapack_int info = LAPACKE_zgesv(
+			LAPACK_ROW_MAJOR, static_cast<lapack_int>(M), 1,
+			reinterpret_cast<lapack_complex_double*>(system.data()),
+			static_cast<lapack_int>(M), pivots.data(),
+			reinterpret_cast<lapack_complex_double*>(rhs.data()), 1);
+
+		if (info > 0){
+			// A defective Padé table can have a rank-deficient coefficient matrix
+			// even when a lower-degree rational representation is well defined.
+			// Rank-revealing QR supplies that representation instead of returning
+			// the determinant form's indeterminate 0/0.
+			system = system_copy;
+			rhs = rhs_copy;
+			std::vector<lapack_int> column_pivots(M, 0);
+			lapack_int rank = 0;
+			info = LAPACKE_zgelsy(
+				LAPACK_ROW_MAJOR, static_cast<lapack_int>(M),
+				static_cast<lapack_int>(M), 1,
+				reinterpret_cast<lapack_complex_double*>(system.data()),
+				static_cast<lapack_int>(M),
+				reinterpret_cast<lapack_complex_double*>(rhs.data()), 1,
+				column_pivots.data(), -1.0, &rank);
+		}
+		if (info != 0){
+			const double nan = std::numeric_limits<double>::quiet_NaN();
+			return cdouble(nan, nan);
+		}
+		for (std::size_t j = 1; j <= M; ++j){
+			denominator_coefficients[j] = rhs[j - 1];
 		}
 	}
 
-	for (std::size_t col_idx = 0; col_idx < dim; col_idx++){
-		Q_array[M * dim + col_idx] = std::pow(z, M - col_idx);
-		P_array[M * dim + col_idx] = 0.0;
-		for (std::size_t j = M - col_idx; j < N + 1; j++){
-			P_array[M * dim + col_idx] +=
-				a_coeff_array[j - (M - col_idx)] * std::pow(z, j);
+	std::vector<cdouble> numerator_coefficients(N + 1, cdouble(0.0, 0.0));
+	for (std::size_t k = 0; k <= N; ++k){
+		for (std::size_t j = 0; j <= std::min(k, M); ++j){
+			numerator_coefficients[k] +=
+				denominator_coefficients[j] * a_coeff_array[k - j];
 		}
 	}
 
-	const cdouble P_det = determinant(P_array.data(), (int)dim);
-	const cdouble Q_det = determinant(Q_array.data(), (int)dim);
-	return P_det / Q_det;
+	// Horner evaluation avoids the extra dynamic range of explicit powers.
+	cdouble numerator = numerator_coefficients[N];
+	for (std::size_t k = N; k-- > 0;){
+		numerator = numerator * z + numerator_coefficients[k];
+	}
+	cdouble denominator = denominator_coefficients[M];
+	for (std::size_t j = M; j-- > 0;){
+		denominator = denominator * z + denominator_coefficients[j];
+	}
+	return numerator / denominator;
 }
 
 pade_convergence_decision assess_pade_convergence(

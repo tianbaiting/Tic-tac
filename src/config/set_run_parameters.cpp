@@ -52,6 +52,7 @@ std::string create_input_printout_string(run_params run_parameters){
 	output_string << "Np_per_WP_W1:                    " << type_to_string(run_parameters.Np_per_WP_W1) 			  	<< "\n";
 	output_string << "Nq_per_WP_W1:                    " << type_to_string(run_parameters.Nq_per_WP_W1) 			  	<< "\n";
 	output_string << "Nangle_3NF:                      " << type_to_string(run_parameters.Nangle_3NF)                 << "\n";
+	output_string << "Padé maximum diagonal order:     " << type_to_string(run_parameters.pade_max_order)             << "\n";
 	output_string << "P123-recovery mode on:           " << type_to_string(run_parameters.P123_recovery) 		  	  	<< "\n";
 	output_string << "P123 omp number of threads:      " << type_to_string(run_parameters.P123_omp_num_threads) 	  	<< "\n";
 	output_string << "Tensor-force on:                 " << type_to_string(run_parameters.tensor_force) 		  	  	<< "\n";
@@ -129,6 +130,12 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 		run_parameters.Nangle_3NF = std::stoi(input);
 		if (run_parameters.Nangle_3NF < 1) {
 			raise_error("Nangle_3NF must be a positive integer");
+		}
+	}
+	else if (option == "pade_max_order"){
+		run_parameters.pade_max_order = std::stoi(input);
+		if (run_parameters.pade_max_order < 1 || run_parameters.pade_max_order > 64) {
+			raise_error("pade_max_order must be an integer in [1, 64]");
 		}
 	}
 	else if (option == "P123_omp_num_threads"){
@@ -463,6 +470,14 @@ void show_usage(){
 			  << seperationLine
 			  << std::endl;
 
+	std::cout << "pade_max_order:           Maximum diagonal Padé order [N/N]. The solver evaluates\n"
+			  << "                          2*N+1 Neumann coefficients and requires the final three\n"
+			  << "                          Padé updates to satisfy the fixed convergence tolerances.\n"
+			  << "                          Allowed range: 1--64; default: 14.\n"
+			  << "Example:                  pade_max_order=24\n"
+			  << seperationLine
+			  << std::endl;
+
 	std::cout << "c_D, c_E:                 Chiral N2LO 3NF low-energy constants (LECs). c_D multiplies\n"
 			  << "                          the 1pi-exchange-contact term; c_E multiplies the pure 3N\n"
 			  << "                          contact term. Ignored when three_nucleon_force=none.\n"
@@ -687,6 +702,7 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.Np_per_WP_W1             = 2;  // safer baseline; production must check N=2 vs N=4
 	run_parameters.Nq_per_WP_W1             = 2;
 	run_parameters.Nangle_3NF               = 4;  // full projectors; must be converged explicitly
+	run_parameters.pade_max_order            = 14; // legacy-compatible default; increase for an explicit tail study
 	run_parameters.channel_idx		        = -1;
 	run_parameters.parallel_run		        = false;
 	run_parameters.potential_model	        = "LO_internal";

@@ -140,7 +140,12 @@ def build_report(pade_directory: Path, dense_directory: Path) -> dict:
         for key in sorted(set(pade_parameters) | set(dense_parameters))
         if pade_parameters.get(key) != dense_parameters.get(key)
     }
-    expected_difference = {"Solve Faddeev with LAPACK"}
+    # The dense direct path does not evaluate a Padé table, so its recorded
+    # Padé ceiling may differ without changing the dense reference equation.
+    expected_difference = {
+        "Solve Faddeev with LAPACK",
+        "Padé maximum diagonal order",
+    }
     unexpected = set(parameter_differences) - expected_difference
     if unexpected:
         raise ValueError(f"solver inputs differ beyond solve method: {sorted(unexpected)}")
@@ -166,6 +171,33 @@ def build_report(pade_directory: Path, dense_directory: Path) -> dict:
         if not dense_path.is_file():
             raise FileNotFoundError(dense_path)
         results.append(compare_file(pade_path, dense_path))
+
+    radial_p = pade_parameters.get("Np_per_WP_W1")
+    radial_q = pade_parameters.get("Nq_per_WP_W1")
+    angular_order = pade_parameters.get("Nangle_3NF")
+    grid_np = pade_parameters.get("Np_WP")
+    binding = results[0]["deuteron_binding_mev"]
+    if radial_p == "1" and radial_q == "1":
+        radial_limitation = (
+            "Np_per_WP_W1=Nq_per_WP_W1=1 is the unconverged midpoint diagnostic."
+        )
+    elif radial_p is not None and radial_q is not None:
+        radial_limitation = (
+            f"W1 radial orders are (p,q)=({radial_p},{radial_q}); this is not a radial-"
+            "convergence certificate without comparison to higher orders."
+        )
+    else:
+        radial_limitation = "W1 radial quadrature orders are not recorded in the supplied metadata."
+    grid_limitation = (
+        f"Np_WP={grid_np} gives an unphysical deuteron binding energy of {binding:.10g} MeV."
+        if grid_np is not None
+        else f"The reduced grid gives a deuteron binding energy of {binding:.10g} MeV."
+    )
+    angular_limitation = (
+        f"Nangle_3NF={angular_order} is not an angular-convergence certificate."
+        if angular_order is not None
+        else "The 3NF angular quadrature order is not recorded in the supplied metadata."
+    )
 
     return {
         "schema_version": 1,
@@ -193,9 +225,9 @@ def build_report(pade_directory: Path, dense_directory: Path) -> dict:
             ),
         },
         "limitations": [
-            "Np_WP=4 gives an unphysical deuteron binding energy near -0.0114 MeV.",
-            "Np_per_WP_W1=Nq_per_WP_W1=1 is the unconverged midpoint diagnostic.",
-            "Nangle_3NF=2 is not an angular-convergence certificate.",
+            grid_limitation,
+            radial_limitation,
+            angular_limitation,
             "Only one J^pi block is compared.",
             "Numerical agreement with dense inversion does not override Pade honesty codes.",
         ],

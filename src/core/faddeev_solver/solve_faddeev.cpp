@@ -357,8 +357,14 @@ void pade_method_solve(cdouble*  U_array,
 	size_t num_EL_A_vals 	   = num_deuteron_states * num_deuteron_states * num_q_com;	// Elastic elements
 	size_t num_BU_A_vals 	   = 0;//num_deuteron_states * chn_os_indexing.num_BU_chns;	// Breakup elements
 	
-	/* Upper limit on polynomial approximation of Faddeev eq. */
-	size_t NM_max = 14;
+	/* Upper limit on the diagonal Padé approximation of the Faddeev equation.
+	 * This is an explicit run parameter because a max-order-truncated result at
+	 * N=14 cannot establish convergence at a higher order.  Configuration
+	 * parsing constrains it to [1,64]. */
+	if (run_parameters.pade_max_order < 1 || run_parameters.pade_max_order > 64){
+		raise_error("pade_max_order must be an integer in [1, 64]");
+	}
+	size_t NM_max = static_cast<size_t>(run_parameters.pade_max_order);
 	size_t num_neumann_terms = 2*NM_max+1;
 
 	// [EN] Chapter 7 rewrites the matrix AGS equation into a finite list of Neumann coefficients plus a Padé

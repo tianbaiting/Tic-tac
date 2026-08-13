@@ -106,30 +106,41 @@ def parse_neumann_file(path: Path) -> Dict[Tuple[int, int, int], List[complex]]:
 
 
 def pade_approximant(a: List[complex], N: int, M: int, z: complex = 1 + 0j) -> complex:
-    """Mirror of pade_approximant() in solve_faddeev.cpp lines 704-729.
+    """Mirror the production coefficient-solve Padé implementation.
 
-    Requires len(a) >= N+M+1. Returns det(P)/det(Q) for the [N/M] Padé.
+    Solve for the denominator coefficients and then form the numerator by
+    convolution.  This is algebraically equivalent to det(P)/det(Q), without
+    the high-order determinant overflow/underflow that formerly corrupted the
+    Padé tail.
     """
     if len(a) < N + M + 1:
         return float("nan") + 0j
-    # P and Q are (M+1) x (M+1)
-    size = M + 1
-    P = np.zeros((size, size), dtype=complex)
-    Q = np.zeros((size, size), dtype=complex)
-    for row in range(M):
-        for col in range(M + 1):
-            val = a[N - M + 1 + row + col]
-            P[row, col] = val
-            Q[row, col] = val
-    for col in range(M + 1):
-        Q[M, col] = z ** (M - col)
-        s = 0 + 0j
-        for j in range(M - col, N + 1):
-            s += a[j - (M - col)] * (z ** j)
-        P[M, col] = s
-    det_P = np.linalg.det(P)
-    det_Q = np.linalg.det(Q)
-    return det_P / det_Q
+    q = np.zeros(M + 1, dtype=complex)
+    q[0] = 1.0 + 0j
+    if M:
+        system = np.empty((M, M), dtype=complex)
+        rhs = np.empty(M, dtype=complex)
+        for row in range(M):
+            i = row + 1
+            rhs[row] = -a[N + i]
+            for col in range(M):
+                j = col + 1
+                system[row, col] = a[N + i - j]
+            row_scale = max(abs(rhs[row]), np.max(np.abs(system[row])))
+            if row_scale > 0 and np.isfinite(row_scale):
+                rhs[row] /= row_scale
+                system[row] /= row_scale
+        try:
+            q[1:] = np.linalg.solve(system, rhs)
+        except np.linalg.LinAlgError:
+            q[1:] = np.linalg.lstsq(
+                system, rhs, rcond=np.finfo(float).eps
+            )[0]
+
+    p = np.zeros(N + 1, dtype=complex)
+    for k in range(N + 1):
+        p[k] = sum(q[j] * a[k - j] for j in range(min(k, M) + 1))
+    return np.polynomial.polynomial.polyval(z, p) / np.polynomial.polynomial.polyval(z, q)
 
 
 def compute_best_pade(a: List[complex], NM_max: int = 14) -> Tuple[complex, int, bool]:

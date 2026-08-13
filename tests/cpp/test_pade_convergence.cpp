@@ -23,6 +23,60 @@ void check(bool condition, const char* label){
 int main(){
 	constexpr std::size_t max_order = 14;
 
+	// A nontrivial [24/24] rational series checks the numerically stable
+	// coefficient-solve implementation.  The former determinant ratio
+	// overflowed or underflowed on similarly scaled production histories.
+	constexpr std::size_t rational_order = 24;
+	std::vector<cdouble> denominator(1, cdouble(1.0, 0.0));
+	for (std::size_t root = 0; root < rational_order; ++root){
+		const double factor = 0.02 + 0.006 * static_cast<double>(root);
+		std::vector<cdouble> next(denominator.size() + 1, cdouble(0.0, 0.0));
+		for (std::size_t k = 0; k < denominator.size(); ++k){
+			next[k] += denominator[k];
+			next[k + 1] -= factor * denominator[k];
+		}
+		denominator = next;
+	}
+	std::vector<cdouble> numerator(rational_order + 1);
+	for (std::size_t k = 0; k <= rational_order; ++k){
+		numerator[k] = cdouble(
+			std::sin(0.7 * static_cast<double>(k)) / static_cast<double>(k + 1),
+			std::cos(0.4 * static_cast<double>(k)) / static_cast<double>(2 * k + 1));
+	}
+	std::vector<cdouble> rational_series(2 * rational_order + 1);
+	for (std::size_t n = 0; n < rational_series.size(); ++n){
+		rational_series[n] = n <= rational_order ? numerator[n] : cdouble(0.0, 0.0);
+		for (std::size_t j = 1; j <= std::min(n, rational_order); ++j){
+			rational_series[n] -= denominator[j] * rational_series[n - j];
+		}
+	}
+	cdouble exact_rational = cdouble(0.0, 0.0);
+	for (const cdouble value : numerator){
+		exact_rational += value;
+	}
+	cdouble exact_denominator = cdouble(0.0, 0.0);
+	for (const cdouble value : denominator){
+		exact_denominator += value;
+	}
+	exact_rational /= exact_denominator;
+	const cdouble computed_rational = pade_approximant(
+		rational_series.data(), rational_order, rational_order, cdouble(1.0, 0.0));
+	check(std::abs(computed_rational - exact_rational) < 1e-10,
+	      "[24/24] coefficient solve reproduces a known rational function");
+
+	// Rank-deficient Padé systems occur when the true denominator degree is
+	// smaller than the requested table order.  They have a valid generalized
+	// approximant and must not become determinant-form 0/0.
+	std::vector<cdouble> geometric(13);
+	for (std::size_t n = 0; n < geometric.size(); ++n){
+		geometric[n] = std::pow(cdouble(0.35, 0.0), static_cast<int>(n));
+	}
+	const cdouble geometric_pade = pade_approximant(
+		geometric.data(), 6, 6, cdouble(1.0, 0.0));
+	check(std::isfinite(geometric_pade.real()) && std::isfinite(geometric_pade.imag())
+	      && std::abs(geometric_pade - cdouble(1.0 / 0.65, 0.0)) < 1e-11,
+	      "rank-deficient Padé table falls back to a finite generalized solution");
+
 	// This is the failure mode of the removed legacy criterion: because every
 	// successive difference is > 1, its "best" index stayed at zero and P[0/0]
 	// was declared genuinely converged at order five.

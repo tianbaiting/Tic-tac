@@ -127,6 +127,10 @@ typedef struct run_params{
 	// complete direct-Jj 3NF reference projector.  It is ignored by the legacy
 	// rank-0 approximation but is part of the W1 cache identity.
 	int         Nangle_3NF;
+	// Maximum diagonal Padé order [N/N].  The solver consumes 2*N+1
+	// Neumann coefficients and records this value in run_parameters.txt so a
+	// convergence claim is reproducible rather than tied to a hidden constant.
+	int         pade_max_order;
 	int			channel_idx;
 	int			P123_omp_num_threads;
 	double 		chebyshev_t;
