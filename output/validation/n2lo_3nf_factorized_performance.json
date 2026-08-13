@@ -35,7 +35,8 @@
     "magnetic_factorization": "18f1974",
     "channel_batching": "46b7308",
     "exact_hermitian_reuse": "d14d2bb",
-    "restore_threads_after_P123": "2563e8c"
+    "restore_threads_after_P123": "2563e8c",
+    "projection_hot_path": "9eaa5f8"
   },
   "benchmarks": {
     "two_parity_blocks_200_channel_pairs_one_pass": {
@@ -163,6 +164,27 @@
         "max_relative_U_change": 8.9621415190e-17,
         "interpretation": "The values are numerically unchanged and the timing shift is within run variation at transfer order two. The remaining cost is dominated by the angle-dependent c1/c3/c4 two-pion kernels."
       },
+      "two_pion_projection_hot_path": {
+        "status": "accepted bitwise-equivalent optimization",
+        "revision": "9eaa5f8",
+        "changes": [
+          "accumulate c1 and c3 reduced radial kernels in one pass when both LECs are active",
+          "precompute the four external-momentum bases at powers zero through four once per Cartesian projection",
+          "replace the ordered magnetic-orbital cache with a hashed cache",
+          "serve immutable Cartesian weight tables from a thread-local read cache after first use"
+        ],
+        "seconds_by_threads": {"1": 58.0, "16": 12.3, "96": 11.1},
+        "comparison_before_hot_path_seconds": {"1": 126.5, "16": 16.9, "96": 12.7},
+        "speedup_by_threads": {"1": 2.1810, "16": 1.3740, "96": 1.1441},
+        "U_files_bitwise_identical_across_implementation_and_1_16_96_threads": true,
+        "U_sha256": "f1b1b0c69954ba8358638dd8eb31374da897ebb9ba11c611ed56283dffd77ceb",
+        "convergence_sidecar_sha256": "615177a1f5f9c8e9ed603f6c6c9a8b8916a2e1102b1c7940163b6ec80d587f8f",
+        "verification": {
+          "ctest": "13/13 passed",
+          "related_python_oracle_tests": "10/10 passed"
+        },
+        "interpretation": "The speedup comes from eliminating repeated transcendental evaluation, ordered-tree lookup, and shared-mutex traffic in the c4-dominated projection loop. The operator formula, quadrature nodes, and per-component accumulation order are unchanged."
+      },
       "verification": {
         "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
         "radial_order_two_u_and_convergence_files": "byte-identical across channel batching",
@@ -183,6 +205,7 @@
     "The complete pass enumerates alpha 0..9 and alpha 10..19 separately, preserving parity selection.",
     "The angular-cache, magnetic-factorization, and channel-batching optimizations do not alter the operator formula or per-element summation order.",
     "Exact-Hermitian reuse deliberately replaces separately accumulated reverse slabs with exact transposes; W1 cache schema v7 prevents mixing the two construction contracts.",
-    "Before commit 2563e8c, the P123-specific thread limit remained active for W1 and the solver. Restoring the caller setting exposes real W1 scaling without changing P123's requested thread count."
+    "Before commit 2563e8c, the P123-specific thread limit remained active for W1 and the solver. Restoring the caller setting exposes real W1 scaling without changing P123's requested thread count.",
+    "Commit 9eaa5f8 removes projection hot-path overhead without changing cached W1 values, so the W1 cache schema remains v9."
   ]
 }
