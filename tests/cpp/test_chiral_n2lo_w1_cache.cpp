@@ -51,6 +51,11 @@ public:
 	{
 		return m_inner.W1_is_exactly_hermitian();
 	}
+	void prepare_W1_channel(
+		int alpha_r, int alpha_c, const pw_3N_statespace& pw) const override
+	{
+		m_inner.prepare_W1_channel(alpha_r, alpha_c, pw);
+	}
 
 	double W1_element(int alpha_r, int alpha_c,
 	                  double p_r, double q_r, double p_c, double q_c,
@@ -155,7 +160,7 @@ int main()
 	const std::size_t radial_cells = 2 * 2 * 2 * 2;
 	const std::size_t quadrature_tuples = 2 * 2 * 2 * 2;
 	const std::size_t expected_hermitian_calls =
-		3 * (1 + radial_cells * quadrature_tuples);
+		3 * radial_cells * quadrature_tuples;
 	expect_true("cache-off evaluates only Hermitian triangle",
 	            tnf.calls() == expected_hermitian_calls);
 	for (std::size_t iqr = 0; iqr < 2; ++iqr) {

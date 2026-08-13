@@ -119,6 +119,14 @@
         "without_warmup_seconds": {"1": 126.5, "16": 26.4, "96": 22.9},
         "reason": "Removing the discarded warm-up call helps one thread slightly but creates concurrent first-use cache contention and is 52.6 percent slower at 16 threads and 76.2 percent slower at 96 threads."
       },
+      "metadata_only_warmup": {
+        "status": "accepted as a redundant-work removal, not a claimed wall-time speedup",
+        "full_W1_elements_previously_evaluated_and_discarded": 56,
+        "seconds_by_threads": {"1": 127.8, "16": 16.9, "96": 13.8},
+        "comparison_full_element_warmup_seconds": {"1": 130.4, "16": 17.3, "96": 13.0},
+        "interpretation": "The one- and 16-thread points improve slightly while the 96-thread point regresses within observed run-to-run variation; no material speedup is claimed.",
+        "U_and_convergence_files_bitwise_identical": true
+      },
       "verification": {
         "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
         "radial_order_two_u_and_convergence_files": "byte-identical across channel batching",

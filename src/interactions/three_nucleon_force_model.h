@@ -101,6 +101,13 @@ public:
 	// whose finite quadrature is not Hermitian at a fixed order.
 	virtual bool W1_is_exactly_hermitian() const { return false; }
 
+	// Optional metadata-only warm-up before a parallel W1 packet build.  Models
+	// with shared momentum-independent recoupling tables may populate them here
+	// without evaluating and discarding a full momentum-space matrix element.
+	virtual void prepare_W1_channel(
+		int alpha_r, int alpha_c,
+		const pw_3N_statespace& pw_states) const {}
+
 	// [EN] LEC accessors used by W1_PW_cache to build a complete cache key
 	// (3NF audit B5: previously the cache key omitted c_1, c_3, c_4, allowing
 	// two runs with different 2NF (e.g. N2LOopt vs Idaho_N3LO) but identical

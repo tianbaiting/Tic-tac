@@ -1033,6 +1033,47 @@ double evaluate_factorized_element(
 	return total.real();
 }
 
+void prepare_factorized_channel(
+	int alpha_r, int alpha_c, const pw_3N_statespace& pw_states,
+	double c_D, double c_E, double c1_gev, double c3_gev, double c4_gev,
+	int transfer_order)
+{
+	const jj_channel bra = make_jj_channel(alpha_r, pw_states);
+	const jj_channel ket = make_jj_channel(alpha_c, pw_states);
+	if (bra.two_total_J != ket.two_total_J || bra.two_total_T != ket.two_total_T) return;
+	static_cast<void>(get_quadrature_grid(transfer_order));
+	const auto bra_expansion = get_ls_expansion(bra);
+	const auto ket_expansion = get_ls_expansion(ket);
+	for (const auto& bra_ls : *bra_expansion) {
+		for (const auto& ket_ls : *ket_expansion) {
+			const complex iso23 = isospin_matrix_element(bra_ls.first, ket_ls.first, 0);
+			const complex iso12 = isospin_matrix_element(bra_ls.first, ket_ls.first, 1);
+			const complex iso13 = isospin_matrix_element(bra_ls.first, ket_ls.first, 2);
+			const complex iso_cross = isospin_matrix_element(bra_ls.first, ket_ls.first, 3);
+			if ((c1_gev != 0.0 || c3_gev != 0.0) && std::abs(iso23) > 1.0e-15) {
+				static_cast<void>(get_weight_table(
+					bra_ls.first, ket_ls.first, algebra_kind::q23));
+			}
+			if (c4_gev != 0.0 && std::abs(iso_cross) > 1.0e-15) {
+				static_cast<void>(get_weight_table(
+					bra_ls.first, ket_ls.first, algebra_kind::c4));
+			}
+			if (c_D != 0.0 && std::abs(iso12) > 1.0e-15) {
+				static_cast<void>(get_weight_table(
+					bra_ls.first, ket_ls.first, algebra_kind::d12));
+			}
+			if (c_D != 0.0 && std::abs(iso13) > 1.0e-15) {
+				static_cast<void>(get_weight_table(
+					bra_ls.first, ket_ls.first, algebra_kind::d13));
+			}
+			if (c_E != 0.0 && std::abs(iso23) > 1.0e-15) {
+				static_cast<void>(get_weight_table(
+					bra_ls.first, ket_ls.first, algebra_kind::identity));
+			}
+		}
+	}
+}
+
 } // namespace
 
 chiral_N2LO_3NF_factorized::chiral_N2LO_3NF_factorized(
@@ -1060,6 +1101,14 @@ void chiral_N2LO_3NF_factorized::update_parameters(const double* parameters)
 		m_c_D = parameters[0];
 		m_c_E = parameters[1];
 	}
+}
+
+void chiral_N2LO_3NF_factorized::prepare_W1_channel(
+	int alpha_r, int alpha_c, const pw_3N_statespace& pw_states) const
+{
+	prepare_factorized_channel(
+		alpha_r, alpha_c, pw_states,
+		m_c_D, m_c_E, m_c1_gev, m_c3_gev, m_c4_gev, m_transfer_order);
 }
 
 double chiral_N2LO_3NF_factorized::W1_element(

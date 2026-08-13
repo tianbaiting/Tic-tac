@@ -277,21 +277,13 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
 		evaluation_channels.push_back(m_blocks[blk]);
 	}
 
-    // Populate expensive momentum-independent angular tables in parallel.
-    // Without this warm-up, every momentum-batch worker begins with the same
-    // first channel and waits on the single-flight table builder, serializing
-    // initialization even though distinct channel tables are independent.
-    #pragma omp parallel for schedule(dynamic)
+	// Populate expensive momentum-independent angular tables in parallel without
+	// evaluating and discarding a complete transfer-integral matrix element.
+	#pragma omp parallel for schedule(dynamic)
 	for (std::size_t index = 0; index < evaluation_channels.size(); ++index) {
 		const auto channel = evaluation_channels[index];
-        static_cast<void>(tnf.W1_element(
-            channel.first, channel.second,
-            p_nodes_MeV.front() * inv_hbarc,
-            q_nodes_MeV.front() * inv_hbarc,
-            p_nodes_MeV.front() * inv_hbarc,
-            q_nodes_MeV.front() * inv_hbarc,
-            pw_states));
-    }
+		tnf.prepare_W1_channel(channel.first, channel.second, pw_states);
+	}
 
     #pragma omp parallel for schedule(dynamic)
     for (std::size_t cell = 0; cell < per_block; ++cell) {
