@@ -30,6 +30,7 @@
 #include "make_swp_states.h"
 #include "make_resolvent.h"
 #include "solve_faddeev.h"
+#include "faddeev_solver_facade.h"
 #include "disk_io_routines.h"
 #include "run_organizer.h"
 
@@ -524,38 +525,34 @@ private:
 																P_3N,
 																J_2N_max_);
 
-		std::vector<cdouble> U_array(chn_os_indexing.num_T_lab
-								   * chn_os_indexing.num_deuteron_states
-								   * chn_os_indexing.num_deuteron_states);
+		// [EN] Step 9 is the expensive AGS solve. The scattering problem on this
+		// J^pi block is expressed as its mathematical operands -- P, V, W^(1), G
+		// and the three nested bases -- via FaddeevProblem. The facade forwards to
+		// solve_faddeev_equations with argument order unchanged, implementing
+		// U = K + K G U with K = P V + (1+P) W^(1).
+		// / [CN] 第 9 步是最昂贵的 AGS 求解。该 J^pi 块的散射问题通过 FaddeevProblem
+		// 表达为其数学算符；外观层不改写 solve_faddeev_equations，参数顺序不变。
+		tictac::core::FaddeevProblem faddeev_problem;
+		faddeev_problem.permutation_values    = P123_sparse_val_array;
+		faddeev_problem.permutation_row_index = P123_sparse_row_array;
+		faddeev_problem.permutation_col_ptr   = P123_sparse_col_array_csc;
+		faddeev_problem.permutation_dimension = P123_sparse_dim;
+		faddeev_problem.V_WP_unco             = V_WP_unco_array.data();
+		faddeev_problem.V_WP_coup             = V_WP_coup_ptr;
+		faddeev_problem.tnf                   = tnf_ptr_.get();
+		faddeev_problem.G_array               = G_array.data();
+		faddeev_problem.scattering_basis      = &swp_states;
+		faddeev_problem.packet_grid           = &fwp_states_;
+		faddeev_problem.basis                 = &pw_substates;
+		faddeev_problem.on_shell              = &chn_os_indexing;
 
-		std::vector<cdouble> U_BU_array;
-		cdouble* U_BU_ptr = nullptr;
-		if (run_parameters_.include_breakup_channels){
-			U_BU_array.resize(chn_os_indexing.num_T_lab * chn_os_indexing.num_BU_chns);
-			U_BU_ptr = U_BU_array.data();
-		}
+		tictac::core::FaddeevSolveOptions faddeev_options;
+		faddeev_options.run_parameters       = run_parameters_;
+		faddeev_options.file_identification  = file_identification;
 
-		// [EN] Step 9 is the expensive AGS solve: build the kernel action on the required on-shell rows, iterate
-		// the Neumann rescattering series, and use Padé acceleration before step 10 writes the on-shell U values.
-		// / [CN] 第 9 步是最昂贵的 AGS 求解：先在所需的 on-shell 行上构造核作用，再迭代 Neumann 再散射级数，
-		// 然后做 Padé 加速，最后由第 10 步写出 on-shell 的 U 元素。
 		printf(" - Solving Faddeev equation ... \n");
-		solve_faddeev_equations(U_array.data(),
-								U_BU_ptr,
-								G_array.data(),
-								P123_sparse_val_array,
-								P123_sparse_row_array,
-								P123_sparse_col_array_csc,
-								P123_sparse_dim,
-								V_WP_unco_array.data(),
-								V_WP_coup_ptr,
-								swp_states,
-								fwp_states_,
-								chn_os_indexing,
-								pw_substates,
-								file_identification,
-								run_parameters_,
-								tnf_ptr_.get());
+		auto faddeev_result = tictac::core::solve_faddeev_block(faddeev_problem,
+		                                                        faddeev_options);
 		printf("   - Done \n");
 
 		/* Start of code segment for storing on-shell U-matrix solutions */
@@ -564,7 +561,7 @@ private:
 																	+ "_PSI_" + std::to_string(idx_param_set)
 																	+ ".txt";
 
-		store_U_matrix_elements_txt(U_array.data(),
+		store_U_matrix_elements_txt(faddeev_result.elastic_U.data(),
 									solve_config_,
 									chn_os_indexing,
 									run_parameters_,
@@ -578,7 +575,7 @@ private:
 																		+ "_PSI_" + std::to_string(idx_param_set)
 																		+ ".txt";
 
-			store_U_BU_matrix_elements_txt(U_BU_ptr,
+			store_U_BU_matrix_elements_txt(faddeev_result.breakup_U.data(),
 										solve_config_,
 										chn_os_indexing,
 										run_parameters_,
