@@ -159,6 +159,12 @@ typedef struct run_params{
                                          // 保留以便 A/B 对照。
 	bool		solve_faddeev;
 	bool		solve_dense;
+	// [EN] Production diagnostic that stops after the ordinary 2NF potential
+	// matrix and SWP diagonalization stages and writes the deuteron eigenvalue.
+	// It deliberately bypasses P123 and every three-body/Faddeev operation.
+	// / [CN] 生产诊断模式：完成常规 2NF 势矩阵和 SWP 对角化后即停止并输出
+	// 氘核本征能，明确跳过 P123 以及所有三体/Faddeev 运算。
+	bool        deuteron_binding_only;
 	bool		production_run;
 	bool	    parameter_walk;
 	int			PSI_start;

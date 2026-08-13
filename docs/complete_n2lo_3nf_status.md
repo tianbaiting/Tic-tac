@@ -54,6 +54,8 @@ The labels used below are:
 | Historical reduced complete-3NF dense/Padé cross-check | `tools/3nf_oracle/compare_reduced_solver_outputs.py`; `output/validation/n2lo_3nf_reduced_solver_crosscheck.json` | **Superseded Padé-stability baseline:** before commit `5e003d6`, one `J=1/2`, positive-parity block at `Np=4`, `Nq=3`, radial order one, and angular order two agreed with dense inversion to `max|delta U|=2.12e-9 MeV`, but the determinant-ratio evaluator marked all 12 elements maximum-order truncated.  The grid and unphysical `-0.0114 MeV` deuteron energy remain useful negative WPCD evidence; the Padé status has been superseded by the next row. |
 | Stable Padé resummation | `output/validation/n2lo_3nf_pade_stability.json`; commit `5e003d6` | **Verified numerical result:** replacing the high-order ratio of determinants with a row-scaled denominator-coefficient solve leaves the Neumann coefficients byte-identical and does not change the fixed three-step, `1e-5` relative plus `1e-7` absolute convergence test.  At radial order two, all 12 amplitudes are genuinely converged at both `[14/14]` and `[24/24]`; `[14/14]` agrees with dense inversion to `max|delta U|=5.79e-15 MeV`, and orders 14 versus 24 differ by at most `1.34e-14 MeV`.  Cached `(4,3)`, `(6,4)`, `(8,6)`, and `(10,8)` reruns give `76/76` code-1 amplitudes at the unchanged default order 14. |
 | Reduced WPCD convergence diagnostic | `tools/3nf_oracle/summarize_factorized_solver_convergence.py`; `output/validation/n2lo_3nf_reduced_wpcd_convergence.json` | **Verified negative grid result:** with `J_2N_max=1`, transfer order two, and midpoint W1 integration, increasing `(Np,Nq)` through `(4,3)`, `(6,4)`, `(8,6)`, and `(10,8)` moves the deuteron energy from `-0.0114` to `-1.2586 MeV`, so the 2NF/WP basis is still far from converged.  Different q grids have different on-shell bin midpoints and their U values are not compared directly.  At identical `(4,3)`, radial order one versus two changes the 12 amplitudes by as much as `0.1335 MeV` and `67.4%` relative.  The archived JSON contains pre-`5e003d6` code-2 sidecars; cached post-fix reruns resolve those Padé codes without resolving the WPCD drift. |
+| Idaho-N3LO deuteron p-grid ladder | `deuteron_binding_only=true`; `output/validation/idaho_n3lo_deuteron_binding_ladder.json`; `python3 -m unittest tests/test_deuteron_binding_mode.py` | **Verified production-path result:** the new fail-closed mode calls the ordinary `V_WP` builder and SWP diagonalizer but returns before P123.  At `Np=10` it reproduces the full-solver header within `4.2e-9 MeV`.  The default `t=1,s=100` grid remains wrong by `56.6 keV` even at `Np=100`.  A scale ladder identifies `t=1,s=300` as a stable tested choice: `Np=60,80,100,120,150` give binding magnitudes `2.18513,2.20221,2.21020,2.21457,2.21815 MeV`.  A common `1/Np^2` fit has `E_infinity=2.2243837 MeV`, only `0.191 keV` below the `2.224575 MeV` reference, with at most `0.068 keV` fit residual.  Potential quadrature orders 4 through 16 agree within `4.6e-9 MeV` at `Np=40`; finite packet resolution, not quadrature or the Idaho potential, is the active error.  `Np=100,s=300` is the first tested point passing the present 20-keV Ay binding gate. |
+| Low-energy nd Ay preflight | `examples/audit_low_energy_Ay.py`; `output/validation/n2lo_3nf_low_energy_Ay_preflight.json`; `python3 -m unittest tests/test_low_energy_ay_audit.py` | **Verified negative acceptance result:** the fail-closed audit computes `Ay_max`, its angle, peak deficits, RMSE, uncertainty-weighted chi-square, maximum residual, and `R_Ay`, but permits an interpretation only after all physics gates pass.  The existing paired `Np=Nq=10`, `J_3N<=9/2` Idaho-N3LO artifacts match in numerical settings and have all requested J-parity U blocks, but use the old approximate 3NF, have `E_d=-0.108641 MeV`, contain 400 truncated 2NF and 51 truncated 3NF amplitudes, and provide none of the required `Np/Nq/W1/J2N/J3N/Pade` Ay ladders.  Their diagnostic `R_Ay=1.1595` is therefore explicitly withheld as a physical conclusion. |
 | Full Python discovery | `python3 -m unittest ...` including `tests/test_pade_honesty.py` | **Environment limitation:** collection fails because the local Python environment does not provide `pytest`; this is separate from the clean `unittest` regression set above. |
 
 At audit start the worktree also contained three unrelated untracked user files:
@@ -206,6 +208,18 @@ Existing 10 MeV analyzing-power results are diagnostic only:
 These calculations use coarse WP/angular truncations and the incomplete force.
 They do not satisfy the requested low-energy nd Ay publication benchmark.
 
+The dedicated P123-free deuteron ladder isolates the leading problem in those
+artifacts.  It exactly reuses the full solver's potential-packet and SWP
+diagonalization stages, reproduces the old `Np=10` header, and shows monotone
+`1/Np^2` convergence toward the physical Idaho-N3LO binding energy.  The
+default `Np=10` value is therefore a finite-packet artifact, not a different
+physical prediction.  With the tested Chebyshev family, `Np=100,t=1,s=300` is
+the first point inside the audit's 20-keV binding window.  A physical Ay run
+must still tune the q grid independently, because using the same Chebyshev
+scale for p and q can trade improved deuteron convergence for degraded 10-MeV
+on-shell resolution.  No Ay interpretation follows from the binding ladder
+alone.
+
 The first reduced-grid solve with the complete factorized force adds an
 algorithmic check, not a physics benchmark.  On this machine, constructing 101
 W1 blocks for `Np=4`, `Nq=3`, radial order one, angular order two, and four
@@ -286,9 +300,12 @@ published raw-PWD, exact-contact-normalization, complete slow-C++-reference,
 factorized matrix-element implementation, and broad machine-readable matrix-table
 gates.  Representative W1 cell integration is also converged at radial order
 four, but the repository still fails the decisive realistic-grid solver
-convergence and physical-validation gates.  A physically stable two-body grid
-and converged radial/angular/J ladders must precede the low-energy nd Ay
-comparison.  No existing Ay curve is yet admissible as a complete-N2LO result.
+convergence and physical-validation gates.  The low-energy Ay path now has a
+machine-readable, fail-closed acceptance audit, and it rejects the existing
+diagnostic artifacts for the expected model, binding, Padé, and ladder reasons.
+A physically stable two-body grid and converged radial/angular/J ladders must
+precede the final comparison.  No existing Ay curve is yet admissible as a
+complete-N2LO result.
 
 ## GLM-5.2 review disposition
 

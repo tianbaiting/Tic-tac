@@ -1,0 +1,97 @@
+{
+  "schema": "tictac.deuteron_binding_ladder.v1",
+  "generated_on": "2026-08-13",
+  "purpose": "Fail-closed p-grid preflight for the low-energy nd Ay calculation",
+  "potential_model": "Idaho_N3LO",
+  "reference_binding_magnitude_mev": 2.224575,
+  "calculation_path": "production_V_WP_to_SWP",
+  "common_settings": {
+    "Nq_WP": 1,
+    "J_2N_max": 1,
+    "two_J_3N_max": 1,
+    "tensor_force": true,
+    "isospin_breaking_1S0": true,
+    "p_grid_type": "chebyshev",
+    "three_nucleon_force": "none",
+    "solve_faddeev": false,
+    "calculate_and_store_P123": false,
+    "deuteron_binding_only": true
+  },
+  "production_path_identity_check": {
+    "settings": {
+      "Np_WP": 10,
+      "chebyshev_t": 1.0,
+      "chebyshev_s": 100.0,
+      "Np_per_WP": 8
+    },
+    "binding_only_energy_mev": -0.1086409658,
+    "full_solver_header_energy_mev": -0.10864097,
+    "absolute_difference_mev": 4.2e-09,
+    "passed": true
+  },
+  "default_grid_ladder": [
+    {"Np_WP": 10, "binding_magnitude_mev": 0.1086409658, "error_from_reference_kev": 2115.9340342},
+    {"Np_WP": 20, "binding_magnitude_mev": 1.1181597825, "error_from_reference_kev": 1106.4152175},
+    {"Np_WP": 30, "binding_magnitude_mev": 1.6350098113, "error_from_reference_kev": 589.5651887},
+    {"Np_WP": 40, "binding_magnitude_mev": 1.8827904008, "error_from_reference_kev": 341.7845992},
+    {"Np_WP": 50, "binding_magnitude_mev": 2.0063209541, "error_from_reference_kev": 218.2540459},
+    {"Np_WP": 60, "binding_magnitude_mev": 2.0720757194, "error_from_reference_kev": 152.4992806},
+    {"Np_WP": 80, "binding_magnitude_mev": 2.1370576793, "error_from_reference_kev": 87.5173207},
+    {"Np_WP": 100, "binding_magnitude_mev": 2.1679632394, "error_from_reference_kev": 56.6117606}
+  ],
+  "scale_scan_at_Np40": [
+    {"chebyshev_s": 100.0, "binding_magnitude_mev": 1.8827904008},
+    {"chebyshev_s": 300.0, "binding_magnitude_mev": 2.1374619716},
+    {"chebyshev_s": 400.0, "binding_magnitude_mev": 2.1370877648},
+    {"chebyshev_s": 500.0, "binding_magnitude_mev": 2.1252364121},
+    {"chebyshev_s": 600.0, "binding_magnitude_mev": 2.1073471504},
+    {"chebyshev_s": 800.0, "binding_magnitude_mev": 2.0602467919},
+    {"chebyshev_s": 1000.0, "binding_magnitude_mev": 1.9995853245},
+    {"chebyshev_s": 1200.0, "binding_magnitude_mev": 1.9223431620}
+  ],
+  "optimized_grid_ladder": {
+    "chebyshev_t": 1.0,
+    "chebyshev_s": 300.0,
+    "points": [
+      {"Np_WP": 40, "Np_per_WP": 8, "binding_magnitude_mev": 2.1374619716, "error_from_reference_kev": 87.1130284},
+      {"Np_WP": 60, "Np_per_WP": 8, "binding_magnitude_mev": 2.1851318067, "error_from_reference_kev": 39.4431933},
+      {"Np_WP": 80, "Np_per_WP": 8, "binding_magnitude_mev": 2.2022136982, "error_from_reference_kev": 22.3613018},
+      {"Np_WP": 100, "Np_per_WP": 8, "binding_magnitude_mev": 2.2102026780, "error_from_reference_kev": 14.3723220},
+      {"Np_WP": 120, "Np_per_WP": 4, "binding_magnitude_mev": 2.2145674684, "error_from_reference_kev": 10.0075316},
+      {"Np_WP": 150, "Np_per_WP": 4, "binding_magnitude_mev": 2.2181536272, "error_from_reference_kev": 6.4213728}
+    ],
+    "inverse_square_fit": {
+      "model": "E_binding(Np) = E_infinity + a / Np^2",
+      "fit_range_Np": [60, 80, 100, 120, 150],
+      "E_infinity_mev": 2.2243837404,
+      "a_mev": -141.452486,
+      "difference_from_reference_kev": -0.191260,
+      "maximum_fit_residual_kev": 0.068092
+    }
+  },
+  "potential_quadrature_ladder_at_Np40_s300": [
+    {"Np_per_WP": 4, "binding_magnitude_mev": 2.1374619762},
+    {"Np_per_WP": 6, "binding_magnitude_mev": 2.1374619716},
+    {"Np_per_WP": 8, "binding_magnitude_mev": 2.1374619716},
+    {"Np_per_WP": 10, "binding_magnitude_mev": 2.1374619716},
+    {"Np_per_WP": 12, "binding_magnitude_mev": 2.1374619716},
+    {"Np_per_WP": 16, "binding_magnitude_mev": 2.1374619716}
+  ],
+  "gates": {
+    "same_production_V_WP_and_SWP_path": true,
+    "P123_and_Faddeev_bypassed": true,
+    "Np_per_WP_converged_at_4": true,
+    "inverse_square_limit_consistent_with_reference_within_1_kev": true,
+    "Np80_s300_passes_20_kev_binding_gate": false,
+    "Np100_s300_passes_20_kev_binding_gate": true
+  },
+  "disposition": {
+    "existing_Np10_Ay_artifacts_are_physical": false,
+    "minimum_tested_p_grid_passing_current_binding_gate": "Np_WP=100, chebyshev_t=1, chebyshev_s=300",
+    "remaining_before_physical_Ay": [
+      "separate p- and q-grid tuning so the p-grid scale does not degrade the 10 MeV q resolution",
+      "demonstrate Ay convergence itself on paired 2NF/full-N2LO-3NF runs",
+      "satisfy the Padé all-converged gate and all six convergence ladders"
+    ]
+  }
+}

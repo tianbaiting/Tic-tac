@@ -166,8 +166,12 @@ public:
 
 		initialize(argc, argv);
 
-		for (int chn_3N=0; chn_3N<pw_states_.N_chn_3N; chn_3N++){
-			process_channel(chn_3N);
+		if (run_parameters_.deuteron_binding_only) {
+			process_deuteron_binding_only();
+		} else {
+			for (int chn_3N=0; chn_3N<pw_states_.N_chn_3N; chn_3N++){
+				process_channel(chn_3N);
+			}
 		}
 
 		auto program_end = std::chrono::system_clock::now();
@@ -224,16 +228,95 @@ private:
 		construct_symmetric_pw_states(pw_states_,
 									  run_parameters_);
 
-		/* Allocate deuteron-channel index-lookup arrays */
-		solve_config_.deuteron_idx_arrays = new int* [pw_states_.N_chn_3N];
-		solve_config_.deuteron_num_array  = new int  [pw_states_.N_chn_3N];
+		if (!run_parameters_.deuteron_binding_only) {
+			/* Allocate deuteron-channel index-lookup arrays */
+			solve_config_.deuteron_idx_arrays = new int* [pw_states_.N_chn_3N];
+			solve_config_.deuteron_num_array  = new int  [pw_states_.N_chn_3N];
+		}
 
 		make_fwp_statespace(fwp_states_, run_parameters_);
 
 		/* Verify either P123 or U is being calculated, or both */
-		if (run_parameters_.solve_faddeev==false && run_parameters_.calculate_and_store_P123==false){
+		if (!run_parameters_.deuteron_binding_only
+			&& run_parameters_.solve_faddeev==false
+			&& run_parameters_.calculate_and_store_P123==false){
 			raise_error("Both solve_faddeev=false and calculate_and_store_P123==false so code has nothing to do!");
 		}
+	}
+
+	// [EN] A fail-closed preflight for grid studies. This calls the same
+	// production V_WP builder and make_swp_states diagonalizer as a full channel
+	// solve, but returns before constructing P123. The JSON is intentionally a
+	// raw numerical result: acceptance tolerances belong to downstream audits.
+	// / [CN] 用于网格阶梯的严格前置诊断。这里与完整通道求解调用完全相同的
+	// V_WP 构造器和 make_swp_states 对角化器，但在构造 P123 前返回。JSON 只记录
+	// 原始数值，物理接受阈值由下游审计决定。
+	void process_deuteron_binding_only() {
+		const two_body_channel_layout two_body_layout = make_two_body_channel_layout(
+			J_2N_max_, run_parameters_, Np_WP_);
+
+		std::vector<double> V_WP_unco_array(two_body_layout.V_unco_array_size);
+		std::vector<double> V_WP_coup_array(two_body_layout.V_coup_array_size);
+		double* V_WP_coup_ptr = two_body_layout.V_coup_array_size > 0
+			? V_WP_coup_array.data() : nullptr;
+
+		printf(" - Constructing 2N-potential matrices in WP basis ... \n");
+		calculate_potential_matrices_array_in_WP_basis(
+			V_WP_unco_array.data(), two_body_layout.num_2N_unco_states,
+			V_WP_coup_ptr, two_body_layout.num_2N_coup_states,
+			fwp_states_, pw_states_, pot_ptr_.get(), run_parameters_);
+		printf("   - Done \n");
+
+		std::vector<double> e_SWP_unco_array(
+			(Np_WP_ + 1) * two_body_layout.num_2N_unco_states);
+		std::vector<double> e_SWP_coup_array(
+			2 * (Np_WP_ + 1) * two_body_layout.num_2N_coup_states);
+		std::vector<double> C_WP_unco_array(two_body_layout.V_unco_array_size);
+		std::vector<double> C_WP_coup_array(two_body_layout.V_coup_array_size);
+		double* e_SWP_coup_ptr = two_body_layout.num_2N_coup_states > 0
+			? e_SWP_coup_array.data() : nullptr;
+		double* C_WP_coup_ptr = two_body_layout.V_coup_array_size > 0
+			? C_WP_coup_array.data() : nullptr;
+
+		double E_bound = 0.0;
+		swp_statespace swp_states;
+		printf(" - Constructing 2N SWPs ... \n");
+		make_swp_states(e_SWP_unco_array.data(), e_SWP_coup_ptr,
+			C_WP_unco_array.data(), C_WP_coup_ptr,
+			V_WP_unco_array.data(), V_WP_coup_ptr,
+			two_body_layout.num_2N_unco_states,
+			two_body_layout.num_2N_coup_states,
+			E_bound, fwp_states_, swp_states, pw_states_, run_parameters_);
+		printf("   - Using E_bound = %.10f MeV \n", E_bound);
+		printf("   - Done \n");
+
+		const std::string output_path = run_parameters_.output_folder
+			+ "/deuteron_binding.json";
+		std::ofstream output(output_path);
+		if (!output) {
+			raise_error("Unable to open file " + output_path);
+		}
+		output << std::setprecision(17)
+			   << "{\n"
+			   << "  \"schema\": \"tictac.deuteron_binding.v1\",\n"
+			   << "  \"calculation_path\": \"production_V_WP_to_SWP\",\n"
+			   << "  \"potential_model\": \"" << run_parameters_.potential_model << "\",\n"
+			   << "  \"energy_mev\": " << E_bound << ",\n"
+			   << "  \"binding_magnitude_mev\": " << -E_bound << ",\n"
+			   << "  \"Np_WP\": " << Np_WP_ << ",\n"
+			   << "  \"Nq_WP\": " << Nq_WP_ << ",\n"
+			   << "  \"J_2N_max\": " << J_2N_max_ << ",\n"
+			   << "  \"Np_per_WP\": " << run_parameters_.Np_per_WP << ",\n"
+			   << "  \"p_grid_type\": \"" << run_parameters_.p_grid_type << "\",\n"
+			   << "  \"chebyshev_t\": " << run_parameters_.chebyshev_t << ",\n"
+			   << "  \"chebyshev_s\": " << run_parameters_.chebyshev_s << "\n"
+			   << "}\n";
+		output.close();
+		std::cout << " - Stored deuteron binding diagnostic at " << output_path << std::endl;
+
+#if TICTAC_USE_NEW_CACHE_LAYER
+		tictac::cache::shutdown();
+#endif
 	}
 
 	// ---- Stage 2: one J^pi channel -------------------------------------------------

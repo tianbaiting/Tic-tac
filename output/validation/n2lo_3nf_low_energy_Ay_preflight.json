@@ -1,0 +1,349 @@
+{
+  "schema": "tictac.low_energy_nd_Ay_validation.v1",
+  "target_tlab_mev": 10.0,
+  "accepted_physics_benchmark": false,
+  "disposition": "diagnostic only; failed acceptance gates",
+  "experiment": {
+    "path": "data/miller_paper3_fig6/Ay_n_expt_Elab10MeV.csv",
+    "theta_deg": [
+      30.0,
+      45.0,
+      60.0,
+      75.0,
+      90.0,
+      105.0,
+      120.0,
+      135.0,
+      150.0,
+      165.0
+    ],
+    "Ay": [
+      0.015,
+      0.035,
+      0.065,
+      0.115,
+      0.15,
+      0.18,
+      0.19,
+      0.175,
+      0.125,
+      0.06
+    ],
+    "uncertainty": [
+      0.015,
+      0.015,
+      0.02,
+      0.02,
+      0.02,
+      0.02,
+      0.02,
+      0.02,
+      0.02,
+      0.02
+    ]
+  },
+  "runs": {
+    "two_nf": {
+      "run_dir": "output/ay_diagnosis_current_binary/j9/solver_out",
+      "parameters": {
+        "two_j_3n_max": 9,
+        "np_wp": 10,
+        "nq_wp": 10,
+        "j_2n_max": 2,
+        "nphi": 24,
+        "nx": 24,
+        "chebyshev_t": 1.0,
+        "chebyshev_s": 100.0,
+        "np_per_wp": 8,
+        "nq_per_wp": 8,
+        "np_per_wp_w1": 2,
+        "nq_per_wp_w1": 2,
+        "tensor_force": "true",
+        "isospin_breaking_1s0": "true",
+        "midpoint_approx": "false",
+        "include_breakup_channels": "false",
+        "potential_model": "Idaho_N3LO",
+        "three_nucleon_force": "none",
+        "c_d": 0.0,
+        "c_e": 0.0,
+        "lambda_3nf_mev": 500.0,
+        "p_grid_type": "chebyshev",
+        "p_grid_file": "",
+        "q_grid_type": "chebyshev",
+        "q_grid_file": "",
+        "energy_input_file": "CPP/Input/lab_energies_miller_gate2.txt"
+      },
+      "binding_energy_mev": -0.10864096999999999,
+      "binding_headers_consistent": true,
+      "expected_blocks": [
+        "1/2-",
+        "1/2+",
+        "3/2-",
+        "3/2+",
+        "5/2-",
+        "5/2+",
+        "7/2-",
+        "7/2+",
+        "9/2-",
+        "9/2+"
+      ],
+      "present_blocks": [
+        "1/2-",
+        "1/2+",
+        "3/2-",
+        "3/2+",
+        "5/2-",
+        "5/2+",
+        "7/2-",
+        "7/2+",
+        "9/2-",
+        "9/2+"
+      ],
+      "missing_blocks": [],
+      "pade_counts": {
+        "converged": 0,
+        "truncated": 400,
+        "unknown": 0
+      }
+    },
+    "two_nf_plus_3nf": {
+      "run_dir": "output/ay_diagnosis_current_binary/j9_3nf/solver_out",
+      "parameters": {
+        "two_j_3n_max": 9,
+        "np_wp": 10,
+        "nq_wp": 10,
+        "j_2n_max": 2,
+        "nphi": 24,
+        "nx": 24,
+        "chebyshev_t": 1.0,
+        "chebyshev_s": 100.0,
+        "np_per_wp": 8,
+        "nq_per_wp": 8,
+        "np_per_wp_w1": 2,
+        "nq_per_wp_w1": 2,
+        "tensor_force": "true",
+        "isospin_breaking_1s0": "true",
+        "midpoint_approx": "false",
+        "include_breakup_channels": "false",
+        "potential_model": "Idaho_N3LO",
+        "three_nucleon_force": "chiral_N2LO_c1c3cDcE_approx",
+        "c_d": -0.2,
+        "c_e": -0.205,
+        "lambda_3nf_mev": 500.0,
+        "p_grid_type": "chebyshev",
+        "p_grid_file": "",
+        "q_grid_type": "chebyshev",
+        "q_grid_file": "",
+        "energy_input_file": "CPP/Input/lab_energies_miller_gate2.txt"
+      },
+      "binding_energy_mev": -0.10864096999999999,
+      "binding_headers_consistent": true,
+      "expected_blocks": [
+        "1/2-",
+        "1/2+",
+        "3/2-",
+        "3/2+",
+        "5/2-",
+        "5/2+",
+        "7/2-",
+        "7/2+",
+        "9/2-",
+        "9/2+"
+      ],
+      "present_blocks": [
+        "1/2-",
+        "1/2+",
+        "3/2-",
+        "3/2+",
+        "5/2-",
+        "5/2+",
+        "7/2-",
+        "7/2+",
+        "9/2-",
+        "9/2+"
+      ],
+      "missing_blocks": [],
+      "pade_counts": {
+        "converged": 34,
+        "truncated": 51,
+        "unknown": 0
+      }
+    }
+  },
+  "gates": {
+    "paired_numerical_setup": {
+      "passed": true,
+      "mismatches": {}
+    },
+    "model_identity": {
+      "passed": false,
+      "two_nf": "none",
+      "two_nf_plus_3nf": "chiral_N2LO_c1c3cDcE_approx",
+      "required_three_nf": "chiral_N2LO_full_factorized"
+    },
+    "deuteron_binding": {
+      "passed": false,
+      "two_nf_mev": -0.10864096999999999,
+      "two_nf_plus_3nf_mev": -0.10864096999999999,
+      "max_error_from_measured_mev": 2.1159290299999998,
+      "pair_delta_mev": 0.0,
+      "tolerance_mev": 0.02
+    },
+    "partial_wave_block_completeness": {
+      "passed": true,
+      "two_nf_missing": [],
+      "two_nf_plus_3nf_missing": []
+    },
+    "pade_honesty": {
+      "passed": false,
+      "two_nf": {
+        "converged": 0,
+        "truncated": 400,
+        "unknown": 0
+      },
+      "two_nf_plus_3nf": {
+        "converged": 34,
+        "truncated": 51,
+        "unknown": 0
+      }
+    },
+    "matched_energy_treatment": {
+      "passed": true,
+      "two_nf_bracket_mev": [
+        6.616133643615171,
+        12.57154309635473
+      ],
+      "two_nf_plus_3nf_bracket_mev": [
+        6.616133643615171,
+        12.57154309635473
+      ]
+    },
+    "Ay_convergence_ladders": {
+      "passed": false,
+      "required": [
+        "Np",
+        "Nq",
+        "W1",
+        "J2N",
+        "J3N",
+        "Pade"
+      ],
+      "missing": [
+        "Np",
+        "Nq",
+        "W1",
+        "J2N",
+        "J3N",
+        "Pade"
+      ],
+      "results": {}
+    },
+    "effect_resolved_above_numerical_uncertainty": {
+      "passed": false,
+      "max_abs_three_nf_effect_Ay": 0.0609680923985255,
+      "estimated_numerical_uncertainty_Ay": null
+    }
+  },
+  "energy_interpolation": {
+    "two_nf": {
+      "values": null,
+      "lower_tlab_mev": 6.616133643615171,
+      "upper_tlab_mev": 12.57154309635473,
+      "upper_weight": 0.5682004542656945
+    },
+    "two_nf_plus_3nf": {
+      "values": null,
+      "lower_tlab_mev": 6.616133643615171,
+      "upper_tlab_mev": 12.57154309635473,
+      "upper_weight": 0.5682004542656945
+    }
+  },
+  "metrics": {
+    "two_nf": {
+      "ay_max": 0.17603464515135345,
+      "theta_at_ay_max_deg": 117.0,
+      "experimental_ay_max": 0.19,
+      "experimental_peak_theta_deg": 120.0,
+      "peak_deficit_model_minus_experiment": -0.013965354848646555,
+      "prediction_at_experimental_peak": 0.16878875405466454,
+      "deficit_at_experimental_peak": -0.021211245945335466,
+      "mae": 0.06923359089976865,
+      "rmse": 0.08288397938380425,
+      "maximum_absolute_residual": 0.1372413641119809,
+      "chi2": 174.05017381388518,
+      "chi2_points": 10,
+      "chi2_per_point": 17.405017381388518,
+      "predictions_at_experiment": [
+        0.0441292692653521,
+        0.053373746681894624,
+        0.04759851838259286,
+        0.027215152910148335,
+        0.03220421985438416,
+        0.11724515772127192,
+        0.16878875405466454,
+        0.037758635888019074,
+        -0.00904437497938343,
+        -0.006598956882137248
+      ],
+      "residuals_at_experiment": [
+        0.0291292692653521,
+        0.01837374668189462,
+        -0.017401481617407143,
+        -0.08778484708985167,
+        -0.11779578014561584,
+        -0.06275484227872807,
+        -0.021211245945335466,
+        -0.1372413641119809,
+        -0.13404437497938343,
+        -0.06659895688213724
+      ]
+    },
+    "two_nf_plus_3nf": {
+      "ay_max": 0.165834185031908,
+      "theta_at_ay_max_deg": 118.0,
+      "experimental_ay_max": 0.19,
+      "experimental_peak_theta_deg": 120.0,
+      "peak_deficit_model_minus_experiment": -0.024165814968092003,
+      "prediction_at_experimental_peak": 0.16291916793150527,
+      "deficit_at_experimental_peak": -0.027080832068494737,
+      "mae": 0.08580732020326774,
+      "rmse": 0.09610337371354548,
+      "maximum_absolute_residual": 0.15521987319271627,
+      "chi2": 244.2797691850067,
+      "chi2_points": 10,
+      "chi2_per_point": 24.42797691850067,
+      "predictions_at_experiment": [
+        0.09764302646875715,
+        0.042278351239213766,
+        -0.004462794800134035,
+        0.007480803212846977,
+        0.036574270754172744,
+        0.10341722709110848,
+        0.16291916793150527,
+        0.03743253829681928,
+        -0.030219873192716268,
+        -0.021293163618308936
+      ],
+      "residuals_at_experiment": [
+        0.08264302646875715,
+        0.007278351239213762,
+        -0.06946279480013404,
+        -0.10751919678715302,
+        -0.11342572924582725,
+        -0.07658277290889151,
+        -0.027080832068494737,
+        -0.1375674617031807,
+        -0.15521987319271627,
+        -0.08129316361830893
+      ]
+    },
+    "R_Ay_rmse_ratio": 1.1594927563567772,
+    "three_nf_effect": {
+      "max_abs_delta_Ay": 0.0609680923985255,
+      "theta_at_max_abs_delta_deg": 24.0,
+      "signed_delta_at_max_abs": 0.0609680923985255
+    }
+  },
+  "interpretation_allowed": false,
+  "interpretation": "R_Ay < 1 means the complete 3NF reduces the discrepancy; R_Ay > 1 means it worsens it.  This interpretation is withheld until every gate passes."
+}

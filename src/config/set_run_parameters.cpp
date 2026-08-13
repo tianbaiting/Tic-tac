@@ -83,6 +83,7 @@ std::string create_input_printout_string(run_params run_parameters){
 	if(run_parameters.parallel_run==true){
 	output_string << "Channel index:                   " << type_to_string(run_parameters.channel_idx) 		  	  		<< "\n";
 	}
+	output_string << "Deuteron binding only:           " << type_to_string(run_parameters.deuteron_binding_only) << "\n";
 	return output_string.str();
 }
 
@@ -236,6 +237,14 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 		}
 		else{
 			raise_error("Invalid value for input parameter solve_faddeev!");
+		}
+	}
+	else if (option == "deuteron_binding_only"){
+		if (input=="true" || input=="false"){
+			run_parameters.deuteron_binding_only = (input=="true");
+		}
+		else{
+			raise_error("Invalid value for input parameter deuteron_binding_only!");
 		}
 	}
 	else if (option == "production_run"){
@@ -608,6 +617,15 @@ void show_usage(){
 			  << seperationLine
 			  << std::endl;
 			  
+	std::cout << "deuteron_binding_only:    Stop after the production 2NF potential and SWP\n"
+			  << "                          diagonalization stages and write deuteron_binding.json.\n"
+			  << "                          Requires solve_faddeev=false, calculate_and_store_P123=false,\n"
+			  << "                          parameter_walk=false, parallel_run=false, and\n"
+			  << "                          three_nucleon_force=none.\n"
+			  << "Example:                  deuteron_binding_only=true\n"
+			  << seperationLine
+			  << std::endl;
+
 	std::cout << "solve_dense:              Tell program whether to solve the Faddeev equation using\n"
 			  << "                          a dense LAPACK solver or with Pade resummation. Note that\n"
 			  << "                          the dense solver is VERY SLOW compared to the Pade resummation.\n"
@@ -732,6 +750,7 @@ void set_default_values(run_params& run_parameters){
 	run_parameters.solve_faddeev		    = true;
 	run_parameters.solve_dense				= false;
 	run_parameters.production_run		    = true;
+	run_parameters.deuteron_binding_only   = false;
 	run_parameters.energy_input_file        = "lab_energies.txt";
 	run_parameters.output_folder  	        = "Output";
 	run_parameters.P123_folder  	        = "cache/p123";
@@ -809,6 +828,18 @@ void set_run_parameters(int& argc, char* argv[], run_params& run_parameters){
 	}
 	if ( run_parameters.two_J_3N_max%2==0 ||  run_parameters.two_J_3N_max<=0 ){
 		raise_error("Cannot have even two_J_3N_max!");
+	}
+
+	if (run_parameters.deuteron_binding_only) {
+		if (run_parameters.solve_faddeev || run_parameters.calculate_and_store_P123) {
+			raise_error("deuteron_binding_only=true requires solve_faddeev=false and calculate_and_store_P123=false");
+		}
+		if (run_parameters.parameter_walk || run_parameters.parallel_run) {
+			raise_error("deuteron_binding_only=true does not support parameter_walk or parallel_run");
+		}
+		if (run_parameters.three_nucleon_force != "none") {
+			raise_error("deuteron_binding_only=true is a 2NF diagnostic and requires three_nucleon_force=none");
+		}
 	}
 
 	// [EN] w1_scale debug-only guard (fix/3nf-physics-contract Phase 5).

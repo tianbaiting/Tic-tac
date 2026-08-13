@@ -26,17 +26,16 @@ class TestPhysicsValidation(unittest.TestCase):
         "Solver not built"
     )
     def test_3nf_improves_ay(self):
-        """With 3NF enabled, Ay discrepancy should be reduced vs 2NF-only."""
-        # This test runs the full pipeline via examples/deuteron_proton_Ay.py
-        # with and without 3NF, and compares RMSE against experiment.
-        #
-        # Implementation depends on the observable extraction code in
-        # examples/compare_Ay_experiment.py.
-        #
-        # For now, this is a placeholder that documents the intended test.
-        # The full implementation will be added once the 1PE-CT and 2PE terms
-        # are verified to produce correct matrix elements.
-        self.skipTest("Full physics validation requires completed 3NF implementation")
+        """A complete, converged 3NF run may improve, preserve, or worsen Ay."""
+        # Operator completeness is no longer the blocker.  The remaining gate
+        # is a paired set of solver artifacts with physical deuteron binding,
+        # complete J^pi coverage, honest Pade tails, and Ay convergence ladders
+        # in Np, Nq, W1, J2N, J3N, and resummation order.  The fail-closed
+        # artifact audit lives in examples/audit_low_energy_Ay.py.
+        self.skipTest(
+            "No complete-N2LO low-energy Ay artifact set has passed the "
+            "convergence audit"
+        )
 
 
 if __name__ == "__main__":

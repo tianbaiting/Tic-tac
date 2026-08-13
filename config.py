@@ -36,6 +36,7 @@ class TicTacConfig:
             'include_breakup_channels': False,
             'solve_faddeev': True,
             'solve_dense': False,
+            'deuteron_binding_only': False,
             'production_run': True,
             'potential_model': 'LO_internal',
             'parameter_walk': False,
