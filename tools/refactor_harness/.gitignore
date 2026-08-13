@@ -7,3 +7,12 @@ out_2nf/
 cache_golden/
 cache_2nf/
 current_hashes.txt
+out_j3nf_cutoff/
+out_a/
+out_b/
+out_c/
+cache_a/
+cache_b/
+cache_c/
+cache_j3nf_cutoff/
+input_j3nf_multiblock.txt.bak

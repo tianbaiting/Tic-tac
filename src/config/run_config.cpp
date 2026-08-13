@@ -23,6 +23,7 @@ RunConfig make_run_config(const run_params& rp)
 	cfg.physics.three_body.c_E                  = rp.c_E;
 	cfg.physics.three_body.Lambda_3NF           = rp.Lambda_3NF;
 	cfg.physics.three_body.w1_scale             = rp.w1_scale;
+	cfg.physics.three_body.two_J_3NF_force_max  = rp.two_J_3NF_force_max;
 
 	cfg.truncation.two_J_3N_max = rp.two_J_3N_max;
 	cfg.truncation.J_2N_max     = rp.J_2N_max;
@@ -92,6 +93,7 @@ void apply_to(run_params& rp, const RunConfig& cfg)
 	rp.c_E                 = cfg.physics.three_body.c_E;
 	rp.Lambda_3NF          = cfg.physics.three_body.Lambda_3NF;
 	rp.w1_scale            = cfg.physics.three_body.w1_scale;
+	rp.two_J_3NF_force_max = cfg.physics.three_body.two_J_3NF_force_max;
 
 	rp.two_J_3N_max = cfg.truncation.two_J_3N_max;
 	rp.J_2N_max     = cfg.truncation.J_2N_max;

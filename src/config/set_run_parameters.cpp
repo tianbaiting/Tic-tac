@@ -40,6 +40,7 @@ std::string create_input_printout_string(run_params run_parameters){
 	std::ostringstream output_string;
 	output_string << "Running program for:" << std::endl;
 	output_string << "two_J_3N_max:                    " << type_to_string(run_parameters.two_J_3N_max) 		  	  	<< "\n";
+	output_string << "two_J_3NF_force_max:             " << type_to_string(run_parameters.two_J_3NF_force_max) 	  	<< "\n";
 	output_string << "Np_WP:                           " << type_to_string(run_parameters.Np_WP) 				  	  	<< "\n";
 	output_string << "Nq_WP:                           " << type_to_string(run_parameters.Nq_WP) 				  	  	<< "\n";
 	output_string << "J_2N_max:                        " << type_to_string(run_parameters.J_2N_max) 			  	  	<< "\n";
@@ -97,6 +98,11 @@ bool read_and_set_parameter(run_params& run_parameters, std::string option, std:
 	
 	if (option == "two_J_3N_max"){
 		run_parameters.two_J_3N_max = std::stoi(input);
+	}
+	else if (option == "two_J_3NF_force_max"){
+		// Independent 3NF-active J cutoff. 3NF/W1 active iff two_J_3N <= this.
+		// -1 (default) = active in all solved blocks. See docs/j3nf_truncation_design.md.
+		run_parameters.two_J_3NF_force_max = std::stoi(input);
 	}
 	else if (option == "Np_WP"){
 		run_parameters.Np_WP = std::stoi(input);
@@ -732,6 +738,8 @@ void set_default_values(run_params& run_parameters){
 
 	/* Default parameters */
 	run_parameters.two_J_3N_max 	        = 1;
+	// Default -1 = 3NF active in all solved blocks (bit-identical to pre-cutoff).
+	run_parameters.two_J_3NF_force_max      = -1;
 	run_parameters.Np_WP		 	        = 50;
 	run_parameters.Nq_WP		 	        = 50;
 	run_parameters.J_2N_max	  	  	        = 3;

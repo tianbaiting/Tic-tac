@@ -42,6 +42,10 @@ struct ThreeBodyForceConfig {
 	// Diagnostic/fault-injection only; MUST be 1.0 in physics runs
 	// (docs/three_nf_equation_contract.md §8).
 	double      w1_scale    = 1.0;
+	// Independent 3NF-active J cutoff: 3NF active iff two_J_3N <= this.
+	// Default -1 = active in ALL solved blocks (bit-identical to pre-cutoff).
+	// See docs/j3nf_truncation_design.md.
+	int         two_J_3NF_force_max = -1;
 };
 
 struct PhysicsConfig {

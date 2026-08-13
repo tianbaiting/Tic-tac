@@ -103,6 +103,14 @@ typedef struct channel_os_indexing{	// This should be renamed solution_configura
 // still exposes a legacy key=value interface. Keeping them in one record avoids long argument chains while the
 // build is migrated from `CPP/` to `src/`. / [CN] 运行参数同时包含物理截断、离散化旋钮和 IO 路径，因为当前求解器仍然对外暴露旧式 key=value 接口；在从 `CPP/` 迁移到 `src/` 的过程中，把它们放在同一记录里能避免冗长的参数链。
 typedef struct run_params{
+	// [EN] Independent 3NF-active J cutoff. The total Faddeev calculation runs
+	// to two_J_3N_max, but the 3NF (and hence W1 construction) is active only in
+	// blocks with two_J_3N <= two_J_3NF_force_max. Default -1 = active in ALL
+	// solved blocks (bit-identical to the pre-cutoff behaviour). A block with
+	// two_J_3N above the cutoff runs the pure-2NF kernel K=P V (tnf=nullptr),
+	// builds no W1, and emits no W1 cache entries. See docs/j3nf_truncation_design.md.
+	// / [CN] 独立的 3NF 激活 J 截断。默认 -1 = 全部块激活（逐比特复现旧行为）。
+	int         two_J_3NF_force_max;
 	int         two_J_3N_max;
 	int         Np_WP;
 	int         Nq_WP;

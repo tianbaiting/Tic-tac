@@ -25,6 +25,7 @@ static run_params sentinel_run_params()
 {
 	run_params rp{};
 	rp.two_J_3N_max = 7;   rp.Np_WP = 11;   rp.Nq_WP = 13;   rp.J_2N_max = 3;
+	rp.two_J_3NF_force_max = 5;   // independent 3NF-active J cutoff (default -1)
 	rp.Nphi = 41;  rp.Nx = 43;  rp.Np_per_WP = 5;  rp.Nq_per_WP = 7;
 	rp.Np_per_WP_W1 = 2;  rp.Nq_per_WP_W1 = 4;  rp.Nangle_3NF = 6;
 	rp.pade_max_order = 24;  rp.channel_idx = 2;  rp.P123_omp_num_threads = 8;
@@ -56,7 +57,7 @@ static bool run_params_equal(const run_params& a, const run_params& b)
 #define EQI(x) ((a.x) == (b.x))
 #define EQB(x) ((a.x) == (b.x))
 #define EQS(x) (same_str(a.x, b.x))
-	return EQI(two_J_3N_max) && EQI(Np_WP) && EQI(Nq_WP) && EQI(J_2N_max)
+	return EQI(two_J_3N_max) && EQI(two_J_3NF_force_max) && EQI(Np_WP) && EQI(Nq_WP) && EQI(J_2N_max)
 	    && EQI(Nphi) && EQI(Nx) && EQI(Np_per_WP) && EQI(Nq_per_WP)
 	    && EQI(Np_per_WP_W1) && EQI(Nq_per_WP_W1) && EQI(Nangle_3NF)
 	    && EQI(pade_max_order) && EQI(channel_idx) && EQI(P123_omp_num_threads)

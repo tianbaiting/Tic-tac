@@ -539,7 +539,23 @@ private:
 		faddeev_problem.permutation_dimension = P123_sparse_dim;
 		faddeev_problem.V_WP_unco             = V_WP_unco_array.data();
 		faddeev_problem.V_WP_coup             = V_WP_coup_ptr;
-		faddeev_problem.tnf                   = tnf_ptr_.get();
+		// [EN] Independent 3NF-active J cutoff (docs/j3nf_truncation_design.md).
+		// The total Faddeev calculation runs to two_J_3N_max, but the 3NF
+		// (W1 construction) is active only in blocks with two_J_3N <=
+		// two_J_3NF_force_max. Inactive blocks pass tnf=nullptr, i.e. the exact
+		// 2NF kernel K=P V: no W1 build, no W1 allocation, no W1 cache entries.
+		// Default two_J_3NF_force_max=-1 (or >= two_J_3N_max) = active everywhere.
+		// / [CN] 独立的 3NF 激活 J 截断：超出截断的块走纯 2NF 核（tnf=nullptr）。
+		const bool three_nf_active_in_block =
+		    (tnf_ptr_ != nullptr) &&
+		    (run_parameters_.two_J_3NF_force_max < 0 ||
+		     two_J_3N <= run_parameters_.two_J_3NF_force_max);
+		faddeev_problem.tnf = three_nf_active_in_block ? tnf_ptr_.get() : nullptr;
+		if (tnf_ptr_ != nullptr && !three_nf_active_in_block) {
+			printf("   - 3NF inactive for this J^pi block "
+			       "(two_J_3N=%d > two_J_3NF_force_max=%d): pure-2NF kernel.\n",
+			       two_J_3N, run_parameters_.two_J_3NF_force_max);
+		}
 		faddeev_problem.G_array               = G_array.data();
 		faddeev_problem.scattering_basis      = &swp_states;
 		faddeev_problem.packet_grid           = &fwp_states_;
