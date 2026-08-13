@@ -123,6 +123,17 @@ int main()
 		1.3783489193672998e-2);
 	expect_close("exact Hermitian reverse", off_diagonal_reverse,
 		off_diagonal, 2.0e-12);
+	const std::vector<std::pair<int, int>> batch_channels{{1, 2}, {1, 1}, {0, 3}};
+	std::vector<double> batch_values;
+	all.W1_elements_for_channels(
+		batch_channels, p_bra, q_bra, p_ket, q_ket, space.pw, batch_values);
+	for (std::size_t index = 0; index < batch_channels.size(); ++index) {
+		const auto channel = batch_channels[index];
+		const double scalar_value = all.W1_element(
+			channel.first, channel.second,
+			p_bra, q_bra, p_ket, q_ket, space.pw);
+		expect_true("batch/scalar bitwise equality", batch_values[index] == scalar_value);
+	}
 	chiral_N2LO_3NF_factorized all_order6(
 		-0.2, -0.205, 500.0, -0.81, -3.2, 5.4, 6);
 	expect_close("T=3/2 negative-parity all", all_order6.W1_element(

@@ -26,6 +26,11 @@ public:
 	                  double p_r, double q_r,
 	                  double p_c, double q_c,
 	                  const pw_3N_statespace& pw_states) const override;
+	void W1_elements_for_channels(
+		const std::vector<std::pair<int, int>>& channels,
+		double p_r, double q_r, double p_c, double q_c,
+		const pw_3N_statespace& pw_states,
+		std::vector<double>& values) const override;
 
 	double lec_c1_gev() const override { return m_c1_gev; }
 	double lec_c3_gev() const override { return m_c3_gev; }

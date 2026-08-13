@@ -992,6 +992,47 @@ std::array<complex, 5> project_ls_components(
 	return result;
 }
 
+double evaluate_factorized_element(
+	int alpha_r, int alpha_c, double p_r, double q_r,
+	double p_c, double q_c, const pw_3N_statespace& pw_states,
+	double c_D, double c_E, double lambda,
+	double c1_gev, double c3_gev, double c4_gev, int transfer_order,
+	orbital_cache& cache, reduced_orbital_cache& reduced_cache)
+{
+	const jj_channel bra = make_jj_channel(alpha_r, pw_states);
+	const jj_channel ket = make_jj_channel(alpha_c, pw_states);
+	if (bra.two_total_J != ket.two_total_J || bra.two_total_T != ket.two_total_T) return 0.0;
+	const auto bra_expansion = get_ls_expansion(bra);
+	const auto ket_expansion = get_ls_expansion(ket);
+	std::array<complex, 5> totals{};
+	totals.fill(0.0);
+	const double c1_fm = c1_gev * hbarc / 1000.0;
+	const double c3_fm = c3_gev * hbarc / 1000.0;
+	const double c4_fm = c4_gev * hbarc / 1000.0;
+	for (const auto& bra_ls : *bra_expansion) {
+		for (const auto& ket_ls : *ket_expansion) {
+			const auto components = project_ls_components(
+				bra_ls.first, ket_ls.first, p_c, q_c, p_r, q_r,
+				c_D, c_E, c1_fm, c3_fm, c4_fm, transfer_order,
+				cache, reduced_cache);
+			const double coefficient = bra_ls.second * ket_ls.second;
+			for (int component = 0; component < 5; ++component) {
+				totals[component] += coefficient * components[component];
+			}
+		}
+	}
+	complex total{0.0, 0.0};
+	for (complex value : totals) total += value;
+	const double fourier_normalization = std::pow(2.0 * pi_value, -6);
+	total *= fourier_normalization
+	       * regulator(p_r, q_r, lambda) * regulator(p_c, q_c, lambda);
+	const double tolerance = 2.0e-9 * std::max(1.0, std::abs(total.real()));
+	if (std::abs(total.imag()) > tolerance) {
+		throw std::runtime_error("factorized complete 3NF produced a non-real scalar");
+	}
+	return total.real();
+}
+
 } // namespace
 
 chiral_N2LO_3NF_factorized::chiral_N2LO_3NF_factorized(
@@ -1025,40 +1066,29 @@ double chiral_N2LO_3NF_factorized::W1_element(
 	int alpha_r, int alpha_c, double p_r, double q_r,
 	double p_c, double q_c, const pw_3N_statespace& pw_states) const
 {
-	const jj_channel bra = make_jj_channel(alpha_r, pw_states);
-	const jj_channel ket = make_jj_channel(alpha_c, pw_states);
-	if (bra.two_total_J != ket.two_total_J || bra.two_total_T != ket.two_total_T) return 0.0;
-	const auto bra_expansion = get_ls_expansion(bra);
-	const auto ket_expansion = get_ls_expansion(ket);
-	std::array<complex, 5> totals{};
-	totals.fill(0.0);
 	orbital_cache cache;
 	reduced_orbital_cache reduced_cache;
-	const double c1_fm = m_c1_gev * hbarc / 1000.0;
-	const double c3_fm = m_c3_gev * hbarc / 1000.0;
-	const double c4_fm = m_c4_gev * hbarc / 1000.0;
-	for (const auto& bra_ls : *bra_expansion) {
-		for (const auto& ket_ls : *ket_expansion) {
-			const auto components = project_ls_components(
-				bra_ls.first, ket_ls.first, p_c, q_c, p_r, q_r,
-				m_c_D, m_c_E, c1_fm, c3_fm, c4_fm, m_transfer_order,
-				cache, reduced_cache);
-			const double coefficient = bra_ls.second * ket_ls.second;
-			for (int component = 0; component < 5; ++component) {
-				totals[component] += coefficient * components[component];
-			}
-		}
+	return evaluate_factorized_element(
+		alpha_r, alpha_c, p_r, q_r, p_c, q_c, pw_states,
+		m_c_D, m_c_E, m_lambda, m_c1_gev, m_c3_gev, m_c4_gev,
+		m_transfer_order, cache, reduced_cache);
+}
+
+void chiral_N2LO_3NF_factorized::W1_elements_for_channels(
+	const std::vector<std::pair<int, int>>& channels,
+	double p_r, double q_r, double p_c, double q_c,
+	const pw_3N_statespace& pw_states, std::vector<double>& values) const
+{
+	values.resize(channels.size());
+	orbital_cache cache;
+	reduced_orbital_cache reduced_cache;
+	for (std::size_t index = 0; index < channels.size(); ++index) {
+		values[index] = evaluate_factorized_element(
+			channels[index].first, channels[index].second,
+			p_r, q_r, p_c, q_c, pw_states,
+			m_c_D, m_c_E, m_lambda, m_c1_gev, m_c3_gev, m_c4_gev,
+			m_transfer_order, cache, reduced_cache);
 	}
-	complex total{0.0, 0.0};
-	for (complex value : totals) total += value;
-	const double fourier_normalization = std::pow(2.0 * pi_value, -6);
-	total *= fourier_normalization
-	       * regulator(p_r, q_r, m_lambda) * regulator(p_c, q_c, m_lambda);
-	const double tolerance = 2.0e-9 * std::max(1.0, std::abs(total.real()));
-	if (std::abs(total.imag()) > tolerance) {
-		throw std::runtime_error("factorized complete 3NF produced a non-real scalar");
-	}
-	return total.real();
 }
 
 double chiral_N2LO_3NF_factorized::axial_coupling_3nf() const { return gA; }

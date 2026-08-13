@@ -209,83 +209,119 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
     };
 #endif
 
-    #pragma omp parallel for schedule(dynamic)
+    // Load complete slabs first, then batch all missing channel pairs at each
+    // common Jacobi-momentum tuple.  The complete factorized projector can
+    // thereby reuse its momentum-dependent orbital kernels across the whole
+    // partial-wave block set.  The default model implementation still calls
+    // W1_element independently, preserving behavior for other 3NF models.
+    std::vector<std::size_t> missing_blocks;
+    missing_blocks.reserve(num_blocks);
     for (std::size_t blk = 0; blk < num_blocks; ++blk) {
+        double* slab = &m_data[blk * per_block];
+#if TICTAC_USE_NEW_CACHE_LAYER
         const int a_r = m_blocks[blk].first;
         const int a_c = m_blocks[blk].second;
-        // 3NF audit B6: storage is now double (was float).
-        double*   slab = &m_data[blk * per_block];
-
-#if TICTAC_USE_NEW_CACHE_LAYER
-        tictac::cache::W1Key k = build_w1_key_for_block(a_r, a_c);
+        const tictac::cache::W1Key k = build_w1_key_for_block(a_r, a_c);
         tictac::cache::W1Block out_block{};
-        auto res = tictac::cache::lookup_w1(k, &out_block);
+        const auto res = tictac::cache::lookup_w1(k, &out_block);
         if (res.hit
-            && (size_t)out_block.Nq == m_Nq
-            && (size_t)out_block.Np == m_Np
+            && static_cast<std::size_t>(out_block.Nq) == m_Nq
+            && static_cast<std::size_t>(out_block.Np) == m_Np
             && out_block.data.size() == per_block)
         {
             std::memcpy(slab, out_block.data.data(), per_block * sizeof(double));
             continue;
         }
 #endif
+        missing_blocks.push_back(blk);
+    }
+    if (missing_blocks.empty()) return;
 
-        // Cache miss: integrate W^(1) over each (p_r, q_r, p_c, q_c) bin tuple.
-        for (std::size_t iqr = 0; iqr < m_Nq; ++iqr) {
-            const double inv_sqrt_dq_r = q_inv_sqrtD[iqr];
-            for (std::size_t iqc = 0; iqc < m_Nq; ++iqc) {
-                const double inv_sqrt_dq_c = q_inv_sqrtD[iqc];
-                for (std::size_t ipr = 0; ipr < m_Np; ++ipr) {
-                    const double inv_sqrt_dp_r = p_inv_sqrtD[ipr];
-                    for (std::size_t ipc = 0; ipc < m_Np; ++ipc) {
-                        const double inv_sqrt_dp_c = p_inv_sqrtD[ipc];
+    std::vector<std::pair<int, int>> missing_channels;
+    missing_channels.reserve(missing_blocks.size());
+    for (const std::size_t blk : missing_blocks) {
+        missing_channels.push_back(m_blocks[blk]);
+    }
 
-                        double accum = 0.0;
-                        for (int kqr = 0; kqr < Nq_quad; ++kqr) {
-                            const double q_r_MeV = q_nodes_MeV[iqr * Nq_quad + kqr];
-                            const double w_qr    = q_w_MeV   [iqr * Nq_quad + kqr];
-                            const double q_r_fm  = q_r_MeV * inv_hbarc;
-                            for (int kqc = 0; kqc < Nq_quad; ++kqc) {
-                                const double q_c_MeV = q_nodes_MeV[iqc * Nq_quad + kqc];
-                                const double w_qc    = q_w_MeV   [iqc * Nq_quad + kqc];
-                                const double q_c_fm  = q_c_MeV * inv_hbarc;
-                                for (int kpr = 0; kpr < Np_quad; ++kpr) {
-                                    const double p_r_MeV = p_nodes_MeV[ipr * Np_quad + kpr];
-                                    const double w_pr    = p_w_MeV   [ipr * Np_quad + kpr];
-                                    const double p_r_fm  = p_r_MeV * inv_hbarc;
-                                    for (int kpc = 0; kpc < Np_quad; ++kpc) {
-                                        const double p_c_MeV = p_nodes_MeV[ipc * Np_quad + kpc];
-                                        const double w_pc    = p_w_MeV   [ipc * Np_quad + kpc];
-                                        const double p_c_fm  = p_c_MeV * inv_hbarc;
+    // Populate expensive momentum-independent angular tables in parallel.
+    // Without this warm-up, every momentum-batch worker begins with the same
+    // first channel and waits on the single-flight table builder, serializing
+    // initialization even though distinct channel tables are independent.
+    #pragma omp parallel for schedule(dynamic)
+    for (std::size_t index = 0; index < missing_channels.size(); ++index) {
+        const auto channel = missing_channels[index];
+        static_cast<void>(tnf.W1_element(
+            channel.first, channel.second,
+            p_nodes_MeV.front() * inv_hbarc,
+            q_nodes_MeV.front() * inv_hbarc,
+            p_nodes_MeV.front() * inv_hbarc,
+            q_nodes_MeV.front() * inv_hbarc,
+            pw_states));
+    }
 
-                                        const double w1 = tnf.W1_element(a_r, a_c,
-                                                                          p_r_fm, q_r_fm,
-                                                                          p_c_fm, q_c_fm,
-                                                                          pw_states);
-                                        accum += (p_r_MeV * q_r_MeV * p_c_MeV * q_c_MeV)
-                                               * (w_pr * w_qr * w_pc * w_qc)
-                                               * w1;
-                                    }
-                                }
-                            }
+    #pragma omp parallel for schedule(dynamic)
+    for (std::size_t cell = 0; cell < per_block; ++cell) {
+        std::size_t remaining = cell;
+        const std::size_t ipc = remaining % m_Np;
+        remaining /= m_Np;
+        const std::size_t ipr = remaining % m_Np;
+        remaining /= m_Np;
+        const std::size_t iqc = remaining % m_Nq;
+        const std::size_t iqr = remaining / m_Nq;
+
+        std::vector<double> accum(missing_blocks.size(), 0.0);
+        std::vector<double> w1_values;
+        for (int kqr = 0; kqr < Nq_quad; ++kqr) {
+            const double q_r_MeV = q_nodes_MeV[iqr * Nq_quad + kqr];
+            const double w_qr    = q_w_MeV   [iqr * Nq_quad + kqr];
+            const double q_r_fm  = q_r_MeV * inv_hbarc;
+            for (int kqc = 0; kqc < Nq_quad; ++kqc) {
+                const double q_c_MeV = q_nodes_MeV[iqc * Nq_quad + kqc];
+                const double w_qc    = q_w_MeV   [iqc * Nq_quad + kqc];
+                const double q_c_fm  = q_c_MeV * inv_hbarc;
+                for (int kpr = 0; kpr < Np_quad; ++kpr) {
+                    const double p_r_MeV = p_nodes_MeV[ipr * Np_quad + kpr];
+                    const double w_pr    = p_w_MeV   [ipr * Np_quad + kpr];
+                    const double p_r_fm  = p_r_MeV * inv_hbarc;
+                    for (int kpc = 0; kpc < Np_quad; ++kpc) {
+                        const double p_c_MeV = p_nodes_MeV[ipc * Np_quad + kpc];
+                        const double w_pc    = p_w_MeV   [ipc * Np_quad + kpc];
+                        const double p_c_fm  = p_c_MeV * inv_hbarc;
+
+                        tnf.W1_elements_for_channels(
+                            missing_channels, p_r_fm, q_r_fm, p_c_fm, q_c_fm,
+                            pw_states, w1_values);
+                        const double radial_weight =
+                            (p_r_MeV * q_r_MeV * p_c_MeV * q_c_MeV)
+                            * (w_pr * w_qr * w_pc * w_qc);
+                        for (std::size_t index = 0; index < accum.size(); ++index) {
+                            accum[index] += radial_weight * w1_values[index];
                         }
-
-                        const double bin_norm = inv_sqrt_dp_r * inv_sqrt_dq_r * inv_sqrt_dp_c * inv_sqrt_dq_c;
-                        slab[((iqr * m_Nq + iqc) * m_Np + ipr) * m_Np + ipc]
-                            = accum * bin_norm * inv_hbarc5;
                     }
                 }
             }
         }
 
+        const double bin_norm = p_inv_sqrtD[ipr] * q_inv_sqrtD[iqr]
+                              * p_inv_sqrtD[ipc] * q_inv_sqrtD[iqc];
+        for (std::size_t index = 0; index < missing_blocks.size(); ++index) {
+            m_data[missing_blocks[index] * per_block + cell]
+                = accum[index] * bin_norm * inv_hbarc5;
+        }
+    }
+
 #if TICTAC_USE_NEW_CACHE_LAYER
+    for (const std::size_t blk : missing_blocks) {
+        const int a_r = m_blocks[blk].first;
+        const int a_c = m_blocks[blk].second;
+        const double* slab = &m_data[blk * per_block];
         tictac::cache::W1Block in_block{};
-        in_block.Nq  = (int)m_Nq;
-        in_block.Np  = (int)m_Np;
+        in_block.Nq  = static_cast<int>(m_Nq);
+        in_block.Np  = static_cast<int>(m_Np);
         in_block.a_r = a_r;
         in_block.a_c = a_c;
         in_block.data.assign(slab, slab + per_block);
-        tictac::cache::store_w1(k, in_block);
-#endif
+        tictac::cache::store_w1(build_w1_key_for_block(a_r, a_c), in_block);
     }
+#endif
 }

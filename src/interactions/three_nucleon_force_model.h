@@ -3,6 +3,8 @@
 
 #include <string>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "type_defs.h"
 
@@ -70,9 +72,27 @@ public:
 	// 算符顺序约定（锁定）：弹性 AGS 核使用 (1+P)·W^(1)，(1+P) 在左；
 	// W^(1)·(1+P) 属于另一条 Faddeev 分量方程，二者不可在核内混用。
 	virtual double W1_element(int alpha_r, int alpha_c,
-							  double p_r, double q_r,
-							  double p_c, double q_c,
-							  const pw_3N_statespace& pw_states) const { return 0.0; }
+								  double p_r, double q_r,
+								  double p_c, double q_c,
+								  const pw_3N_statespace& pw_states) const { return 0.0; }
+
+	// Evaluate several channel pairs at one common Jacobi-momentum tuple.  The
+	// default preserves the scalar interface exactly; implementations with a
+	// factorized angular kernel may override it to share momentum-dependent
+	// orbital work across channel pairs.
+	virtual void W1_elements_for_channels(
+		const std::vector<std::pair<int, int>>& channels,
+		double p_r, double q_r, double p_c, double q_c,
+		const pw_3N_statespace& pw_states,
+		std::vector<double>& values) const
+	{
+		values.resize(channels.size());
+		for (std::size_t index = 0; index < channels.size(); ++index) {
+			values[index] = W1_element(
+				channels[index].first, channels[index].second,
+				p_r, q_r, p_c, q_c, pw_states);
+		}
+	}
 
 	// [EN] LEC accessors used by W1_PW_cache to build a complete cache key
 	// (3NF audit B5: previously the cache key omitted c_1, c_3, c_4, allowing
