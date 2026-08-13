@@ -133,6 +133,21 @@
       "candidate_linear_extrapolation_hours_for_one_sector_at_96_threads": 21.2221,
       "interpretation": "Removing repeated momentum powers, ordered cache lookup, and shared weight-table locking cuts the optimistic one-sector estimate by about 3.1 hours, but does not make the required multi-order, multi-J, both-parity paired calculation feasible."
     },
+    "batch_invariant_reuse": {
+      "revision": "964d4d7",
+      "w1_seconds_by_threads": {"1": 53.9, "16": 11.7, "96": 10.4},
+      "comparison_seconds_by_threads": {"1": 58.0, "16": 12.3, "96": 11.1},
+      "all_101_cached_W1_blocks_bitwise_identical": true,
+      "candidate_linear_extrapolation_seconds_for_one_sector_at_96_threads": 69929.6,
+      "candidate_linear_extrapolation_hours_for_one_sector_at_96_threads": 19.4249,
+      "interpretation": "Hoisting the channel-batch regulator and memoizing immutable LS, isospin, and quadrature metadata removes exact redundant work, but the required multi-sector convergence program remains infeasible."
+    },
+    "low_rank_and_streaming_audit": {
+      "artifact": "output/validation/n2lo_3nf_w1_low_rank_feasibility.json",
+      "production_low_rank_accepted": false,
+      "streaming_only_accepted_as_runtime_solution": false,
+      "interpretation": "Streaming does not reduce W1 evaluations, while post-build SVD pays the full construction cost first. Material compression at a 1e-4 block tolerance perturbs small-grid U by up to 0.12 percent pointwise; a 1e-6 tolerance provides little factor-storage benefit."
+    },
     "channel_zero_scan": {
       "description": "All ordered channel pairs were evaluated at three generic nonzero momentum tuples with all c1/c3/c4/cD/cE components enabled.",
       "positive_parity_nonzero_pairs": 100,
@@ -151,8 +166,8 @@
   },
   "decision": {
     "launch_full_paired_physical_Ay_now": false,
-    "reason": "The measured 2NF path is viable, but after exact-Hermitian reuse, restored 96-thread execution, and the bitwise-equivalent projection hot-path optimization, the optimistic extrapolation is still about 21.2 hours for one low-order J-parity sector before the required convergence multipliers.",
-    "next_engineering_target": "Replace materialized four-dimensional W1 construction with a streamed or low-rank contraction.",
+    "reason": "The measured 2NF path is viable, but after exact-Hermitian reuse, restored 96-thread execution, and two bitwise-equivalent projection optimizations, the optimistic extrapolation is still about 19.4 hours for one low-order J-parity sector before the required convergence multipliers.",
+    "next_engineering_target": "Exploit more exact factorized-projector structure or distribute resumable exact W1 construction; low-rank sampling requires a certified U/Ay error ladder before production use.",
     "physical_Ay_conclusion_available": false
   }
 }

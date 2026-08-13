@@ -1,0 +1,78 @@
+{
+  "schema": "tictac.n2lo_3nf_w1_low_rank_feasibility.v1",
+  "generated_on": "2026-08-13",
+  "purpose": "Determine whether streamed or low-rank W1 storage can remove the realistic-grid construction blocker without an uncontrolled physics approximation",
+  "operator_consumption_audit": {
+    "storage_layout": "One dense block per allowed (alpha_r,alpha_c), indexed as (q_r,q_c,p_r,p_c)",
+    "matrix_view": "Each block is a square matrix with row=(q_r,p_r) and column=(q_c,p_c)",
+    "solver_path": "calculate_CPVC_col -> add_one_plus_P_W1_C_col -> W1_PW_cache::get",
+    "current_contraction": "Element-wise W1 lookup inside the p_j contraction that forms W1*C, followed by the sparse (1+P) action",
+    "streaming_effect": "Can reduce resident W1 memory, but does not reduce the number of four-dimensional radial/angular W1 evaluations",
+    "post_build_svd_effect": "Can reduce storage or later contraction work only after the full dense W1 has already been constructed"
+  },
+  "spectral_method": {
+    "block_reshape": "data.reshape(Nq,Nq,Np,Np).transpose(0,2,1,3).reshape(Nq*Np,Nq*Np)",
+    "rank_definition": "Smallest r whose discarded singular-value tail has relative Frobenius norm <= tolerance",
+    "factor_storage_model": "r*(2*n+1) doubles for U_r, singular values, and V_r versus n*n dense doubles",
+    "hermitian_pair_handling": "Off-diagonal reverse blocks use one SVD and its exact transpose; diagonal blocks use an eigen-decomposition and are symmetrized exactly"
+  },
+  "spectra": {
+    "current_schema9_radial_order2_np4_nq3": {
+      "source_cache": "tmp/factorized_scaling/cache_finalhot_t96",
+      "Nalpha": 11,
+      "blocks": 101,
+      "block_dimension": 12,
+      "full_dimension": 132,
+      "relative_hermiticity_residual": 5.3267142871e-16,
+      "tolerances": {
+        "1e-4": {"full_rank": 40, "median_block_rank": 5, "maximum_block_rank": 7, "block_factor_storage_ratio": 0.837115},
+        "1e-6": {"full_rank": 67, "median_block_rank": 7, "maximum_block_rank": 9, "block_factor_storage_ratio": 1.277159},
+        "1e-8": {"full_rank": 101, "median_block_rank": 10, "maximum_block_rank": 11, "block_factor_storage_ratio": 1.694857},
+        "1e-10": {"full_rank": 120, "median_block_rank": 11, "maximum_block_rank": 12, "block_factor_storage_ratio": 1.952695}
+      }
+    },
+    "archived_schema7_midpoint_grid_ladder": {
+      "status": "structural diagnostic only",
+      "limitation": "These radial-order-one midpoint caches predate the exact cE contact correction and are not a physics-convergence data set.",
+      "grids": [
+        {"Np": 4, "Nq": 3, "full_dimension": 132, "full_rank_1e-4": 41, "full_rank_1e-6": 66, "median_block_rank_1e-4": 5, "median_block_rank_1e-6": 7, "block_factor_storage_ratio_1e-4": 0.818, "block_factor_storage_ratio_1e-6": 1.257},
+        {"Np": 6, "Nq": 4, "full_dimension": 264, "full_rank_1e-4": 72, "full_rank_1e-6": 133, "median_block_rank_1e-4": 8, "median_block_rank_1e-6": 13, "block_factor_storage_ratio_1e-4": 0.721, "block_factor_storage_ratio_1e-6": 1.156},
+        {"Np": 8, "Nq": 6, "full_dimension": 528, "full_rank_1e-4": 121, "full_rank_1e-6": 245, "median_block_rank_1e-4": 12, "median_block_rank_1e-6": 23, "block_factor_storage_ratio_1e-4": 0.596, "block_factor_storage_ratio_1e-6": 1.051},
+        {"Np": 10, "Nq": 8, "full_dimension": 880, "full_rank_1e-4": 173, "full_rank_1e-6": 357, "median_block_rank_1e-4": 19, "median_block_rank_1e-6": 34, "block_factor_storage_ratio_1e-4": 0.527, "block_factor_storage_ratio_1e-6": 0.950}
+      ]
+    }
+  },
+  "solver_perturbation_probe": {
+    "configuration": "Np=4,Nq=3,J2Nmax=1,J3N=1/2 positive parity, radial order 2, transfer order 2, schema-9 exact-Hermitian W1, Pade [24/24]",
+    "implementation": "Offline diagnostic copies of the schema-9 HDF5 blocks were reconstructed at the stated ranks and consumed by the unmodified solver; no low-rank production option or cache format was introduced.",
+    "reference_amplitudes": 12,
+    "reference_U_sha256": "5cded06c901a7c5d75c72eca0606e08f44a1200c88ee02326368bd2f089c99ca",
+    "all_convergence_sidecars_bitwise_identical": true,
+    "convergence_sidecar_sha256": "a38c631c6f964668855aa898c0b58eee3e9ffb8cbac7ef52c0643c08ed58d545",
+    "block_tolerance_1e-4": {
+      "achieved_global_W1_relative_frobenius_error": 3.037981628e-5,
+      "U_relative_l2_error": 7.490103150e-5,
+      "U_maximum_absolute_error_mev": 4.852935020e-5,
+      "U_maximum_pointwise_relative_error": 1.226072421e-3
+    },
+    "block_tolerance_1e-6": {
+      "achieved_global_W1_relative_frobenius_error": 3.657366344e-7,
+      "U_relative_l2_error": 8.856637018e-7,
+      "U_maximum_absolute_error_mev": 6.610078091e-7,
+      "U_maximum_pointwise_relative_error": 1.506822932e-5
+    },
+    "interpretation": "The looser truncation is visible in U, while the tighter truncation has little or no factor-storage advantage at the tested grids. Neither probe establishes an Ay error bound."
+  },
+  "decision": {
+    "implement_low_rank_W1_in_production_now": false,
+    "implement_stream_only_W1_now": false,
+    "reasons": [
+      "A post-build factorization leaves the dominant dense W1 construction cost unchanged.",
+      "Streaming addresses a manageable approximately 746 MiB candidate payload rather than the measured construction-time bottleneck.",
+      "At 1e-6 block tolerance, factor storage is larger than dense at the current schema-9 4x3 grid and only about five percent smaller in the archived 10x8 structural diagnostic.",
+      "At 1e-4, compression is material but the small-grid U probe already shows a 0.12 percent maximum pointwise relative perturbation, with no demonstrated bound for cancellation-sensitive Ay."
+    ],
+    "production_requirement_if_revisited": "Use certified adaptive sampling that reduces W1 evaluations before materialization, preserves exact Hermiticity, and passes W1-order, U-matrix, and final Ay convergence ladders.",
+    "next_exact_engineering_target": "Exploit analytic/shared factorized-projector structure further or distribute resumable exact W1 construction; do not silently introduce low-rank physics."
+  }
+}

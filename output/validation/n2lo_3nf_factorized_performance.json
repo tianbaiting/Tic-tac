@@ -36,7 +36,8 @@
     "channel_batching": "46b7308",
     "exact_hermitian_reuse": "d14d2bb",
     "restore_threads_after_P123": "2563e8c",
-    "projection_hot_path": "9eaa5f8"
+    "projection_hot_path": "9eaa5f8",
+    "batch_invariant_reuse": "964d4d7"
   },
   "benchmarks": {
     "two_parity_blocks_200_channel_pairs_one_pass": {
@@ -185,6 +186,31 @@
         },
         "interpretation": "The speedup comes from eliminating repeated transcendental evaluation, ordered-tree lookup, and shared-mutex traffic in the c4-dominated projection loop. The operator formula, quadrature nodes, and per-component accumulation order are unchanged."
       },
+      "batch_invariant_reuse": {
+        "status": "accepted bitwise-equivalent optimization",
+        "revision": "964d4d7",
+        "changes": [
+          "evaluate the common regulator and Fourier normalization once per momentum tuple instead of once per channel",
+          "serve immutable LS expansions and transfer quadrature grids from thread-local front caches",
+          "memoize the four channel-only isospin matrix elements per LS-channel pair"
+        ],
+        "seconds_by_threads": {"1": 53.9, "16": 11.7, "96": 10.4},
+        "comparison_before_batch_invariant_reuse_seconds": {"1": 58.0, "16": 12.3, "96": 11.1},
+        "speedup_by_threads": {"1": 1.0761, "16": 1.0513, "96": 1.0673},
+        "all_101_W1_blocks_bitwise_identical": true,
+        "concatenated_W1_double_payload_sha256": "faa352f1df22a5516881a2e5ac97e82c53a7558b939535bb421ec52348778adb",
+        "U_files_bitwise_identical_across_implementation_and_1_16_96_threads": true,
+        "U_sha256": "f1b1b0c69954ba8358638dd8eb31374da897ebb9ba11c611ed56283dffd77ceb",
+        "convergence_sidecar_sha256": "615177a1f5f9c8e9ed603f6c6c9a8b8916a2e1102b1c7940163b6ec80d587f8f",
+        "candidate_linear_extrapolation_seconds_for_one_sector_at_96_threads": 69929.6,
+        "candidate_linear_extrapolation_hours_for_one_sector_at_96_threads": 19.4249,
+        "verification": {
+          "ctest": "13/13 passed",
+          "related_python_oracle_tests": "10/10 passed",
+          "CPP_make": "passed with the documented conda HDF5/LAPACK prefix"
+        },
+        "interpretation": "The removed work is invariant across the channel batch or depends only on discrete channel metadata. Cached W1 doubles and downstream outputs are bitwise unchanged."
+      },
       "verification": {
         "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
         "radial_order_two_u_and_convergence_files": "byte-identical across channel batching",
@@ -206,6 +232,6 @@
     "The angular-cache, magnetic-factorization, and channel-batching optimizations do not alter the operator formula or per-element summation order.",
     "Exact-Hermitian reuse deliberately replaces separately accumulated reverse slabs with exact transposes; W1 cache schema v7 prevents mixing the two construction contracts.",
     "Before commit 2563e8c, the P123-specific thread limit remained active for W1 and the solver. Restoring the caller setting exposes real W1 scaling without changing P123's requested thread count.",
-    "Commit 9eaa5f8 removes projection hot-path overhead without changing cached W1 values, so the W1 cache schema remains v9."
+    "Commits 9eaa5f8 and 964d4d7 remove projection hot-path and batch-invariant overhead without changing cached W1 values, so the W1 cache schema remains v9."
   ]
 }
