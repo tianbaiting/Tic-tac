@@ -61,7 +61,60 @@ void build_per_bin_quadrature(const double* boundary_array,
     }
 }
 
-}  // namespace
+} // namespace
+
+tictac::cache::W1Key make_w1_key(const three_nucleon_force_model& tnf,
+                                 const run_params&                run_parameters,
+                                 const pw_3N_statespace&          pw_states,
+                                 int                              Np_WP,
+                                 int                              Nq_WP,
+                                 int                              Np_quad,
+                                 int                              Nq_quad,
+                                 int                              a_r,
+                                 int                              a_c,
+                                 const std::string&               p_grid_hash,
+                                 const std::string&               q_grid_hash)
+{
+#if TICTAC_USE_NEW_CACHE_LAYER
+    tictac::cache::W1Key k{};
+    k.schema_version  = tictac::cache::W1_SCHEMA_VERSION;
+    k.potential_model = run_parameters.potential_model;
+    k.tnf_model       = tnf.name();
+    k.Np_WP           = Np_WP;
+    k.Nq_WP           = Nq_WP;
+    k.J_2N_max        = run_parameters.J_2N_max;
+    k.two_J_3N_max    = run_parameters.two_J_3N_max;
+    k.two_J_3N        = pw_states.two_J_3N_array[a_r];
+    k.P_3N            = pw_states.P_3N_array[a_r];
+    k.a_r             = a_r;
+    k.a_c             = a_c;
+    k.c_D             = run_parameters.c_D;
+    k.c_E             = run_parameters.c_E;
+    k.Lambda_3NF      = run_parameters.Lambda_3NF;
+    k.c_1             = tnf.lec_c1_gev();
+    k.c_3             = tnf.lec_c3_gev();
+    k.c_4             = tnf.lec_c4_gev();
+    k.g_A             = tnf.axial_coupling_3nf();
+    k.f_pi_MeV        = tnf.pion_decay_constant_mev_3nf();
+    k.m_pi_MeV        = tnf.pion_mass_mev_3nf();
+    k.Lambda_chi_MeV  = tnf.chiral_scale_mev_3nf();
+    k.hbarc_MeV_fm    = tnf.hbarc_mev_fm_3nf();
+    k.regulator_kind  = "gaussian";
+    k.chebyshev_s        = run_parameters.chebyshev_s;
+    k.chebyshev_t        = run_parameters.chebyshev_t;
+    k.tensor_force       = run_parameters.tensor_force;
+    k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
+    k.Np_per_WP_W1       = Np_quad;
+    k.Nq_per_WP_W1       = Nq_quad;
+    k.Nangle_3NF         = tnf.angular_order_3nf();
+    k.p_grid_hash        = p_grid_hash;
+    k.q_grid_hash        = q_grid_hash;
+    return k;
+#else
+    // Legacy no-cache build: the key is unused, return a default.
+    return tictac::cache::W1Key{};
+#endif
+}
 
 void W1_PW_cache::build(const three_nucleon_force_model& tnf,
                         const double*               p_WP_array,
@@ -167,46 +220,9 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
     // so caches cannot be wrongly reused across different Hamiltonians or
     // momentum grids.
     auto build_w1_key_for_block = [&](int a_r, int a_c) {
-        tictac::cache::W1Key k{};
-        k.schema_version  = tictac::cache::W1_SCHEMA_VERSION;
-        k.potential_model = run_parameters.potential_model;
-        k.tnf_model       = tnf.name();
-        k.Np_WP           = (int)m_Np;
-        k.Nq_WP           = (int)m_Nq;
-        k.J_2N_max        = run_parameters.J_2N_max;
-        k.two_J_3N_max    = run_parameters.two_J_3N_max;
-        k.two_J_3N        = pw_states.two_J_3N_array[a_r];
-        k.P_3N            = pw_states.P_3N_array[a_r];
-        k.a_r             = a_r;
-        k.a_c             = a_c;
-        k.c_D             = run_parameters.c_D;
-        k.c_E             = run_parameters.c_E;
-        k.Lambda_3NF      = run_parameters.Lambda_3NF;
-        // NEW (B5): c_1, c_3, c_4 from the model itself (default 0 for null/stub).
-        k.c_1             = tnf.lec_c1_gev();
-        k.c_3             = tnf.lec_c3_gev();
-        k.c_4             = tnf.lec_c4_gev();
-        k.g_A             = tnf.axial_coupling_3nf();
-        k.f_pi_MeV        = tnf.pion_decay_constant_mev_3nf();
-        k.m_pi_MeV        = tnf.pion_mass_mev_3nf();
-        k.Lambda_chi_MeV  = tnf.chiral_scale_mev_3nf();
-        k.hbarc_MeV_fm    = tnf.hbarc_mev_fm_3nf();
-        // Today every supported chiral 3NF uses a Gaussian regulator; if a
-        // different regulator family is added later, expose it through
-        // three_nucleon_force_model and source it here instead of hardcoding.
-        k.regulator_kind  = "gaussian";
-        k.chebyshev_s        = run_parameters.chebyshev_s;
-        k.chebyshev_t        = run_parameters.chebyshev_t;
-        k.tensor_force       = run_parameters.tensor_force;
-        k.isospin_breaking_1S0 = run_parameters.isospin_breaking_1S0;
-        k.Np_per_WP_W1       = Np_quad;
-        k.Nq_per_WP_W1       = Nq_quad;
-        k.Nangle_3NF         = tnf.angular_order_3nf();
-        // NEW (B5): SHA-256 of the binary representation of the grid arrays.
-        // Computed once outside the block loop and captured by reference.
-        k.p_grid_hash        = p_grid_hash;
-        k.q_grid_hash        = q_grid_hash;
-        return k;
+        return make_w1_key(tnf, run_parameters, pw_states,
+                           (int)m_Np, (int)m_Nq, Np_quad, Nq_quad,
+                           a_r, a_c, p_grid_hash, q_grid_hash);
     };
 #endif
 

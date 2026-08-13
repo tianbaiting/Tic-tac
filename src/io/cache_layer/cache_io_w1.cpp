@@ -4,8 +4,12 @@
 #include "hdf5/serial/hdf5.h"
 #include "hdf5/serial/hdf5_hl.h"
 
+#include <atomic>
+#include <cstdio>      // std::rename, std::remove
 #include <cstring>
 #include <iostream>
+#include <string>
+#include <unistd.h>    // getpid
 
 namespace tictac::cache {
 
@@ -47,8 +51,22 @@ void write_w1_h5(const std::string& path,
                  const W1Block&     in,
                  const std::string& writer_version)
 {
-    hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-    if (file < 0) { std::cerr << "write_w1_h5: failed " << path << "\n"; return; }
+    // [EN] Atomic publication (Phase E crash safety). The block is written to a
+    // unique temp file in the SAME directory (hence the same filesystem, where
+    // POSIX rename() is atomic) and only then renamed onto the final path. A
+    // process killed mid-write therefore never leaves a partial block visible
+    // at the final path; the worst case is an orphaned temp file, which a later
+    // reader never consults. Two workers building the same block each get a
+    // distinct temp name (pid + per-process counter); the second rename simply
+    // overwrites the first with another valid file. read_w1_h5 still re-checks
+    // the key hash, so a corrupt file can never be silently accepted.
+    // / [CN] 原子发布（Phase E 崩溃安全）：先写同目录唯一临时文件，再 rename 到最终路径。
+    static std::atomic<unsigned long long> seq{0};
+    std::string tmp = path + ".tmp." + std::to_string(::getpid()) + "."
+                    + std::to_string(seq.fetch_add(1));
+
+    hid_t file = H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    if (file < 0) { std::cerr << "write_w1_h5: failed (tmp create) " << tmp << "\n"; return; }
 
     // 3NF audit B6 (2026-06-21): changed from H5T_NATIVE_FLOAT to DOUBLE.
     hsize_t dims4[4] = { (hsize_t)in.Nq, (hsize_t)in.Nq, (hsize_t)in.Np, (hsize_t)in.Np };
@@ -67,6 +85,13 @@ void write_w1_h5(const std::string& path,
     write_str_attr(file, "tictac_writer_version", writer_version);
 
     H5Fclose(file);
+
+    // Atomically promote the complete temp file to the final path.
+    if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+        // Raced with another writer, or other failure: remove our orphan and
+        // rely on whichever writer did succeed. The final path is still valid.
+        std::remove(tmp.c_str());
+    }
 }
 
 bool read_w1_h5(const std::string& path,

@@ -16,3 +16,6 @@ cache_b/
 cache_c/
 cache_j3nf_cutoff/
 input_j3nf_multiblock.txt.bak
+# Phase D-J W1 block-db acceptance workspace
+cold_cache/ cold_out/ warm_cache/ warm_out/
+shard_cache/ rest_cache/ restart_cache/

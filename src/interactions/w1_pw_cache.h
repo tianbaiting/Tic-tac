@@ -8,6 +8,25 @@
 #include "type_defs.h"
 
 class three_nucleon_force_model;
+namespace tictac { namespace cache { struct W1Key; } }
+
+// [EN] Construct the cache key for one W^(1) block (alpha_r, alpha_c). Pure
+// function of the model + run config + basis + grid hashes + quadrature orders;
+// shared by W1_PW_cache::build (store/lookup) and the W1 worker (plan/verify),
+// so both sides agree on block identity without the worker re-transcribing it.
+// / [CN] 构造单个 W^(1) 块的缓存键（纯函数），供 build 与 worker 共享。
+tictac::cache::W1Key make_w1_key(const three_nucleon_force_model& tnf,
+                                 const run_params&                run_parameters,
+                                 const pw_3N_statespace&          pw_states,
+                                 int                              Np_WP,
+                                 int                              Nq_WP,
+                                 int                              Np_quad,
+                                 int                              Nq_quad,
+                                 int                              a_r,
+                                 int                              a_c,
+                                 const std::string&               p_grid_hash,
+                                 const std::string&               q_grid_hash);
+
 
 // [EN] Dense W^(1) PW cache.
 //

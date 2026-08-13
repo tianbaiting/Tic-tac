@@ -142,6 +142,56 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 enable_testing()
 add_subdirectory(tests/cpp)
 
+# W1 block-database worker (Phase D/E/F): plan/build/verify exact W1 blocks
+# without running the Faddeev solve. Embarrassingly parallel via --shard K/N.
+add_executable(w1_worker
+    ${CMAKE_SOURCE_DIR}/tools/w1_worker/w1_worker.cpp
+    ${CMAKE_SOURCE_DIR}/src/config/set_run_parameters.cpp
+    ${CMAKE_SOURCE_DIR}/src/config/run_organizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/state_space/make_pw_symm_states.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/state_space/make_wp_states.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/disk_io_routines.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_factorized.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_full_reference.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/three_nucleon_force_model.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/chiral_3nf_recoupling.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/kinetic_conversion.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_p123.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_w1.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_layer.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
+)
+target_include_directories(w1_worker PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/config
+    ${CMAKE_SOURCE_DIR}/src/core
+    ${CMAKE_SOURCE_DIR}/src/core/state_space
+    ${CMAKE_SOURCE_DIR}/src/interactions
+    ${CMAKE_SOURCE_DIR}/src/utils
+    ${CMAKE_SOURCE_DIR}/src/io
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party
+    ${HDF5_INCLUDE_DIRS}
+)
+target_link_libraries(w1_worker
+    OpenMP::OpenMP_CXX
+    ${GSL_LIBRARIES}
+    ${HDF5_CXX_LIBRARIES}
+    ${HDF5_LIBRARIES}
+    ${HDF5_HL_LIBRARIES}
+)
+set_target_properties(w1_worker PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
 # 安装规则
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
