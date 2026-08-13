@@ -260,3 +260,16 @@ target_include_directories(cache_layer_test PRIVATE
 )
 target_link_libraries(cache_layer_test PRIVATE ${HDF5_CXX_LIBRARIES} ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 add_test(NAME cache_layer_test COMMAND cache_layer_test)
+
+# Phase 3: semantic non-owning views over legacy SoA storage. Header-only
+# views, so the test needs no extra sources; it verifies the accessors alias
+# the underlying storage with zero numerical impact.
+add_executable(test_semantic_views
+    test_semantic_views.cpp
+)
+target_include_directories(test_semantic_views PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/core/state_space
+)
+add_test(NAME semantic_views COMMAND test_semantic_views)
