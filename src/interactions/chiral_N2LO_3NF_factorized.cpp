@@ -118,17 +118,29 @@ ls_expansion_table build_ls_expansion(const jj_channel& channel)
 std::shared_ptr<const ls_expansion_table> get_ls_expansion(const jj_channel& channel)
 {
 	using key_type = std::array<int, 8>;
+	using table_ptr = std::shared_ptr<const ls_expansion_table>;
+	// The expansion is immutable after construction and the active state space
+	// contains only a small number of distinct channels.  Avoid taking the
+	// process-wide build lock for every channel at every radial quadrature tuple.
+	static thread_local std::map<key_type, table_ptr> local_cache;
 	static std::mutex cache_mutex;
-	static std::map<key_type, std::shared_ptr<const ls_expansion_table>> cache;
+	static std::map<key_type, table_ptr> cache;
 	const key_type key = channel_key(channel);
+	const auto local_found = local_cache.find(key);
+	if (local_found != local_cache.end()) return local_found->second;
 	{
 		std::lock_guard<std::mutex> lock(cache_mutex);
 		const auto found = cache.find(key);
-		if (found != cache.end()) return found->second;
+		if (found != cache.end()) {
+			local_cache.emplace(key, found->second);
+			return found->second;
+		}
 	}
 	auto candidate = std::make_shared<ls_expansion_table>(build_ls_expansion(channel));
 	std::lock_guard<std::mutex> lock(cache_mutex);
-	return cache.emplace(key, candidate).first->second;
+	table_ptr result = cache.emplace(key, candidate).first->second;
+	local_cache.emplace(key, result);
+	return result;
 }
 
 int product_index(int two_m1, int two_m2, int two_m3)
@@ -238,6 +250,26 @@ complex isospin_matrix_element(const ls_channel& bra, const ls_channel& ket, int
 		}
 	}
 	return inner_product(bra_state, operated);
+}
+
+const std::array<complex, 4>& get_isospin_matrix_elements(
+	const ls_channel& bra, const ls_channel& ket)
+{
+	using key_type = std::array<int, 16>;
+	static thread_local std::map<key_type, std::array<complex, 4>> cache;
+	key_type key{};
+	const auto bra_values = channel_key(bra);
+	const auto ket_values = channel_key(ket);
+	std::copy(bra_values.begin(), bra_values.end(), key.begin());
+	std::copy(ket_values.begin(), ket_values.end(), key.begin() + 8);
+	const auto found = cache.find(key);
+	if (found != cache.end()) return found->second;
+	return cache.emplace(key, std::array<complex, 4>{
+		isospin_matrix_element(bra, ket, 0),
+		isospin_matrix_element(bra, ket, 1),
+		isospin_matrix_element(bra, ket, 2),
+		isospin_matrix_element(bra, ket, 3)
+	}).first->second;
 }
 
 complex spherical_harmonic(int l_value, int m_value, const vector3& direction)
@@ -733,19 +765,28 @@ struct quadrature_grid {
 
 std::shared_ptr<const quadrature_grid> get_quadrature_grid(int order)
 {
+	using grid_ptr = std::shared_ptr<const quadrature_grid>;
+	static thread_local std::map<int, grid_ptr> local_cache;
 	static std::mutex cache_mutex;
-	static std::map<int, std::shared_ptr<const quadrature_grid>> cache;
+	static std::map<int, grid_ptr> cache;
+	const auto local_found = local_cache.find(order);
+	if (local_found != local_cache.end()) return local_found->second;
 	{
 		std::lock_guard<std::mutex> lock(cache_mutex);
 		const auto found = cache.find(order);
-		if (found != cache.end()) return found->second;
+		if (found != cache.end()) {
+			local_cache.emplace(order, found->second);
+			return found->second;
+		}
 	}
 	auto candidate = std::make_shared<quadrature_grid>();
 	candidate->nodes.resize(order);
 	candidate->weights.resize(order);
 	gauss(candidate->nodes.data(), candidate->weights.data(), order);
 	std::lock_guard<std::mutex> lock(cache_mutex);
-	return cache.emplace(order, candidate).first->second;
+	grid_ptr result = cache.emplace(order, candidate).first->second;
+	local_cache.emplace(order, result);
+	return result;
 }
 
 enum class scalar_kernel_kind { contact = 0, two_pion = 1, c3 = 2, one_pion = 3 };
@@ -1052,10 +1093,11 @@ std::array<complex, 5> project_ls_components(
 	const double f_pi = fpi / hbarc;
 	const double pion_mass = mpi / hbarc;
 	const double lambda_chi = 700.0 / hbarc;
-	const complex iso23 = isospin_matrix_element(bra, ket, 0);
-	const complex iso12 = isospin_matrix_element(bra, ket, 1);
-	const complex iso13 = isospin_matrix_element(bra, ket, 2);
-	const complex iso_cross = isospin_matrix_element(bra, ket, 3);
+	const auto& isospin = get_isospin_matrix_elements(bra, ket);
+	const complex iso23 = isospin[0];
+	const complex iso12 = isospin[1];
+	const complex iso13 = isospin[2];
+	const complex iso_cross = isospin[3];
 	const double common = gA * gA / (4.0 * std::pow(f_pi, 4));
 	if ((c1_fm != 0.0 || c3_fm != 0.0) && std::abs(iso23) > 1.0e-15) {
 		if (c1_fm != 0.0) {
@@ -1101,7 +1143,7 @@ std::array<complex, 5> project_ls_components(
 double evaluate_factorized_element(
 	int alpha_r, int alpha_c, double p_r, double q_r,
 	double p_c, double q_c, const pw_3N_statespace& pw_states,
-	double c_D, double c_E, double lambda,
+	double c_D, double c_E, double external_normalization,
 	double c1_gev, double c3_gev, double c4_gev, int transfer_order,
 	orbital_cache& cache, reduced_orbital_cache& reduced_cache)
 {
@@ -1143,9 +1185,7 @@ double evaluate_factorized_element(
 	}
 	complex total{0.0, 0.0};
 	for (complex value : totals) total += value;
-	const double fourier_normalization = std::pow(2.0 * pi_value, -6);
-	total *= fourier_normalization
-	       * regulator(p_r, q_r, lambda) * regulator(p_c, q_c, lambda);
+	total *= external_normalization;
 	const double tolerance = 2.0e-9 * std::max(1.0, std::abs(total.real()));
 	if (std::abs(total.imag()) > tolerance) {
 		throw std::runtime_error("factorized complete 3NF produced a non-real scalar");
@@ -1167,10 +1207,12 @@ void prepare_factorized_channel(
 	const auto ket_expansion = get_ls_expansion(ket);
 	for (const auto& bra_ls : *bra_expansion) {
 		for (const auto& ket_ls : *ket_expansion) {
-			const complex iso23 = isospin_matrix_element(bra_ls.first, ket_ls.first, 0);
-			const complex iso12 = isospin_matrix_element(bra_ls.first, ket_ls.first, 1);
-			const complex iso13 = isospin_matrix_element(bra_ls.first, ket_ls.first, 2);
-			const complex iso_cross = isospin_matrix_element(bra_ls.first, ket_ls.first, 3);
+			const auto& isospin = get_isospin_matrix_elements(
+				bra_ls.first, ket_ls.first);
+			const complex iso23 = isospin[0];
+			const complex iso12 = isospin[1];
+			const complex iso13 = isospin[2];
+			const complex iso_cross = isospin[3];
 			if ((c1_gev != 0.0 || c3_gev != 0.0) && std::abs(iso23) > 1.0e-15) {
 				static_cast<void>(get_weight_table(
 					bra_ls.first, ket_ls.first, algebra_kind::q23));
@@ -1234,9 +1276,12 @@ double chiral_N2LO_3NF_factorized::W1_element(
 {
 	orbital_cache cache;
 	reduced_orbital_cache reduced_cache;
+	const double external_normalization = std::pow(2.0 * pi_value, -6)
+		* regulator(p_r, q_r, m_lambda) * regulator(p_c, q_c, m_lambda);
 	return evaluate_factorized_element(
 		alpha_r, alpha_c, p_r, q_r, p_c, q_c, pw_states,
-		m_c_D, m_c_E, m_lambda, m_c1_gev, m_c3_gev, m_c4_gev,
+		m_c_D, m_c_E, external_normalization,
+		m_c1_gev, m_c3_gev, m_c4_gev,
 		m_transfer_order, cache, reduced_cache);
 }
 
@@ -1248,11 +1293,17 @@ void chiral_N2LO_3NF_factorized::W1_elements_for_channels(
 	values.resize(channels.size());
 	orbital_cache cache;
 	reduced_orbital_cache reduced_cache;
+	// Every channel in this batch shares the same Jacobi momenta.  The regulator
+	// and Fourier normalization are therefore one common scalar, not per-channel
+	// work (notably two exp() calls per channel in the former hot path).
+	const double external_normalization = std::pow(2.0 * pi_value, -6)
+		* regulator(p_r, q_r, m_lambda) * regulator(p_c, q_c, m_lambda);
 	for (std::size_t index = 0; index < channels.size(); ++index) {
 		values[index] = evaluate_factorized_element(
 			channels[index].first, channels[index].second,
 			p_r, q_r, p_c, q_c, pw_states,
-			m_c_D, m_c_E, m_lambda, m_c1_gev, m_c3_gev, m_c4_gev,
+			m_c_D, m_c_E, external_normalization,
+			m_c1_gev, m_c3_gev, m_c4_gev,
 			m_transfer_order, cache, reduced_cache);
 	}
 }
