@@ -92,6 +92,24 @@
       "candidate_linear_extrapolation_seconds_for_one_sector": 325441.6,
       "candidate_linear_extrapolation_hours_for_one_sector": 90.4004
     },
+    "openmp_scaling_after_P123_thread_restore": {
+      "commit": "2563e8c",
+      "w1_seconds_at_threads": {
+        "1": 130.4,
+        "2": 68.7,
+        "4": 39.6,
+        "8": 24.5,
+        "16": 17.3,
+        "32": 14.7,
+        "48": 14.6,
+        "96": 13.0
+      },
+      "one_to_96_thread_speedup": 10.0308,
+      "U_and_convergence_files_bitwise_identical_across_thread_counts": true,
+      "candidate_linear_extrapolation_seconds_for_one_sector_at_96_threads": 87412.0,
+      "candidate_linear_extrapolation_hours_for_one_sector_at_96_threads": 24.2811,
+      "interpretation": "The 96-thread point minimizes measured wall time, but its 10.45 percent parallel efficiency and the higher-order convergence multipliers leave dense W1 construction infeasible for the full paired run."
+    },
     "channel_zero_scan": {
       "description": "All ordered channel pairs were evaluated at three generic nonzero momentum tuples with all c1/c3/c4/cD/cE components enabled.",
       "positive_parity_nonzero_pairs": 100,
@@ -110,7 +128,7 @@
   },
   "decision": {
     "launch_full_paired_physical_Ay_now": false,
-    "reason": "The measured 2NF path is viable, but after exact-Hermitian reuse the optimistic W1 extrapolation is still about 90 hours for one low-order J-parity sector before the required convergence multipliers.",
+    "reason": "The measured 2NF path is viable, but after exact-Hermitian reuse and restoring 96-thread W1 execution the optimistic extrapolation is still about 24.3 hours for one low-order J-parity sector before the required convergence multipliers.",
     "next_engineering_target": "Replace materialized four-dimensional W1 construction with a streamed or low-rank contraction.",
     "physical_Ay_conclusion_available": false
   }

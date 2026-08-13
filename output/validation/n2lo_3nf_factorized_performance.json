@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-08-13",
-  "scope": "factorized complete N2LO W1 projection performance; scalar driver measurements are single-thread and production W1 measurements use four OpenMP threads",
+  "scope": "factorized complete N2LO W1 projection performance; scalar driver measurements are single-thread and production measurements record their effective OpenMP count",
   "hardware": {
     "cpu": "Intel Xeon Gold 5318Y 2.10 GHz",
     "sockets": 2,
@@ -11,7 +11,8 @@
   "build": {
     "type": "Release",
     "flags": "-O3 -DNDEBUG",
-    "driver": "build/tools/3nf_oracle/print_w1_element"
+    "scalar_driver": "build/tools/3nf_oracle/print_w1_element",
+    "production_driver": "build/bin/Tic-tac"
   },
   "physics_parameters": {
     "cE": -0.205,
@@ -33,7 +34,8 @@
     "angular_cache": "b39901e",
     "magnetic_factorization": "18f1974",
     "channel_batching": "46b7308",
-    "exact_hermitian_reuse": "d14d2bb"
+    "exact_hermitian_reuse": "d14d2bb",
+    "restore_threads_after_P123": "2563e8c"
   },
   "benchmarks": {
     "two_parity_blocks_200_channel_pairs_one_pass": {
@@ -77,6 +79,7 @@
         "before_channel_batching_w1_seconds": 162.4,
         "after_channel_batching_w1_seconds": 87.8,
         "after_exact_hermitian_reuse_w1_seconds": 48.4,
+        "effective_threads_before_restore": 3,
         "channel_batching_speedup": 1.8497,
         "hermitian_reuse_speedup": 1.8140,
         "cumulative_speedup": 3.3554,
@@ -85,6 +88,36 @@
         "transpose_filled_blocks_after_hermitian_reuse": 45,
         "total_run_seconds_after_channel_batching": 94.269280,
         "total_run_seconds_after_hermitian_reuse": 54.928159
+      },
+      "openmp_scaling_after_P123_thread_restore": {
+        "P123_omp_num_threads": 3,
+        "OMP_DYNAMIC": false,
+        "pade_max_order": 1,
+        "w1_seconds_by_threads": {
+          "1": 130.4,
+          "2": 68.7,
+          "4": 39.6,
+          "8": 24.5,
+          "16": 17.3,
+          "32": 14.7,
+          "48": 14.6,
+          "96": 13.0
+        },
+        "best_measured_threads": 96,
+        "best_measured_w1_seconds": 13.0,
+        "speedup_from_one_to_96_threads": 10.0308,
+        "parallel_efficiency_at_96": 0.1045,
+        "U_files_bitwise_identical_across_all_thread_counts": true,
+        "U_sha256": "79a8913189b40ac219810920196b1198fb9638a3b47c8fd8c99f043712cc278d",
+        "convergence_sidecar_sha256": "615177a1f5f9c8e9ed603f6c6c9a8b8916a2e1102b1c7940163b6ec80d587f8f",
+        "pre_fix_8_to_96_thread_range_seconds": [48.3, 48.6],
+        "pre_fix_explanation": "P123_omp_num_threads leaked into subsequent OpenMP regions, so requested OMP_NUM_THREADS values from 8 through 96 all executed W1 with three threads."
+      },
+      "momentum_independent_warmup_ablation": {
+        "status": "rejected",
+        "with_warmup_seconds": {"1": 130.4, "16": 17.3, "96": 13.0},
+        "without_warmup_seconds": {"1": 126.5, "16": 26.4, "96": 22.9},
+        "reason": "Removing the discarded warm-up call helps one thread slightly but creates concurrent first-use cache contention and is 52.6 percent slower at 16 threads and 76.2 percent slower at 96 threads."
       },
       "verification": {
         "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
@@ -105,6 +138,7 @@
     "Timings use /usr/bin/time around a fresh driver process.",
     "The complete pass enumerates alpha 0..9 and alpha 10..19 separately, preserving parity selection.",
     "The angular-cache, magnetic-factorization, and channel-batching optimizations do not alter the operator formula or per-element summation order.",
-    "Exact-Hermitian reuse deliberately replaces separately accumulated reverse slabs with exact transposes; W1 cache schema v7 prevents mixing the two construction contracts."
+    "Exact-Hermitian reuse deliberately replaces separately accumulated reverse slabs with exact transposes; W1 cache schema v7 prevents mixing the two construction contracts.",
+    "Before commit 2563e8c, the P123-specific thread limit remained active for W1 and the solver. Restoring the caller setting exposes real W1 scaling without changing P123's requested thread count."
   ]
 }
