@@ -1,0 +1,117 @@
+{
+  "schema": "tictac.n2lo_3nf_physical_Ay_feasibility.v1",
+  "generated_on": "2026-08-13",
+  "purpose": "Measured feasibility gate before launching a paired low-energy nd Ay calculation",
+  "machine": {
+    "logical_cpus": 96,
+    "memory_gib": 125,
+    "free_workspace_storage_tib": 2.9
+  },
+  "candidate": {
+    "potential_model": "Idaho_N3LO",
+    "target_tlab_mev": 10.0,
+    "Np_WP": 82,
+    "Nq_WP": 12,
+    "p_chebyshev_t": 0.88,
+    "p_chebyshev_s": 325.0,
+    "q_chebyshev_t": 1.0,
+    "q_chebyshev_s": 90.0,
+    "deuteron_binding_mev": -2.2047472480,
+    "binding_error_from_reference_kev": 19.8277520,
+    "nearest_tlab_midpoint_mev": 10.0453121,
+    "nearest_tlab_midpoint_index": 6,
+    "bracketing_lower_tlab_midpoint_mev": 5.9021781
+  },
+  "two_body_solver_preflight": {
+    "scope": "2NF only, two_J_3N=1, both parities, J_2N_max=1",
+    "dense_dimension_per_parity": 10824,
+    "P123": {
+      "Nphi": 48,
+      "Nx": 48,
+      "omp_threads": 12,
+      "positive_parity": {
+        "nonzero_elements": 2655655,
+        "build_seconds": 32.078866,
+        "schema2_cache_bytes": 42494584
+      },
+      "negative_parity": {
+        "nonzero_elements": 3155543,
+        "build_seconds": 31.560334,
+        "schema2_cache_bytes": 50492792
+      }
+    },
+    "pade_order_24": {
+      "solve_seconds_by_parity": [75.757246, 76.565735],
+      "total_run_seconds": 231.508709,
+      "truly_converged_amplitudes": 16,
+      "maximum_order_truncated_amplitudes": 0
+    },
+    "pade_order_32_cache_hit": {
+      "solve_seconds_by_parity": [103.691567, 102.611005],
+      "total_run_seconds": 218.490205,
+      "truly_converged_amplitudes": 16,
+      "maximum_order_truncated_amplitudes": 0
+    },
+    "order_24_vs_32": {
+      "positive_parity_max_absolute_difference_mev": 1.2803710168e-09,
+      "positive_parity_max_relative_difference": 2.0056650861e-08,
+      "negative_parity_max_absolute_difference_mev": 6.2063353831e-17,
+      "negative_parity_max_relative_difference": 4.2994158314e-16
+    },
+    "viable": true
+  },
+  "complete_3nf_W1_projection": {
+    "measured_baseline": {
+      "Np_WP": 4,
+      "Nq_WP": 3,
+      "channel_blocks": 101,
+      "radial_order": 2,
+      "transfer_angular_order": 2,
+      "batched_build_seconds": 87.8,
+      "source": "output/validation/n2lo_3nf_reduced_wpcd_convergence.json"
+    },
+    "candidate_to_baseline_cell_ratio": 6724.0,
+    "linear_cell_count_extrapolation": {
+      "seconds_for_one_101_block_J_parity_sector": 590367.2,
+      "hours_for_one_101_block_J_parity_sector": 163.9909,
+      "candidate_dense_W1_bytes_for_101_blocks": 782350848,
+      "candidate_dense_W1_mib_for_101_blocks": 746.1079
+    },
+    "exact_hermitian_reuse_measurement": {
+      "commit": "d14d2bb",
+      "ordered_blocks": 101,
+      "directly_evaluated_blocks": 56,
+      "transpose_filled_blocks": 45,
+      "w1_build_seconds": 48.4,
+      "pre_optimization_w1_build_seconds": 87.8,
+      "speedup": 1.8140,
+      "wall_time_reduction_fraction": 0.4487,
+      "total_run_seconds": 54.928159,
+      "max_absolute_U_change_mev": 5.0898377329e-09,
+      "max_relative_U_change": 7.2582582707e-08,
+      "candidate_linear_extrapolation_seconds_for_one_sector": 325441.6,
+      "candidate_linear_extrapolation_hours_for_one_sector": 90.4004
+    },
+    "channel_zero_scan": {
+      "description": "All ordered channel pairs were evaluated at three generic nonzero momentum tuples with all c1/c3/c4/cD/cE components enabled.",
+      "positive_parity_nonzero_pairs": 100,
+      "positive_parity_pairs_scanned": 100,
+      "negative_parity_nonzero_pairs": 100,
+      "negative_parity_pairs_scanned": 100,
+      "exact_zero_block_pruning_available": false
+    },
+    "limitations": [
+      "The timing projection is a cell-count extrapolation from Np=4,Nq=3, not a direct Np=82,Nq=12 W1 build.",
+      "It covers only one approximately 101-block J-parity sector at radial and transfer angular order two.",
+      "A physical result additionally requires higher W1 orders, multiple J/parity sectors, a 2NF/3NF pair, and all convergence ladders."
+    ],
+    "viable_with_current_dense_builder": false,
+    "active_bottleneck": "W1 construction time, not memory, P123, or Padé"
+  },
+  "decision": {
+    "launch_full_paired_physical_Ay_now": false,
+    "reason": "The measured 2NF path is viable, but after exact-Hermitian reuse the optimistic W1 extrapolation is still about 90 hours for one low-order J-parity sector before the required convergence multipliers.",
+    "next_engineering_target": "Replace materialized four-dimensional W1 construction with a streamed or low-rank contraction.",
+    "physical_Ay_conclusion_available": false
+  }
+}

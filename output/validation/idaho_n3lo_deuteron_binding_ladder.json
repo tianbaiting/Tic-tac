@@ -69,6 +69,51 @@
       "maximum_fit_residual_kev": 0.068092
     }
   },
+  "independently_tuned_p_grid_ladder": {
+    "p_chebyshev_t": 0.88,
+    "p_chebyshev_s": 325.0,
+    "selection_method": "two-dimensional t/s scan followed by a fixed-shape Np ladder",
+    "points": [
+      {"Np_WP": 40, "Np_per_WP": 4, "binding_magnitude_mev": 2.1468142621, "error_from_reference_kev": 77.7607379},
+      {"Np_WP": 60, "Np_per_WP": 4, "binding_magnitude_mev": 2.1884649390, "error_from_reference_kev": 36.1100610},
+      {"Np_WP": 80, "Np_per_WP": 4, "binding_magnitude_mev": 2.2037805130, "error_from_reference_kev": 20.7944870},
+      {"Np_WP": 82, "Np_per_WP": 4, "binding_magnitude_mev": 2.2047472480, "error_from_reference_kev": 19.8277520},
+      {"Np_WP": 85, "Np_per_WP": 4, "binding_magnitude_mev": 2.2060754000, "error_from_reference_kev": 18.4996000},
+      {"Np_WP": 90, "Np_per_WP": 4, "binding_magnitude_mev": 2.2080095760, "error_from_reference_kev": 16.5654240},
+      {"Np_WP": 100, "Np_per_WP": 4, "binding_magnitude_mev": 2.2110662918, "error_from_reference_kev": 13.5087082},
+      {"Np_WP": 120, "Np_per_WP": 4, "binding_magnitude_mev": 2.2150950144, "error_from_reference_kev": 9.4799856},
+      {"Np_WP": 150, "Np_per_WP": 4, "binding_magnitude_mev": 2.2184399846, "error_from_reference_kev": 6.1350154}
+    ],
+    "inverse_square_fit": {
+      "model": "E_binding(Np) = E_infinity + a / Np^2",
+      "fit_range_Np": [80, 82, 85, 90, 100, 120, 150],
+      "E_infinity_mev": 2.2242145467,
+      "difference_from_reference_kev": -0.3604533,
+      "maximum_fit_residual_kev": 0.048390
+    }
+  },
+  "independent_p_q_control_check": {
+    "Np_WP": 10,
+    "Nq_WP": 10,
+    "legacy_inherited_baseline": {
+      "chebyshev_t": 1.0,
+      "chebyshev_s": 100.0,
+      "binding_magnitude_mev": 0.1086409658
+    },
+    "p_change_with_q_inherited": {
+      "p_chebyshev_t": 1.0,
+      "p_chebyshev_s": 300.0,
+      "binding_magnitude_mev": 1.2033801300
+    },
+    "q_change_at_fixed_p": {
+      "q_chebyshev_t": 1.0,
+      "q_chebyshev_s": 300.0,
+      "binding_magnitude_mev": 1.2033801300
+    },
+    "inherited_and_explicit_q_boundary_sha256": "f0e3bd30719a0d5f197f8ee9c8149e2bedf696fdee33f714634f516dc166a189",
+    "q300_boundary_sha256": "a2db4c42039bd52338a155d8d8e31f445e952ac6565689959c3d528b7266aedf",
+    "passed": true
+  },
   "potential_quadrature_ladder_at_Np40_s300": [
     {"Np_per_WP": 4, "binding_magnitude_mev": 2.1374619762},
     {"Np_per_WP": 6, "binding_magnitude_mev": 2.1374619716},
@@ -82,14 +127,16 @@
     "P123_and_Faddeev_bypassed": true,
     "Np_per_WP_converged_at_4": true,
     "inverse_square_limit_consistent_with_reference_within_1_kev": true,
+    "independent_p_q_controls_verified": true,
     "Np80_s300_passes_20_kev_binding_gate": false,
-    "Np100_s300_passes_20_kev_binding_gate": true
+    "Np100_s300_passes_20_kev_binding_gate": true,
+    "Np82_t0p88_s325_passes_20_kev_binding_gate": true
   },
   "disposition": {
     "existing_Np10_Ay_artifacts_are_physical": false,
-    "minimum_tested_p_grid_passing_current_binding_gate": "Np_WP=100, chebyshev_t=1, chebyshev_s=300",
+    "minimum_tested_p_grid_passing_current_binding_gate": "Np_WP=82, p_chebyshev_t=0.88, p_chebyshev_s=325",
     "remaining_before_physical_Ay": [
-      "separate p- and q-grid tuning so the p-grid scale does not degrade the 10 MeV q resolution",
+      "demonstrate Nq and Ay convergence around the independently tuned Nq=12, q_t=1, q_s=90 candidate",
       "demonstrate Ay convergence itself on paired 2NF/full-N2LO-3NF runs",
       "satisfy the Padé all-converged gate and all six convergence ladders"
     ]

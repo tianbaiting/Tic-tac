@@ -31,6 +31,10 @@
 | `Nx` | `48` | 几何函数角积分点数 | 与 `Nphi` 一起调，先小步加 |
 | `chebyshev_s` | `100` | Chebyshev 网格尺度 | 增大可覆盖更高动量/能量区间 |
 | `chebyshev_t` | `1` | Chebyshev 稀疏度指数 | 通常保持 `1`，仅在收敛研究中改动 |
+| `p_chebyshev_s` | `0` | `p` 网格独立尺度；`0` 表示继承 `chebyshev_s` | 束缚能收敛时独立调节，避免同时破坏 `q` 的能量分辨率 |
+| `p_chebyshev_t` | `0` | `p` 网格独立稀疏度；`0` 表示继承 `chebyshev_t` | 与 `p_chebyshev_s` 成对做固定形状的 `Np` 梯度 |
+| `q_chebyshev_s` | `0` | `q` 网格独立尺度；`0` 表示继承 `chebyshev_s` | 用目标 `Tlab` 附近的离散中点和 `Nq` 收敛共同确定 |
+| `q_chebyshev_t` | `0` | `q` 网格独立稀疏度；`0` 表示继承 `chebyshev_t` | 不应通过改变 `p` 网格间接调节 |
 | `p_grid_type` | `chebyshev` | `p` 网格类型 | `chebyshev` 或 `custom` |
 | `p_grid_filename` | `""` | 自定义 `p` 网格文件 | `custom` 时必须提供，文件应有 `Np_WP+1` 行单调边界 |
 | `q_grid_type` | `chebyshev` | `q` 网格类型 | `chebyshev` 或 `custom` |
@@ -56,7 +60,7 @@
 | `P123_omp_num_threads` | `omp_get_max_threads()` | `P123` OpenMP 线程数 | 实际会被截断到 `Nq_WP` |
 | `calculate_and_store_P123` | `true` | 计算并写出 `P123_sparse*.h5` | 首次跑新网格必须 `true` |
 | `P123_recovery` | `false` | 从 TFC 子文件恢复 `P123` | 仅在中断恢复/拼接场景使用 |
-| `P123_folder` | `Output` | `P123` 读写目录 | 固定好后可复用，换网格要重算 |
+| `P123_folder` | `Output` | `P123` 读写目录 | 新缓存键对实际 `p/q` 边界逐字节哈希；相同边界可安全复用 |
 | `solve_faddeev` | `true` | 是否求解 Faddeev 方程 | 若为 `false`，仍需 `calculate_and_store_P123=true` 才有工作可做 |
 | `solve_dense` | `false` | 是否用 dense LAPACK 解法 | 很慢，仅调试用 |
 | `include_breakup_channels` | `false` | 是否计算 breakup 振幅 | 成本很高，按需打开 |
@@ -75,10 +79,10 @@
 ## 3. 推荐调参顺序
 
 1. 先定物理开关：`potential_model`, `tensor_force`, `isospin_breaking_1S0`。  
-2. 再调能量离散：优先调 `Nq_WP`，再调 `chebyshev_s`；若要精确控制离散点，用 `q_grid_type=custom` + `q_grid_filename`。  
+2. 分开调两个径向坐标：用 `p_chebyshev_t/s` 和 `Np_WP` 收敛氘核束缚能；用 `q_chebyshev_t/s` 和 `Nq_WP` 收敛目标 `Tlab` 附近的散射量。若要精确控制离散点，用 `q_grid_type=custom` + `q_grid_filename`。
 3. 再做角动量与积分收敛：`two_J_3N_max`, `J_2N_max`, `Nphi`, `Nx`。  
 4. 最后平衡耗时：`Np_WP/Nq_WP`、`Np_per_WP/Nq_per_WP`、线程数。  
-5. 网格或角动量截断改变后，不要复用旧 `P123`，需重新生成。  
+5. P123 缓存 schema v2 将实际 `p/q` 边界数组写入键的 SHA-256 身份。网格改变后会自动 miss；schema v1 旧缓存不会命中。旧式 `P123_folder` 文件名不含完整身份，仍应放在独立目录中管理。
 
 ## 4. 常见失败与对应参数
 

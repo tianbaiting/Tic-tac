@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-08-13",
-  "scope": "single-thread factorized complete N2LO W1 projection performance",
+  "scope": "factorized complete N2LO W1 projection performance; scalar driver measurements are single-thread and production W1 measurements use four OpenMP threads",
   "hardware": {
     "cpu": "Intel Xeon Gold 5318Y 2.10 GHz",
     "sockets": 2,
@@ -32,7 +32,8 @@
     "baseline": "208159a",
     "angular_cache": "b39901e",
     "magnetic_factorization": "18f1974",
-    "channel_batching": "46b7308"
+    "channel_batching": "46b7308",
+    "exact_hermitian_reuse": "d14d2bb"
   },
   "benchmarks": {
     "two_parity_blocks_200_channel_pairs_one_pass": {
@@ -75,23 +76,35 @@
       "radial_order_two": {
         "before_channel_batching_w1_seconds": 162.4,
         "after_channel_batching_w1_seconds": 87.8,
-        "speedup": 1.8497,
-        "total_run_seconds_after": 94.269280
+        "after_exact_hermitian_reuse_w1_seconds": 48.4,
+        "channel_batching_speedup": 1.8497,
+        "hermitian_reuse_speedup": 1.8140,
+        "cumulative_speedup": 3.3554,
+        "ordered_blocks": 101,
+        "directly_evaluated_blocks_after_hermitian_reuse": 56,
+        "transpose_filled_blocks_after_hermitian_reuse": 45,
+        "total_run_seconds_after_channel_batching": 94.269280,
+        "total_run_seconds_after_hermitian_reuse": 54.928159
       },
       "verification": {
         "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
-        "radial_order_two_u_and_convergence_files": "byte-identical across channel batching"
+        "radial_order_two_u_and_convergence_files": "byte-identical across channel batching",
+        "hermitian_reuse_max_absolute_u_difference_mev": 5.0898377329e-09,
+        "hermitian_reuse_max_relative_u_difference": 7.2582582707e-08,
+        "hermitian_reuse_explanation": "Reverse slabs are now exact transposes instead of separately accumulated quadrature results."
       }
     }
   },
   "correctness_after_optimization": {
     "ctest": "13/13 passed",
     "related_python_oracle_tests": "20/20 passed",
-    "w1_cache_off_miss_hit": "bitwise identical"
+    "w1_cache_off_miss_hit": "bitwise identical",
+    "hermitian_transpose_layout": "all p/q index permutations passed on a two-bin-per-axis cache test"
   },
   "notes": [
     "Timings use /usr/bin/time around a fresh driver process.",
     "The complete pass enumerates alpha 0..9 and alpha 10..19 separately, preserving parity selection.",
-    "The optimization reuses momentum-independent recouplings, factors magnetic projections, and batches channel pairs at a common momentum tuple; it does not alter the operator formula or per-element summation order."
+    "The angular-cache, magnetic-factorization, and channel-batching optimizations do not alter the operator formula or per-element summation order.",
+    "Exact-Hermitian reuse deliberately replaces separately accumulated reverse slabs with exact transposes; W1 cache schema v7 prevents mixing the two construction contracts."
   ]
 }
