@@ -30,7 +30,9 @@
   },
   "revisions": {
     "baseline": "208159a",
-    "optimized": "b39901e"
+    "angular_cache": "b39901e",
+    "magnetic_factorization": "18f1974",
+    "channel_batching": "46b7308"
   },
   "benchmarks": {
     "two_parity_blocks_200_channel_pairs_one_pass": {
@@ -62,6 +64,24 @@
         "optimized_seconds": 0.1,
         "elapsed_speedup": 7.425
       }
+    },
+    "production_np4_nq3_101_blocks": {
+      "radial_order_one": {
+        "before_magnetic_factorization_w1_seconds": 102.3,
+        "after_magnetic_factorization_w1_seconds": 31.0,
+        "speedup": 3.3,
+        "total_run_seconds_after": 37.441160
+      },
+      "radial_order_two": {
+        "before_channel_batching_w1_seconds": 162.4,
+        "after_channel_batching_w1_seconds": 87.8,
+        "speedup": 1.8497,
+        "total_run_seconds_after": 94.269280
+      },
+      "verification": {
+        "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
+        "radial_order_two_u_and_convergence_files": "byte-identical across channel batching"
+      }
     }
   },
   "correctness_after_optimization": {
@@ -72,6 +92,6 @@
   "notes": [
     "Timings use /usr/bin/time around a fresh driver process.",
     "The complete pass enumerates alpha 0..9 and alpha 10..19 separately, preserving parity selection.",
-    "The optimization reuses momentum-independent recouplings and same-element orbital kernels; it does not alter the operator formula or summation order."
+    "The optimization reuses momentum-independent recouplings, factors magnetic projections, and batches channel pairs at a common momentum tuple; it does not alter the operator formula or per-element summation order."
   ]
 }

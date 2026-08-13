@@ -1,0 +1,339 @@
+{
+  "comparisons": [
+    {
+      "left": "np4_midpoint",
+      "max_absolute_difference_mev": 0.13352144669358784,
+      "max_relative_difference": 0.674375269424907,
+      "num_complex_amplitudes": 12,
+      "right": "np4_radial2_batch",
+      "rms_absolute_difference_mev": 0.04629672005570436,
+      "same_kinematics": true
+    },
+    {
+      "left": "np4_radial2_scalar",
+      "max_absolute_difference_mev": 0.0,
+      "max_relative_difference": 0.0,
+      "num_complex_amplitudes": 12,
+      "right": "np4_radial2_batch",
+      "rms_absolute_difference_mev": 0.0,
+      "same_kinematics": true
+    },
+    {
+      "amplitude_comparison": "not_performed",
+      "left": "np8q6_midpoint",
+      "right": "np10q8_midpoint",
+      "same_kinematics": false
+    }
+  ],
+  "generated_utc": "2026-08-13T04:50:17Z",
+  "limitations": [
+    "J_2N_max=1 and two_J_3N_max=1 are reduced diagnostic truncations.",
+    "Nangle_3NF=2 is not an angular-convergence certificate.",
+    "Radial order one is the unconverged midpoint diagnostic.",
+    "Chebyshev q grids at different Nq have different on-shell bin midpoints; their amplitudes are not compared directly.",
+    "Pad\u00e9 maximum-order truncation codes remain a separate failed convergence gate."
+  ],
+  "purpose": "reduced complete-N2LO-3NF WPCD convergence diagnostics",
+  "runs": [
+    {
+      "convergence_sha256": "f33c811c18b7b287d12857cade6022cf599277445f70c37288619ebe2758c9cd",
+      "deuteron_binding_mev": -0.011400617,
+      "directory": "tmp/factorized_conv/np4_reduced_kernel",
+      "grid": {
+        "J_2N_max": 1,
+        "Nangle_3NF": 2,
+        "Np_WP": 4,
+        "Np_per_WP_W1": 1,
+        "Nq_WP": 3,
+        "Nq_per_WP_W1": 1,
+        "two_J_3N_max": 1
+      },
+      "kinematics": [
+        {
+          "Ecm_mev": 0.28662224223011273,
+          "Tlab_mev": 0.43002290488630024,
+          "q_index": 0
+        },
+        {
+          "Ecm_mev": 4.278755082328541,
+          "Tlab_mev": 6.417197680600111,
+          "q_index": 1
+        },
+        {
+          "Ecm_mev": 59.5953703592461,
+          "Tlab_mev": 88.96345855763161,
+          "q_index": 2
+        }
+      ],
+      "label": "np4_midpoint",
+      "num_complex_amplitudes": 12,
+      "num_kinematic_rows": 3,
+      "pade_status": {
+        "all_truly_converged": false,
+        "num_max_order_truncated": 12,
+        "num_truly_converged": 0
+      },
+      "timing": {
+        "total_run_seconds": 37.44116,
+        "w1_build_seconds": 31.0
+      },
+      "u_sha256": "b19022c8762d16c066a906a48bcaf158cd870ae1cea053b459539ef2d57115d7"
+    },
+    {
+      "convergence_sha256": "f57bfdf5a3624071e5abbedd56c6de97b30447867980ed29ad5adc4d8fc8910c",
+      "deuteron_binding_mev": -0.13180385,
+      "directory": "tmp/factorized_conv/np6q4_midpoint",
+      "grid": {
+        "J_2N_max": 1,
+        "Nangle_3NF": 2,
+        "Np_WP": 6,
+        "Np_per_WP_W1": 1,
+        "Nq_WP": 4,
+        "Nq_per_WP_W1": 1,
+        "two_J_3N_max": 1
+      },
+      "kinematics": [
+        {
+          "Ecm_mev": 0.15795662420007678,
+          "Tlab_mev": 0.23699712180416554,
+          "q_index": 0
+        },
+        {
+          "Ecm_mev": 1.9403331131578778,
+          "Tlab_mev": 2.9108026566907483,
+          "q_index": 1
+        },
+        {
+          "Ecm_mev": 10.724261842813675,
+          "Tlab_mev": 16.075629940290355,
+          "q_index": 2
+        },
+        {
+          "Ecm_mev": 109.8417767156891,
+          "Tlab_mev": 163.33950702970185,
+          "q_index": 3
+        }
+      ],
+      "label": "np6q4_midpoint",
+      "num_complex_amplitudes": 16,
+      "num_kinematic_rows": 4,
+      "pade_status": {
+        "all_truly_converged": false,
+        "num_max_order_truncated": 16,
+        "num_truly_converged": 0
+      },
+      "timing": {
+        "total_run_seconds": 48.187134,
+        "w1_build_seconds": 41.6
+      },
+      "u_sha256": "3fc404b996d7a64effcd63126627ffb72dbb62d7cfe23c5cf8d0f1e84c8418ff"
+    },
+    {
+      "convergence_sha256": "9f0ba8ba963b00467b18c532f519354e601c55be0cc12d618b47ba42e90ef7ea",
+      "deuteron_binding_mev": -0.71215136,
+      "directory": "tmp/factorized_conv/np8q6_midpoint",
+      "grid": {
+        "J_2N_max": 1,
+        "Nangle_3NF": 2,
+        "Np_WP": 8,
+        "Np_per_WP_W1": 1,
+        "Nq_WP": 6,
+        "Nq_per_WP_W1": 1,
+        "two_J_3N_max": 1
+      },
+      "kinematics": [
+        {
+          "Ecm_mev": 0.06920177804668956,
+          "Tlab_mev": 0.1038521242750221,
+          "q_index": 0
+        },
+        {
+          "Ecm_mev": 0.7542287592957393,
+          "Tlab_mev": 1.1318132668437784,
+          "q_index": 1
+        },
+        {
+          "Ecm_mev": 3.0358503246907884,
+          "Tlab_mev": 4.554746457150259,
+          "q_index": 2
+        },
+        {
+          "Ecm_mev": 9.131891377885461,
+          "Tlab_mev": 13.693407704507308,
+          "q_index": 3
+        },
+        {
+          "Ecm_mev": 30.051820085364117,
+          "Tlab_mev": 44.9820817352238,
+          "q_index": 4
+        },
+        {
+          "Ecm_mev": 253.6274492166824,
+          "Tlab_mev": 373.5971843029697,
+          "q_index": 5
+        }
+      ],
+      "label": "np8q6_midpoint",
+      "num_complex_amplitudes": 24,
+      "num_kinematic_rows": 6,
+      "pade_status": {
+        "all_truly_converged": false,
+        "num_max_order_truncated": 24,
+        "num_truly_converged": 0
+      },
+      "timing": {
+        "total_run_seconds": 128.18366,
+        "w1_build_seconds": 118.3
+      },
+      "u_sha256": "01a9dd744f6d257851dbcb54e930b19dcef1b9f10c35e88f4e55efb3db23b21e"
+    },
+    {
+      "convergence_sha256": "3956bf48d4aa39983b697a54c9a9668dd09a680de1ac57bd8c368754e4c8a9df",
+      "deuteron_binding_mev": -1.2585708,
+      "directory": "tmp/factorized_conv/np10q8_midpoint",
+      "grid": {
+        "J_2N_max": 1,
+        "Nangle_3NF": 2,
+        "Np_WP": 10,
+        "Np_per_WP_W1": 1,
+        "Nq_WP": 8,
+        "Nq_per_WP_W1": 1,
+        "two_J_3N_max": 1
+      },
+      "kinematics": [
+        {
+          "Ecm_mev": 0.4061688236601673,
+          "Tlab_mev": 0.6096435726180971,
+          "q_index": 1
+        },
+        {
+          "Ecm_mev": 1.508248072088261,
+          "Tlab_mev": 2.2636001880665617,
+          "q_index": 2
+        },
+        {
+          "Ecm_mev": 3.830165735872587,
+          "Tlab_mev": 5.747186430400575,
+          "q_index": 3
+        },
+        {
+          "Ecm_mev": 8.617988292745306,
+          "Tlab_mev": 12.925898230095868,
+          "q_index": 4
+        },
+        {
+          "Ecm_mev": 19.904791448562012,
+          "Tlab_mev": 29.825454367474094,
+          "q_index": 5
+        },
+        {
+          "Ecm_mev": 57.36945984757852,
+          "Tlab_mev": 85.69455600774984,
+          "q_index": 6
+        }
+      ],
+      "label": "np10q8_midpoint",
+      "num_complex_amplitudes": 24,
+      "num_kinematic_rows": 6,
+      "pade_status": {
+        "all_truly_converged": false,
+        "num_max_order_truncated": 24,
+        "num_truly_converged": 0
+      },
+      "timing": {
+        "total_run_seconds": 319.35713,
+        "w1_build_seconds": 311.2
+      },
+      "u_sha256": "4e92612110e208753340bca02cc9f055925071ee0dae5c7c907913b87b7a228b"
+    },
+    {
+      "convergence_sha256": "14da5bb14c3c2ae8accc9e1ec433b2f36b138616f3509227225361924403ebb8",
+      "deuteron_binding_mev": -0.011400617,
+      "directory": "tmp/factorized_conv/np4_radial2",
+      "grid": {
+        "J_2N_max": 1,
+        "Nangle_3NF": 2,
+        "Np_WP": 4,
+        "Np_per_WP_W1": 2,
+        "Nq_WP": 3,
+        "Nq_per_WP_W1": 2,
+        "two_J_3N_max": 1
+      },
+      "kinematics": [
+        {
+          "Ecm_mev": 0.28662224223011273,
+          "Tlab_mev": 0.43002290488630024,
+          "q_index": 0
+        },
+        {
+          "Ecm_mev": 4.278755082328541,
+          "Tlab_mev": 6.417197680600111,
+          "q_index": 1
+        },
+        {
+          "Ecm_mev": 59.5953703592461,
+          "Tlab_mev": 88.96345855763161,
+          "q_index": 2
+        }
+      ],
+      "label": "np4_radial2_scalar",
+      "num_complex_amplitudes": 12,
+      "num_kinematic_rows": 3,
+      "pade_status": {
+        "all_truly_converged": false,
+        "num_max_order_truncated": 12,
+        "num_truly_converged": 0
+      },
+      "timing": {
+        "total_run_seconds": 169.035247,
+        "w1_build_seconds": 162.4
+      },
+      "u_sha256": "678c5751c83d09aad8cfd775c0aac8ba868f64f535709da00c48c6e3638e6859"
+    },
+    {
+      "convergence_sha256": "14da5bb14c3c2ae8accc9e1ec433b2f36b138616f3509227225361924403ebb8",
+      "deuteron_binding_mev": -0.011400617,
+      "directory": "tmp/factorized_conv/np4_radial2_batch",
+      "grid": {
+        "J_2N_max": 1,
+        "Nangle_3NF": 2,
+        "Np_WP": 4,
+        "Np_per_WP_W1": 2,
+        "Nq_WP": 3,
+        "Nq_per_WP_W1": 2,
+        "two_J_3N_max": 1
+      },
+      "kinematics": [
+        {
+          "Ecm_mev": 0.28662224223011273,
+          "Tlab_mev": 0.43002290488630024,
+          "q_index": 0
+        },
+        {
+          "Ecm_mev": 4.278755082328541,
+          "Tlab_mev": 6.417197680600111,
+          "q_index": 1
+        },
+        {
+          "Ecm_mev": 59.5953703592461,
+          "Tlab_mev": 88.96345855763161,
+          "q_index": 2
+        }
+      ],
+      "label": "np4_radial2_batch",
+      "num_complex_amplitudes": 12,
+      "num_kinematic_rows": 3,
+      "pade_status": {
+        "all_truly_converged": false,
+        "num_max_order_truncated": 12,
+        "num_truly_converged": 0
+      },
+      "timing": {
+        "total_run_seconds": 94.26928,
+        "w1_build_seconds": 87.8
+      },
+      "u_sha256": "678c5751c83d09aad8cfd775c0aac8ba868f64f535709da00c48c6e3638e6859"
+    }
+  ],
+  "schema_version": 1
+}
