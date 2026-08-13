@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-13",
+  "scope": "single-thread factorized complete N2LO W1 projection performance",
+  "hardware": {
+    "cpu": "Intel Xeon Gold 5318Y 2.10 GHz",
+    "sockets": 2,
+    "cores_per_socket": 24,
+    "threads_per_core": 2
+  },
+  "build": {
+    "type": "Release",
+    "flags": "-O3 -DNDEBUG",
+    "driver": "build/tools/3nf_oracle/print_w1_element"
+  },
+  "physics_parameters": {
+    "cE": -0.205,
+    "cD": -0.2,
+    "c1_GeV_inverse": -0.81,
+    "c3_GeV_inverse": -3.2,
+    "c4_GeV_inverse": 5.4,
+    "Lambda_3NF_MeV": 500.0,
+    "transfer_quadrature_order": 2,
+    "momenta_fm_inverse": {
+      "p_r": 0.73,
+      "q_r": 0.61,
+      "p_c": 0.92,
+      "q_c": 0.84
+    }
+  },
+  "revisions": {
+    "baseline": "208159a",
+    "optimized": "b39901e"
+  },
+  "benchmarks": {
+    "two_parity_blocks_200_channel_pairs_one_pass": {
+      "baseline": {
+        "elapsed_seconds": 233.55,
+        "user_seconds": 233.39,
+        "max_rss_kb": 45372
+      },
+      "optimized": {
+        "elapsed_seconds": 65.50,
+        "user_seconds": 65.43,
+        "max_rss_kb": 41604
+      },
+      "elapsed_speedup": 3.5656
+    },
+    "representative_high_orbital_alpha_9_to_9": {
+      "one_cold_call": {
+        "baseline_elapsed_seconds": 2.09,
+        "optimized_elapsed_seconds": 0.54,
+        "elapsed_speedup": 3.8704
+      },
+      "five_calls_one_process": {
+        "baseline_elapsed_seconds": 5.06,
+        "optimized_elapsed_seconds": 0.94
+      },
+      "estimated_incremental_warm_call": {
+        "method": "(five_call_elapsed - one_cold_call_elapsed) / 4",
+        "baseline_seconds": 0.7425,
+        "optimized_seconds": 0.1,
+        "elapsed_speedup": 7.425
+      }
+    }
+  },
+  "correctness_after_optimization": {
+    "ctest": "13/13 passed",
+    "related_python_oracle_tests": "20/20 passed",
+    "w1_cache_off_miss_hit": "bitwise identical"
+  },
+  "notes": [
+    "Timings use /usr/bin/time around a fresh driver process.",
+    "The complete pass enumerates alpha 0..9 and alpha 10..19 separately, preserving parity selection.",
+    "The optimization reuses momentum-independent recouplings and same-element orbital kernels; it does not alter the operator formula or summation order."
+  ]
+}
