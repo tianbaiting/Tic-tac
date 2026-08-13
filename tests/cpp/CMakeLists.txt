@@ -286,3 +286,17 @@ target_include_directories(test_run_config PRIVATE
     ${CMAKE_SOURCE_DIR}/src/config
 )
 add_test(NAME run_config COMMAND test_run_config)
+
+# Phase 7: W1 block-store abstraction for resumable/distributed EXACT W^(1)
+# construction. Verifies the contains/save/load/manifest contract, signature
+# scoping, restart safety, and explicit Hermitian-transpose-reuse bookkeeping.
+add_executable(test_w1_block_store
+    test_w1_block_store.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_block_store.cpp
+)
+target_include_directories(test_w1_block_store PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/interactions
+    ${CMAKE_SOURCE_DIR}/include
+)
+add_test(NAME w1_block_store COMMAND test_w1_block_store)
