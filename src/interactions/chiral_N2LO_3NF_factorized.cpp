@@ -10,6 +10,8 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <exception>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -56,6 +58,13 @@ std::array<int, 8> channel_key(const ls_channel& channel)
 	        channel.t_pair, channel.two_total_T};
 }
 
+std::array<int, 8> channel_key(const jj_channel& channel)
+{
+	return {channel.l_pair, channel.s_pair, channel.j_pair,
+	        channel.lambda_spectator, channel.two_j_spectator,
+	        channel.two_total_J, channel.t_pair, channel.two_total_T};
+}
+
 jj_channel make_jj_channel(int alpha, const pw_3N_statespace& pw)
 {
 	if (alpha < 0 || alpha >= pw.Nalpha) {
@@ -69,9 +78,11 @@ jj_channel make_jj_channel(int alpha, const pw_3N_statespace& pw)
 	};
 }
 
-std::vector<std::pair<ls_channel, double>> ls_expansion(const jj_channel& channel)
+using ls_expansion_table = std::vector<std::pair<ls_channel, double>>;
+
+ls_expansion_table build_ls_expansion(const jj_channel& channel)
 {
-	std::vector<std::pair<ls_channel, double>> result;
+	ls_expansion_table result;
 	double norm = 0.0;
 	for (int total_L = std::abs(channel.l_pair - channel.lambda_spectator);
 	     total_L <= channel.l_pair + channel.lambda_spectator; ++total_L) {
@@ -101,6 +112,22 @@ std::vector<std::pair<ls_channel, double>> ls_expansion(const jj_channel& channe
 		throw std::runtime_error("factorized 3NF Jj-to-LS recoupling is not unitary");
 	}
 	return result;
+}
+
+std::shared_ptr<const ls_expansion_table> get_ls_expansion(const jj_channel& channel)
+{
+	using key_type = std::array<int, 8>;
+	static std::mutex cache_mutex;
+	static std::map<key_type, std::shared_ptr<const ls_expansion_table>> cache;
+	const key_type key = channel_key(channel);
+	{
+		std::lock_guard<std::mutex> lock(cache_mutex);
+		const auto found = cache.find(key);
+		if (found != cache.end()) return found->second;
+	}
+	auto candidate = std::make_shared<ls_expansion_table>(build_ls_expansion(channel));
+	std::lock_guard<std::mutex> lock(cache_mutex);
+	return cache.emplace(key, candidate).first->second;
 }
 
 int product_index(int two_m1, int two_m2, int two_m3)
@@ -308,6 +335,30 @@ std::vector<harmonic_term> multiply_axes(
 	return states;
 }
 
+struct harmonic_cache_key {
+	int l_value;
+	int m_value;
+	std::vector<int> axes;
+	bool conjugate;
+
+	bool operator<(const harmonic_cache_key& other) const
+	{
+		return std::tie(l_value, m_value, axes, conjugate)
+		     < std::tie(other.l_value, other.m_value, other.axes, other.conjugate);
+	}
+};
+
+const std::vector<harmonic_term>& get_harmonic_terms(
+	int l_value, int m_value, const std::vector<int>& axes, bool conjugate)
+{
+	static thread_local std::map<harmonic_cache_key, std::vector<harmonic_term>> cache;
+	const harmonic_cache_key key{l_value, m_value, axes, conjugate};
+	const auto found = cache.find(key);
+	if (found != cache.end()) return found->second;
+	return cache.emplace(key, multiply_axes(l_value, m_value, axes, conjugate))
+	            .first->second;
+}
+
 struct channel_term {
 	int m_pair;
 	int m_spectator;
@@ -359,6 +410,20 @@ std::vector<channel_term> channel_terms(const ls_channel& channel, int two_m_j)
 		}
 	}
 	return result;
+}
+
+const std::vector<channel_term>& get_channel_terms(
+	const ls_channel& channel, int two_m_j)
+{
+	using key_type = std::array<int, 9>;
+	static thread_local std::map<key_type, std::vector<channel_term>> cache;
+	key_type key{};
+	const auto channel_values = channel_key(channel);
+	std::copy(channel_values.begin(), channel_values.end(), key.begin());
+	key[8] = two_m_j;
+	const auto found = cache.find(key);
+	if (found != cache.end()) return found->second;
+	return cache.emplace(key, channel_terms(channel, two_m_j)).first->second;
 }
 
 enum coordinate_id { p_bra = 0, q_bra = 1, p_ket = 2, q_ket = 3 };
@@ -489,6 +554,34 @@ complex spin_matrix_element(int bra_index, int ket_index,
 	return operated[bra_index];
 }
 
+struct spin_cache_key {
+	int bra_index;
+	int ket_index;
+	std::vector<int> axes;
+
+	bool operator<(const spin_cache_key& other) const
+	{
+		return std::tie(bra_index, ket_index, axes)
+		     < std::tie(other.bra_index, other.ket_index, other.axes);
+	}
+};
+
+complex get_spin_matrix_element(int bra_index, int ket_index,
+	                              const std::vector<spin_axis>& axes)
+{
+	static thread_local std::map<spin_cache_key, complex> cache;
+	std::vector<int> encoded_axes;
+	encoded_axes.reserve(axes.size());
+	for (const spin_axis& axis : axes) {
+		encoded_axes.push_back(3 * (axis.particle - 1) + axis.axis);
+	}
+	const spin_cache_key key{bra_index, ket_index, std::move(encoded_axes)};
+	const auto found = cache.find(key);
+	if (found != cache.end()) return found->second;
+	return cache.emplace(key, spin_matrix_element(bra_index, ket_index, axes))
+	            .first->second;
+}
+
 struct weight_key {
 	std::array<int, 8> angular;
 	std::array<int, 4> radial_powers;
@@ -510,8 +603,8 @@ weight_table build_weight_table(
 	const double inverse_m_count = 1.0 / (bra.two_total_J + 1.0);
 	for (int two_m_j = -bra.two_total_J;
 	     two_m_j <= bra.two_total_J; two_m_j += 2) {
-		const std::vector<channel_term> bra_channel_terms = channel_terms(bra, two_m_j);
-		const std::vector<channel_term> ket_channel_terms = channel_terms(ket, two_m_j);
+		const auto& bra_channel_terms = get_channel_terms(bra, two_m_j);
+		const auto& ket_channel_terms = get_channel_terms(ket, two_m_j);
 		for (const cartesian_term& cartesian : cartesian_terms(kind)) {
 			std::array<std::vector<int>, 4> axes_by_slot;
 			std::array<int, 4> powers{{0, 0, 0, 0}};
@@ -521,18 +614,18 @@ weight_table build_weight_table(
 				++powers[slot];
 			}
 			for (const channel_term& bra_term : bra_channel_terms) {
-				const std::vector<harmonic_term> bra_pair = multiply_axes(
+				const auto& bra_pair = get_harmonic_terms(
 					bra.l_pair, bra_term.m_pair, axes_by_slot[p_bra], true);
-				const std::vector<harmonic_term> bra_spectator = multiply_axes(
+				const auto& bra_spectator = get_harmonic_terms(
 					bra.lambda_spectator, bra_term.m_spectator,
 					axes_by_slot[q_bra], true);
 				for (const channel_term& ket_term : ket_channel_terms) {
-					const complex spin = spin_matrix_element(
+					const complex spin = get_spin_matrix_element(
 						bra_term.spin_index, ket_term.spin_index, cartesian.spin_axes);
 					if (std::abs(spin) < 1.0e-15) continue;
-					const std::vector<harmonic_term> ket_pair = multiply_axes(
+					const auto& ket_pair = get_harmonic_terms(
 						ket.l_pair, ket_term.m_pair, axes_by_slot[p_ket], false);
-					const std::vector<harmonic_term> ket_spectator = multiply_axes(
+					const auto& ket_spectator = get_harmonic_terms(
 						ket.lambda_spectator, ket_term.m_spectator,
 						axes_by_slot[q_ket], false);
 					const complex state_coefficient = cartesian.coefficient
@@ -578,17 +671,34 @@ std::shared_ptr<const weight_table> get_weight_table(
 	const ls_channel& bra, const ls_channel& ket, algebra_kind kind)
 {
 	using key_type = std::array<int, 17>;
+	using table_ptr = std::shared_ptr<const weight_table>;
+	using table_future = std::shared_future<table_ptr>;
 	static std::mutex cache_mutex;
-	static std::map<key_type, std::shared_ptr<const weight_table>> cache;
+	static std::map<key_type, table_future> cache;
 	const key_type key = weight_cache_key(bra, ket, kind);
+	table_future result;
+	std::shared_ptr<std::promise<table_ptr>> builder;
 	{
 		std::lock_guard<std::mutex> lock(cache_mutex);
 		const auto found = cache.find(key);
-		if (found != cache.end()) return found->second;
+		if (found != cache.end()) {
+			result = found->second;
+		} else {
+			builder = std::make_shared<std::promise<table_ptr>>();
+			result = builder->get_future().share();
+			cache.emplace(key, result);
+		}
 	}
-	auto candidate = std::make_shared<weight_table>(build_weight_table(bra, ket, kind));
-	std::lock_guard<std::mutex> lock(cache_mutex);
-	return cache.emplace(key, candidate).first->second;
+	if (!builder) return result.get();
+	try {
+		table_ptr candidate = std::make_shared<weight_table>(
+			build_weight_table(bra, ket, kind));
+		builder->set_value(candidate);
+		return candidate;
+	} catch (...) {
+		builder->set_exception(std::current_exception());
+		throw;
+	}
 }
 
 struct quadrature_grid {
@@ -731,14 +841,15 @@ struct orbital_cache_key {
 	}
 };
 
+using orbital_cache = std::map<orbital_cache_key, complex>;
+
 complex project_cartesian_algebra(
 	const ls_channel& bra, const ls_channel& ket,
 	double p, double q, double pp, double qp,
 	algebra_kind algebra, scalar_kernel_kind kernel,
-	int order, double pion_mass)
+	int order, double pion_mass, orbital_cache& cache)
 {
 	const auto weights = get_weight_table(bra, ket, algebra);
-	std::map<orbital_cache_key, complex> orbital_cache;
 	const std::array<double, 4> radial{{pp, qp, p, q}};
 	complex result{0.0, 0.0};
 	for (const auto& item : *weights) {
@@ -748,9 +859,9 @@ complex project_cartesian_algebra(
 			radial_factor *= std::pow(radial[slot], key.radial_powers[slot]);
 		}
 		const orbital_cache_key cache_key{key.angular, kernel};
-		auto found = orbital_cache.find(cache_key);
-		if (found == orbital_cache.end()) {
-			found = orbital_cache.emplace(
+		auto found = cache.find(cache_key);
+		if (found == cache.end()) {
+			found = cache.emplace(
 				cache_key,
 				uncoupled_orbital_kernel(
 					key.angular, p, q, pp, qp, kernel, order, pion_mass)
@@ -772,7 +883,7 @@ std::array<complex, 5> project_ls_components(
 	const ls_channel& bra, const ls_channel& ket,
 	double p, double q, double pp, double qp,
 	double c_D, double c_E, double c1_fm, double c3_fm, double c4_fm,
-	int order)
+	int order, orbital_cache& cache)
 {
 	std::array<complex, 5> result{};
 	result.fill(0.0);
@@ -788,20 +899,20 @@ std::array<complex, 5> project_ls_components(
 		if (c1_fm != 0.0) {
 			const complex spin = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::q23,
-				scalar_kernel_kind::two_pion, order, pion_mass);
+				scalar_kernel_kind::two_pion, order, pion_mass, cache);
 			result[0] = common * (-4.0 * c1_fm * pion_mass * pion_mass) * iso23 * spin;
 		}
 		if (c3_fm != 0.0) {
 			const complex spin = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::q23,
-				scalar_kernel_kind::c3, order, pion_mass);
+				scalar_kernel_kind::c3, order, pion_mass, cache);
 			result[1] = common * (2.0 * c3_fm) * iso23 * spin;
 		}
 	}
 	if (c4_fm != 0.0 && std::abs(iso_cross) > 1.0e-15) {
 		const complex spin = project_cartesian_algebra(
 			bra, ket, p, q, pp, qp, algebra_kind::c4,
-			scalar_kernel_kind::two_pion, order, pion_mass);
+			scalar_kernel_kind::two_pion, order, pion_mass, cache);
 		result[2] = common * c4_fm * iso_cross * spin;
 	}
 	if (c_D != 0.0) {
@@ -810,12 +921,12 @@ std::array<complex, 5> project_ls_components(
 		if (std::abs(iso12) > 1.0e-15) {
 			spin12 = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::d12,
-				scalar_kernel_kind::one_pion, order, pion_mass);
+				scalar_kernel_kind::one_pion, order, pion_mass, cache);
 		}
 		if (std::abs(iso13) > 1.0e-15) {
 			spin13 = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::d13,
-				scalar_kernel_kind::one_pion, order, pion_mass);
+				scalar_kernel_kind::one_pion, order, pion_mass, cache);
 		}
 		const double d_lec = c_D / (f_pi * f_pi * lambda_chi);
 		result[3] = -gA * d_lec / (8.0 * f_pi * f_pi)
@@ -824,7 +935,7 @@ std::array<complex, 5> project_ls_components(
 	if (c_E != 0.0 && std::abs(iso23) > 1.0e-15) {
 		const complex scalar = project_cartesian_algebra(
 			bra, ket, p, q, pp, qp, algebra_kind::identity,
-			scalar_kernel_kind::contact, order, pion_mass);
+			scalar_kernel_kind::contact, order, pion_mass, cache);
 		const double e_lec = c_E / (std::pow(f_pi, 4) * lambda_chi);
 		result[4] = e_lec * iso23 * scalar;
 	}
@@ -867,18 +978,19 @@ double chiral_N2LO_3NF_factorized::W1_element(
 	const jj_channel bra = make_jj_channel(alpha_r, pw_states);
 	const jj_channel ket = make_jj_channel(alpha_c, pw_states);
 	if (bra.two_total_J != ket.two_total_J || bra.two_total_T != ket.two_total_T) return 0.0;
-	const auto bra_expansion = ls_expansion(bra);
-	const auto ket_expansion = ls_expansion(ket);
+	const auto bra_expansion = get_ls_expansion(bra);
+	const auto ket_expansion = get_ls_expansion(ket);
 	std::array<complex, 5> totals{};
 	totals.fill(0.0);
+	orbital_cache cache;
 	const double c1_fm = m_c1_gev * hbarc / 1000.0;
 	const double c3_fm = m_c3_gev * hbarc / 1000.0;
 	const double c4_fm = m_c4_gev * hbarc / 1000.0;
-	for (const auto& bra_ls : bra_expansion) {
-		for (const auto& ket_ls : ket_expansion) {
+	for (const auto& bra_ls : *bra_expansion) {
+		for (const auto& ket_ls : *ket_expansion) {
 			const auto components = project_ls_components(
 				bra_ls.first, ket_ls.first, p_c, q_c, p_r, q_r,
-				m_c_D, m_c_E, c1_fm, c3_fm, c4_fm, m_transfer_order);
+				m_c_D, m_c_E, c1_fm, c3_fm, c4_fm, m_transfer_order, cache);
 			const double coefficient = bra_ls.second * ket_ls.second;
 			for (int component = 0; component < 5; ++component) {
 				totals[component] += coefficient * components[component];
