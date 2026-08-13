@@ -16,6 +16,13 @@
 //
 // (see docs/three_nf_equation_contract.md §4.2 / §6).
 //
+// Mathematical aliases (for navigation; historical names kept for WPCD-literature
+// correspondence):
+//   cpvc_kernel            == the packet-space AGS kernel module  ("AgsKernel")
+//   calculate_CPVC_col     == build one driving column of A        ("build_driving_column")
+//   add_one_plus_P_W1_C_col== the (1+P)·W^(1)·C 3NF part of A
+//   calculate_PVC_col      == the P·V·C 2NF part of A
+//
 // These functions are deliberately free of HDF5 / 2NF-model / solver-loop
 // dependencies: they only consume the pre-built WP arrays (CT_RM, VC_CM,
 // P123 sparse) and the three_nucleon_force_model abstract interface.
