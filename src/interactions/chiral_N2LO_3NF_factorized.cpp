@@ -17,6 +17,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -595,6 +596,19 @@ struct weight_key {
 
 using weight_table = std::vector<std::pair<weight_key, complex>>;
 
+struct integer_array_hash {
+	template <std::size_t Size>
+	std::size_t operator()(const std::array<int, Size>& values) const
+	{
+		std::size_t result = 0;
+		for (int value : values) {
+			result ^= static_cast<std::size_t>(value + 17)
+				+ 0x9e3779b9U + (result << 6U) + (result >> 2U);
+		}
+		return result;
+	}
+};
+
 weight_table build_weight_table(
 	const ls_channel& bra, const ls_channel& ket, algebra_kind kind)
 {
@@ -673,9 +687,15 @@ std::shared_ptr<const weight_table> get_weight_table(
 	using key_type = std::array<int, 17>;
 	using table_ptr = std::shared_ptr<const weight_table>;
 	using table_future = std::shared_future<table_ptr>;
+	// Weight tables are immutable after construction.  Keep a per-thread front
+	// cache so the projection hot path does not acquire the global build mutex.
+	static thread_local std::unordered_map<key_type, table_ptr, integer_array_hash>
+		local_cache;
 	static std::mutex cache_mutex;
 	static std::map<key_type, table_future> cache;
 	const key_type key = weight_cache_key(bra, ket, kind);
+	const auto local_found = local_cache.find(key);
+	if (local_found != local_cache.end()) return local_found->second;
 	table_future result;
 	std::shared_ptr<std::promise<table_ptr>> builder;
 	{
@@ -689,11 +709,16 @@ std::shared_ptr<const weight_table> get_weight_table(
 			cache.emplace(key, result);
 		}
 	}
-	if (!builder) return result.get();
+	if (!builder) {
+		table_ptr existing = result.get();
+		local_cache.emplace(key, existing);
+		return existing;
+	}
 	try {
 		table_ptr candidate = std::make_shared<weight_table>(
 			build_weight_table(bra, ket, kind));
 		builder->set_value(candidate);
+		local_cache.emplace(key, candidate);
 		return candidate;
 	} catch (...) {
 		builder->set_exception(std::current_exception());
@@ -757,8 +782,11 @@ struct reduced_orbital_kernel {
 reduced_orbital_kernel build_reduced_orbital_kernel(
 	const std::array<int, 4>& orbital,
 	double p, double q, double pp, double qp,
-	scalar_kernel_kind kind, int order, double pion_mass)
+	scalar_kernel_kind kind, int order, double pion_mass,
+	reduced_orbital_kernel* c3_companion = nullptr)
 {
+	// The c1 and c3 kernels use identical transfer geometry and propagators;
+	// when both LECs are active, accumulate their two radial kernels together.
 	const int bra_l_pair = orbital[0];
 	const int bra_lambda = orbital[1];
 	const int ket_l_pair = orbital[2];
@@ -768,8 +796,15 @@ reduced_orbital_kernel build_reduced_orbital_kernel(
 	const int lbar_max = std::min(bra_l_pair + ket_l_pair,
 	                              bra_lambda + ket_lambda);
 	reduced_orbital_kernel result{lbar_min, {}};
+	if (c3_companion != nullptr) {
+		*c3_companion = reduced_orbital_kernel{lbar_min, {}};
+	}
 	if (lbar_min > lbar_max) return result;
 	result.integrals.reserve(static_cast<std::size_t>(lbar_max - lbar_min + 1));
+	if (c3_companion != nullptr) {
+		c3_companion->integrals.reserve(
+			static_cast<std::size_t>(lbar_max - lbar_min + 1));
+	}
 	const auto grid = get_quadrature_grid(order);
 	const double dp_lo = std::abs(pp - p);
 	const double dp_hi = pp + p;
@@ -781,9 +816,11 @@ reduced_orbital_kernel build_reduced_orbital_kernel(
 			|| kind == scalar_kernel_kind::one_pion;
 		if (relative_angle_independent && lbar != 0) {
 			result.integrals.push_back(0.0);
+			if (c3_companion != nullptr) c3_companion->integrals.push_back(0.0);
 			continue;
 		}
 		complex integral{0.0, 0.0};
+		complex c3_integral{0.0, 0.0};
 		for (int idp = 0; idp < order; ++idp) {
 			const double delta_p = 0.5 * ((dp_hi - dp_lo) * grid->nodes[idp] + dp_hi + dp_lo);
 			const double weight_p = 0.5 * (dp_hi - dp_lo) * grid->weights[idp];
@@ -811,6 +848,7 @@ reduced_orbital_kernel build_reduced_orbital_kernel(
 				const complex spectator_bipolar = bipolar_harmonic(
 					bra_lambda, ket_lambda, lbar, qp_hat, q_hat);
 				complex relative_integral;
+				complex c3_relative_integral{0.0, 0.0};
 				if (relative_angle_independent) {
 					// Integral_{-1}^{1} P_lbar(x) dx = 2 delta_lbar,0.
 					relative_integral = kind == scalar_kernel_kind::contact
@@ -820,16 +858,30 @@ reduced_orbital_kernel build_reduced_orbital_kernel(
 					relative_integral = 0.0;
 					for (int ix = 0; ix < order; ++ix) {
 						const double x = grid->nodes[ix];
-						relative_integral += grid->weights[ix]
-							* legendre_polynomial(lbar, x)
-							* scalar_kernel_value(kind, delta_p, delta_q, x, pion_mass);
+						const double legendre = legendre_polynomial(lbar, x);
+						const complex base_value = scalar_kernel_value(
+							kind, delta_p, delta_q, x, pion_mass);
+						relative_integral += grid->weights[ix] * legendre * base_value;
+						if (c3_companion != nullptr) {
+							const double numerator = -delta_p * delta_p
+								+ 0.25 * delta_q * delta_q;
+							const complex c3_value{numerator * base_value.real(), 0.0};
+							c3_relative_integral += grid->weights[ix] * legendre * c3_value;
+						}
 					}
 				}
 				integral += weight_p * delta_p * weight_q * delta_q
 					* pair_bipolar * spectator_bipolar * relative_integral;
+				if (c3_companion != nullptr) {
+					c3_integral += weight_p * delta_p * weight_q * delta_q
+						* pair_bipolar * spectator_bipolar * c3_relative_integral;
+				}
 			}
 		}
 		result.integrals.push_back(integral);
+		if (c3_companion != nullptr) {
+			c3_companion->integrals.push_back(c3_integral);
+		}
 	}
 	return result;
 }
@@ -838,13 +890,26 @@ struct orbital_cache_key {
 	std::array<int, 8> angular;
 	scalar_kernel_kind kind;
 
-	bool operator<(const orbital_cache_key& other) const
+	bool operator==(const orbital_cache_key& other) const
 	{
-		return std::tie(angular, kind) < std::tie(other.angular, other.kind);
+		return angular == other.angular && kind == other.kind;
 	}
 };
 
-using orbital_cache = std::map<orbital_cache_key, complex>;
+struct orbital_cache_key_hash {
+	std::size_t operator()(const orbital_cache_key& key) const
+	{
+		std::size_t result = static_cast<std::size_t>(key.kind);
+		for (int value : key.angular) {
+			result ^= static_cast<std::size_t>(value + 17)
+				+ 0x9e3779b9U + (result << 6U) + (result >> 2U);
+		}
+		return result;
+	}
+};
+
+using orbital_cache =
+	std::unordered_map<orbital_cache_key, complex, orbital_cache_key_hash>;
 
 struct reduced_orbital_cache_key {
 	std::array<int, 4> orbital;
@@ -859,11 +924,28 @@ struct reduced_orbital_cache_key {
 using reduced_orbital_cache =
 	std::map<reduced_orbital_cache_key, reduced_orbital_kernel>;
 
+using radial_power_table = std::array<std::array<double, 5>, 4>;
+
+radial_power_table build_radial_power_table(
+	const std::array<double, 4>& radial)
+{
+	// c4 contains four Cartesian momentum factors, so no slot exponent exceeds
+	// four.  Retain std::pow to preserve the previous bit pattern, but evaluate
+	// each repeated base/exponent pair only once per projection.
+	radial_power_table powers{};
+	for (int slot = 0; slot < 4; ++slot) {
+		for (int power = 0; power <= 4; ++power) {
+			powers[slot][power] = std::pow(radial[slot], power);
+		}
+	}
+	return powers;
+}
+
 complex uncoupled_orbital_kernel(
 	const std::array<int, 8>& angular,
 	double p, double q, double pp, double qp,
 	scalar_kernel_kind kind, int order, double pion_mass,
-	reduced_orbital_cache& cache)
+	reduced_orbital_cache& cache, bool build_c3_companion)
 {
 	const int bra_l_pair = angular[0];
 	const int bra_m_pair = angular[1];
@@ -879,11 +961,25 @@ complex uncoupled_orbital_kernel(
 	}, kind};
 	auto found = cache.find(key);
 	if (found == cache.end()) {
-		found = cache.emplace(
-			key,
-			build_reduced_orbital_kernel(
-				key.orbital, p, q, pp, qp, kind, order, pion_mass)
-		).first;
+		if (kind == scalar_kernel_kind::two_pion && build_c3_companion) {
+			reduced_orbital_kernel c3_kernel{};
+			reduced_orbital_kernel base_kernel = build_reduced_orbital_kernel(
+				key.orbital, p, q, pp, qp, scalar_kernel_kind::two_pion,
+				order, pion_mass, &c3_kernel);
+			cache.emplace(
+				reduced_orbital_cache_key{key.orbital, scalar_kernel_kind::two_pion},
+				std::move(base_kernel));
+			cache.emplace(
+				reduced_orbital_cache_key{key.orbital, scalar_kernel_kind::c3},
+				std::move(c3_kernel));
+			found = cache.find(key);
+		} else {
+			found = cache.emplace(
+				key,
+				build_reduced_orbital_kernel(
+					key.orbital, p, q, pp, qp, kind, order, pion_mass)
+			).first;
+		}
 	}
 	const reduced_orbital_kernel& reduced = found->second;
 	complex total{0.0, 0.0};
@@ -911,16 +1007,17 @@ complex project_cartesian_algebra(
 	double p, double q, double pp, double qp,
 	algebra_kind algebra, scalar_kernel_kind kernel,
 	int order, double pion_mass, orbital_cache& cache,
-	reduced_orbital_cache& reduced_cache)
+	reduced_orbital_cache& reduced_cache, bool build_c3_companion = false)
 {
 	const auto weights = get_weight_table(bra, ket, algebra);
 	const std::array<double, 4> radial{{pp, qp, p, q}};
+	const radial_power_table radial_powers = build_radial_power_table(radial);
 	complex result{0.0, 0.0};
 	for (const auto& item : *weights) {
 		const weight_key& key = item.first;
 		double radial_factor = 1.0;
 		for (int slot = 0; slot < 4; ++slot) {
-			radial_factor *= std::pow(radial[slot], key.radial_powers[slot]);
+			radial_factor *= radial_powers[slot][key.radial_powers[slot]];
 		}
 		const orbital_cache_key cache_key{key.angular, kernel};
 		auto found = cache.find(cache_key);
@@ -929,7 +1026,7 @@ complex project_cartesian_algebra(
 				cache_key,
 				uncoupled_orbital_kernel(
 					key.angular, p, q, pp, qp, kernel, order, pion_mass,
-					reduced_cache)
+					reduced_cache, build_c3_companion)
 			).first;
 		}
 		result += item.second * radial_factor * found->second;
@@ -964,7 +1061,8 @@ std::array<complex, 5> project_ls_components(
 		if (c1_fm != 0.0) {
 			const complex spin = project_cartesian_algebra(
 				bra, ket, p, q, pp, qp, algebra_kind::q23,
-				scalar_kernel_kind::two_pion, order, pion_mass, cache, reduced_cache);
+				scalar_kernel_kind::two_pion, order, pion_mass, cache, reduced_cache,
+				c3_fm != 0.0);
 			result[0] = common * (-4.0 * c1_fm * pion_mass * pion_mass) * iso23 * spin;
 		}
 		if (c3_fm != 0.0) {
