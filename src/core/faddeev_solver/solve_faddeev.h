@@ -62,43 +62,12 @@ void create_VC_col_maj_3N_pointer_array(double** VC_CM_array,
 										pw_3N_statespace pw_states,
 					         			run_params run_parameters);
 
-void PVC_col_brute_force(double*  col_array,
-					     size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
-					     size_t   Nalpha,      size_t Nq_WP,   size_t Np_WP,
-					     double** VC_CM_array,
-					     double*  P123_val_array,
-					     size_t*  P123_row_array,
-					     int*     P123_col_array,
-					     size_t   P123_dim);
-
-void CPVC_col_brute_force(double*  col_array,
-						  size_t   idx_alpha_c, size_t idx_p_c, size_t idx_q_c,
-						  size_t   Nalpha,      size_t Nq_WP,   size_t Np_WP,
-						  double** CT_RM_array,
-						  double** VC_CM_array,
-						  double*  P123_val_array,
-						  size_t*  P123_row_array,
-						  int*     P123_col_array,
-						  size_t   P123_dim);
-
-void PVC_col_calc_test(size_t   Nalpha,
-					   size_t 	Nq_WP,
-					   size_t 	Np_WP,
-					   double** VC_CM_array,
-					   double*  P123_sparse_val_array,
-					   int*     P123_sparse_row_array,
-					   size_t*  P123_sparse_col_array,
-					   size_t   P123_sparse_dim);
-
-void CPVC_col_calc_test(size_t   Nalpha,
-						size_t 	 Nq_WP,
-						size_t 	 Np_WP,
-						double** CT_RM_array,
-						double** VC_CM_array,
-						double*  P123_sparse_val_array,
-						int*     P123_sparse_row_array,
-						size_t*  P123_sparse_col_array,
-						size_t   P123_sparse_dim);
+// [EN] The brute-force reference routines (PVC_col_brute_force,
+// CPVC_col_brute_force) and their *_calc_test harnesses were extracted into
+// reference_brute_force.h, so this production header reads as the clean entry
+// surface (task Phase 5). They remain defined in solve_faddeev.cpp, gated by
+// the run-time test_*_routine flags. / [CN] 暴力参考例程与 *_calc_test 对照已
+// 抽至 reference_brute_force.h；仍定义于 solve_faddeev.cpp，由 test_*_routine 门控。
 
 // [EN] Made visible (forward-declared) for tests/cpp/test_3nf_operator_oracle.cpp —
 // the Phase 0 finite-dimensional operator oracle needs to call the production

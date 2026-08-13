@@ -1,5 +1,6 @@
 #include "solve_faddeev.h"
 #include "cpvc_kernel.h"
+#include "reference_brute_force.h"
 #include "coupled_channel_transform.h"
 #include "pade_approximant.h"
 #include "interactions/three_nucleon_force_model.h"
