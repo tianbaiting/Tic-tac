@@ -753,6 +753,7 @@ void calculate_permutation_elements_for_3N_channel(double** P123_val_dense_array
 	printf("     - Running OpenMP on %d threads \n", P123_omp_num_threads);
 	fflush(stdout);
 	auto timestamp_P123_tot_start = chrono::system_clock::now();
+	const int previous_omp_num_threads = omp_get_max_threads();
 	
 	std::vector<int> num_rows_calculated(P123_omp_num_threads, 0);
 	
@@ -959,8 +960,8 @@ void calculate_permutation_elements_for_3N_channel(double** P123_val_dense_array
 		}
 	}
 	}
-	/* This changes back the maximal number of threads permitted by omp */
-	omp_set_num_threads(omp_get_max_threads());
+	/* Restrict only P123; later W1/solver regions retain the caller's setting. */
+	omp_set_num_threads(previous_omp_num_threads);
 
 	/* Delete all temporary arrays and free memory */
 	delete [] Atilde_store;
