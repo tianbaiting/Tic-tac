@@ -117,6 +117,13 @@
       "transfer_order2_U_max_relative_change": 0.03829752547,
       "interpretation": "The exact contact selection rule removes low-transfer-order leakage into higher orbital channels. It invalidates the old order-two U values as a physics baseline but leaves the timing projection at about 13 seconds on 96 threads."
     },
+    "analytic_cD_relative_angle": {
+      "W1_cache_schema": 9,
+      "same_order_machine_table_rows_checked": 26,
+      "max_absolute_U_change_mev": 1.7347234760e-18,
+      "w1_seconds_at_96_threads": 12.7,
+      "interpretation": "The exact lbar=0 relative-angle reduction is numerically neutral at this grid; the small timing change is within run variation and does not alter the feasibility decision."
+    },
     "channel_zero_scan": {
       "description": "All ordered channel pairs were evaluated at three generic nonzero momentum tuples with all c1/c3/c4/cD/cE components enabled.",
       "positive_parity_nonzero_pairs": 100,

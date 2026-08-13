@@ -776,6 +776,13 @@ reduced_orbital_kernel build_reduced_orbital_kernel(
 	const double dq_lo = std::abs(qp - q);
 	const double dq_hi = qp + q;
 	for (int lbar = lbar_min; lbar <= lbar_max; ++lbar) {
+		const bool relative_angle_independent =
+			kind == scalar_kernel_kind::contact
+			|| kind == scalar_kernel_kind::one_pion;
+		if (relative_angle_independent && lbar != 0) {
+			result.integrals.push_back(0.0);
+			continue;
+		}
 		complex integral{0.0, 0.0};
 		for (int idp = 0; idp < order; ++idp) {
 			const double delta_p = 0.5 * ((dp_hi - dp_lo) * grid->nodes[idp] + dp_hi + dp_lo);
@@ -803,12 +810,20 @@ reduced_orbital_kernel build_reduced_orbital_kernel(
 				const vector3 qp_hat{qp_vector[0] / qp_norm, 0.0, qp_vector[2] / qp_norm};
 				const complex spectator_bipolar = bipolar_harmonic(
 					bra_lambda, ket_lambda, lbar, qp_hat, q_hat);
-				complex relative_integral{0.0, 0.0};
-				for (int ix = 0; ix < order; ++ix) {
-					const double x = grid->nodes[ix];
-					relative_integral += grid->weights[ix]
-						* legendre_polynomial(lbar, x)
-						* scalar_kernel_value(kind, delta_p, delta_q, x, pion_mass);
+				complex relative_integral;
+				if (relative_angle_independent) {
+					// Integral_{-1}^{1} P_lbar(x) dx = 2 delta_lbar,0.
+					relative_integral = kind == scalar_kernel_kind::contact
+						? 2.0
+						: 2.0 / (delta_q * delta_q + pion_mass * pion_mass);
+				} else {
+					relative_integral = 0.0;
+					for (int ix = 0; ix < order; ++ix) {
+						const double x = grid->nodes[ix];
+						relative_integral += grid->weights[ix]
+							* legendre_polynomial(lbar, x)
+							* scalar_kernel_value(kind, delta_p, delta_q, x, pion_mass);
+					}
 				}
 				integral += weight_p * delta_p * weight_q * delta_q
 					* pair_bipolar * spectator_bipolar * relative_integral;

@@ -133,7 +133,7 @@ are being preserved.
 | Complete five-angle reference | Explicit Jj angular-spin states, 8-state Pauli spin and isospin algebra, all five operator components, regulator, rotational volume, and `(2pi)^-6` | Implemented as `chiral_N2LO_full_5d_reference` and signed-oracle tested.  Correctness-first only: cost scales as `Nangle_3NF^5`, so it is not accepted for converged WPCD production grids. |
 | Factorized three-integral implementation | Hebeler Eq. (6) scalar kernel plus an automated Cartesian-vector/spherical-harmonic finite-rank expansion and explicit spin/isospin matrices | Complete in Python and C++ for `c1`, `c3`, `c4`, `cD`, and `cE`.  It retains three nontrivial integrals, caches momentum-independent angular/spin weights, applies the nonlocal regulator after PWD, and performs a unitary LS-to-Jj recoupling.  It is solver-selectable as `chiral_N2LO_full_factorized`; realistic WP cost and convergence remain open gates. |
 | Regulator | Squared nonlocal Gaussian associated with Epelbaum Eq. (3.19) | Present; convention and cutoff pairing must remain explicit in every benchmark. |
-| WP cache | Four-dimensional radial-bin quadrature with model/coupling/grid/truncation fields and schema-v8 operator versioning in the key | `Nangle_3NF`, the distinct reference model name, and numerical `gA`, `fpi`, `mpi`, `Lambda_chi`, and `hbarc` values prevent cross-projector/order/convention reuse.  Independent production-driver integration shows radial order four is converged below `8e-7` for the tested difficult cells.  Cache-off, miss/store, and hit paths are bitwise identical at order two. |
+| WP cache | Four-dimensional radial-bin quadrature with model/coupling/grid/truncation fields and schema-v9 operator versioning in the key | `Nangle_3NF`, the distinct reference model name, and numerical `gA`, `fpi`, `mpi`, `Lambda_chi`, and `hbarc` values prevent cross-projector/order/convention reuse.  Independent production-driver integration shows radial order four is converged below `8e-7` for the tested difficult cells.  Cache-off, miss/store, and hit paths are bitwise identical at order two. |
 | Scattering insertion | Code builds `W1*C` and then its sparse left-permuted `P*W1*C`, including the complete intermediate-channel contraction | Corrected to the primary-source kernel `(1+P)W1`.  The noncommuting test now derives the reference matrix directly from Deltuva Eq. (7a). |
 
 The implementation also exposes `w1_scale`.  It is correctly marked as a
@@ -297,9 +297,10 @@ discriminator.
    including their last quadrature steps.  Realistic-grid WP/solver convergence
    remains required; no unsupported dimensional reduction is accepted.
 6. **Resolved for representative-cell cache parity and quadrature:** W1 schema
-   v8 hashes all chiral constants and the angular order, locks the exact-
+   v9 hashes all chiral constants and the angular order, locks the exact-
    Hermitian transpose construction contract, and uses the exact cE contact
-   selection rule rather than a finite transfer quadrature.  Direct integration
+   selection rule plus the analytic cD relative-angle integral rather than
+   finite transfer quadrature for those angle-independent pieces.  Direct integration
    through the production C++ driver demonstrates
    that the midpoint is not reliable and that radial order four agrees with
    order six below `8e-7` in the hardest tested wide transition.  Cache-off,

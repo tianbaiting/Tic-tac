@@ -151,6 +151,18 @@
         "cD_zero_seconds": {"1": 113.4, "96": 12.5},
         "interpretation": "At transfer order two the cD path contributes about 10 percent of single-thread W1 wall time and is not the dominant remaining cost."
       },
+      "analytic_cD_relative_angle": {
+        "status": "accepted exact reduction",
+        "W1_cache_schema": 9,
+        "identity": "Integral[-1,1] P_lbar(x) dx = 2 delta_lbar,0 because the cD scalar propagator is independent of the relative transfer angle",
+        "high_order_machine_table_rows_checked": 26,
+        "max_absolute_difference_from_stored_same_order_cpp_fm5": 1.5369796460e-34,
+        "seconds_by_threads": {"1": 126.5, "16": 16.9, "96": 12.7},
+        "comparison_pre_reduction_seconds": {"1": 126.0, "16": 16.9, "96": 13.0},
+        "max_absolute_U_change_mev": 1.7347234760e-18,
+        "max_relative_U_change": 8.9621415190e-17,
+        "interpretation": "The values are numerically unchanged and the timing shift is within run variation at transfer order two. The remaining cost is dominated by the angle-dependent c1/c3/c4 two-pion kernels."
+      },
       "verification": {
         "radial_order_one_u_and_convergence_files": "byte-identical across magnetic factorization",
         "radial_order_two_u_and_convergence_files": "byte-identical across channel batching",

@@ -23,6 +23,9 @@ constexpr int P123_SCHEMA_VERSION = 2;
 // exact symmetry contract.
 // Bumped 7 -> 8 on 2026-08-13: the factorized cE contact is evaluated by its
 // exact diagonal closed form rather than by the generic transfer quadrature.
-constexpr int W1_SCHEMA_VERSION   = 8;
+// Bumped 8 -> 9 on 2026-08-13: analytically integrate the relative transfer
+// angle for x-independent contact and cD one-pion scalar kernels.  Only lbar=0
+// survives, eliminating finite-order leakage into forbidden multipoles.
+constexpr int W1_SCHEMA_VERSION   = 9;
 
 }  // namespace tictac::cache
