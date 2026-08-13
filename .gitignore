@@ -20,7 +20,9 @@ __pycache__/
 CPP/Output/
 CPP/Input/*_autogen.txt
 CPP/Input/energy_*_autogen.txt
-docs/
+# Note: tracked documentation lives under docs/ (240 files). Do NOT add a
+# broad 'docs/' ignore rule here -- it would silently block new docs (it bit
+# docs/architecture.md during the refactor). Only ignore build artifacts below.
 # treatise (LaTeX) build artifacts
 docs/treatise/_build/
 docs/treatise/code_excerpts/snippets/*
