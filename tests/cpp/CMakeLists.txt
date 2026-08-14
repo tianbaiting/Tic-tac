@@ -97,6 +97,7 @@ add_executable(test_chiral_n2lo_w1_cache
     test_chiral_n2lo_w1_cache.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_factorized.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_integrate.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
@@ -127,6 +128,49 @@ target_link_libraries(test_chiral_n2lo_w1_cache
 )
 add_test(NAME chiral_n2lo_w1_cache COMMAND test_chiral_n2lo_w1_cache)
 
+# Distributed exact W^(1) construction contract test: deterministic work plan,
+# Hermitian no-duplicate work, stable IDs, cache mismatch / corrupt-shard
+# rejection, atomic completion, resume, two-worker partition, multi-worker
+# fingerprint invariance, monolithic-vs-resumable bitwise equality, transpose
+# correctness, signature stability. Tiny 2-channel grid (< 2 s).
+add_executable(test_w1_distributed
+    test_w1_distributed.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_factorized.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_full_reference.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_integrate.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_work_plan.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_manifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/coupling_coefficients.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/spin_isospin_algebra.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/error_management.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_manifest.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_p123.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_io_w1.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_layer.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party/sha256.cpp
+)
+target_include_directories(test_w1_distributed PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/core/state_space
+    ${CMAKE_SOURCE_DIR}/src/interactions
+    ${CMAKE_SOURCE_DIR}/src/utils
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer
+    ${CMAKE_SOURCE_DIR}/src/io/cache_layer/third_party
+    ${CMAKE_SOURCE_DIR}/include
+    ${HDF5_INCLUDE_DIRS}
+)
+target_link_libraries(test_w1_distributed
+    OpenMP::OpenMP_CXX
+    ${GSL_LIBRARIES}
+    ${HDF5_CXX_LIBRARIES}
+    ${HDF5_LIBRARIES}
+    ${HDF5_HL_LIBRARIES}
+)
+add_test(NAME w1_distributed COMMAND test_w1_distributed)
+
 # L4: Faddeev/AGS operator-ordering dense test (3NF audit B4)
 add_executable(test_faddeev_operator_order
     test_faddeev_operator_order.cpp
@@ -143,6 +187,7 @@ add_executable(test_3nf_operator_oracle
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/coupled_channel_transform.cpp
     ${CMAKE_SOURCE_DIR}/src/core/faddeev_solver/pade_approximant.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_integrate.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/matrix_routines.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/gauss_legendre.cpp
     ${CMAKE_SOURCE_DIR}/src/io/cache_layer/cache_keys.cpp

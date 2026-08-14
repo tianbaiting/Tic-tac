@@ -152,6 +152,9 @@ add_executable(w1_worker
     ${CMAKE_SOURCE_DIR}/src/core/state_space/make_wp_states.cpp
     ${CMAKE_SOURCE_DIR}/src/io/disk_io_routines.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/w1_pw_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_integrate.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_work_plan.cpp
+    ${CMAKE_SOURCE_DIR}/src/interactions/w1_manifest.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_factorized.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/chiral_N2LO_3NF_full_reference.cpp
     ${CMAKE_SOURCE_DIR}/src/interactions/three_nucleon_force_model.cpp

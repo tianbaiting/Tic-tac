@@ -1,5 +1,7 @@
 #include "w1_pw_cache.h"
 
+#include "w1_integrate.h"   // shared per-cell integration (bitwise-identical path)
+
 #include "three_nucleon_force_model.h"
 #include "constants.h"
 #include "gauss_legendre.h"
@@ -15,53 +17,7 @@
 #include <cstring>  // memcpy
 #endif
 
-namespace {
-
-// Build per-bin Gauss-Legendre nodes/weights along one axis.
-// nodes_out[i*Npts + k] is the k-th Gauss point in bin i (in MeV).
-// w_axis_out[i*Npts + k] is the corresponding weight in MeV (already mapped
-// from [-1,1] to [bin_lower, bin_upper]).
-//
-// For Npts=1 the single-point rule is forced to (midpoint, bin_width); this
-// keeps the cache value bit-for-bit identical to the legacy midpoint formula
-// when Np_per_WP_W1 = Nq_per_WP_W1 = 1.
-void build_per_bin_quadrature(const double* boundary_array,
-                              std::size_t   N_bins,
-                              int           Npts,
-                              std::vector<double>& nodes_out,
-                              std::vector<double>& weights_out)
-{
-    nodes_out.assign(N_bins * (std::size_t)Npts, 0.0);
-    weights_out.assign(N_bins * (std::size_t)Npts, 0.0);
-
-    if (Npts == 1) {
-        for (std::size_t i = 0; i < N_bins; ++i) {
-            double lo = boundary_array[i];
-            double hi = boundary_array[i + 1];
-            nodes_out[i]   = 0.5 * (lo + hi);
-            weights_out[i] = hi - lo;          // single-point rule weight = bin width
-        }
-        return;
-    }
-
-    std::vector<double> xref(Npts), wref(Npts);
-    gauss(xref.data(), wref.data(), Npts);     // nodes/weights on [-1, 1]
-
-    for (std::size_t i = 0; i < N_bins; ++i) {
-        double lo = boundary_array[i];
-        double hi = boundary_array[i + 1];
-        double a  = 0.5 * (hi - lo);
-        double b  = 0.5 * (hi + lo);
-        double*  n  = &nodes_out[i * (std::size_t)Npts];
-        double*  w  = &weights_out[i * (std::size_t)Npts];
-        for (int k = 0; k < Npts; ++k) {
-            n[k] = a * xref[k] + b;
-            w[k] = a * wref[k];
-        }
-    }
-}
-
-} // namespace
+using tictac::interactions::integrate_w1_channel_blocks;
 
 tictac::cache::W1Key make_w1_key(const three_nucleon_force_model& tnf,
                                  const run_params&                run_parameters,
@@ -169,31 +125,13 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
     // WP 基下的 bin 矩阵元（MeV，单位与 V_WP 一致；w1_scale 诊断标度在消费侧再乘）。
     // Np_per_WP_W1 = Nq_per_WP_W1 = 1 时退化为现行 midpoint 公式，逐比特复现旧结果。
 
-    const double inv_hbarc  = 1.0 / hbarc;
-    const double inv_hbarc5 = std::pow(inv_hbarc, 5);
-
+    // Quadrature orders are part of the cache key (make_w1_key) and select the
+    // shared integration helper's per-bin Gauss-Legendre rule.  The actual
+    // node/weight/normalisation pre-computation lives in integrate_w1_channel_blocks
+    // so the monolithic dense path and the distributed per-block executor share
+    // one source of truth (bitwise-identical W^(1) blocks).
     const int Np_quad = std::max(1, run_parameters.Np_per_WP_W1);
     const int Nq_quad = std::max(1, run_parameters.Nq_per_WP_W1);
-    if (Np_quad == 1 || Nq_quad == 1) {
-        std::fprintf(stderr,
-            "[3NF quadrature] WARNING: Np_per_WP_W1=%d, Nq_per_WP_W1=%d uses "
-            "the legacy midpoint rule in at least one dimension. This is a "
-            "diagnostic/reproducibility setting, not evidence of a converged "
-            "physical 3NF result. Compare at least N=2 and N=4.\n",
-            Np_quad, Nq_quad);
-    }
-
-    // Per-bin Gauss nodes/weights in MeV (consumer convention).
-    std::vector<double> p_nodes_MeV, p_w_MeV, q_nodes_MeV, q_w_MeV;
-    build_per_bin_quadrature(p_WP_array, m_Np, Np_quad, p_nodes_MeV, p_w_MeV);
-    build_per_bin_quadrature(q_WP_array, m_Nq, Nq_quad, q_nodes_MeV, q_w_MeV);
-
-    // Pre-compute WP normalization factor 1/sqrt(Δ) per bin.
-    std::vector<double> p_inv_sqrtD(m_Np), q_inv_sqrtD(m_Nq);
-    for (std::size_t i = 0; i < m_Np; ++i)
-        p_inv_sqrtD[i] = 1.0 / std::sqrt(p_WP_array[i + 1] - p_WP_array[i]);
-    for (std::size_t i = 0; i < m_Nq; ++i)
-        q_inv_sqrtD[i] = 1.0 / std::sqrt(q_WP_array[i + 1] - q_WP_array[i]);
 
     const std::size_t num_blocks = m_blocks.size();
 
@@ -293,63 +231,25 @@ void W1_PW_cache::build(const three_nucleon_force_model& tnf,
 		evaluation_channels.push_back(m_blocks[blk]);
 	}
 
-	// Populate expensive momentum-independent angular tables in parallel without
-	// evaluating and discarding a complete transfer-integral matrix element.
-	#pragma omp parallel for schedule(dynamic)
-	for (std::size_t index = 0; index < evaluation_channels.size(); ++index) {
-		const auto channel = evaluation_channels[index];
-		tnf.prepare_W1_channel(channel.first, channel.second, pw_states);
-	}
-
-    #pragma omp parallel for schedule(dynamic)
-    for (std::size_t cell = 0; cell < per_block; ++cell) {
-        std::size_t remaining = cell;
-        const std::size_t ipc = remaining % m_Np;
-        remaining /= m_Np;
-        const std::size_t ipr = remaining % m_Np;
-        remaining /= m_Np;
-        const std::size_t iqc = remaining % m_Nq;
-        const std::size_t iqr = remaining / m_Nq;
-
-		std::vector<double> accum(evaluation_blocks.size(), 0.0);
-        std::vector<double> w1_values;
-        for (int kqr = 0; kqr < Nq_quad; ++kqr) {
-            const double q_r_MeV = q_nodes_MeV[iqr * Nq_quad + kqr];
-            const double w_qr    = q_w_MeV   [iqr * Nq_quad + kqr];
-            const double q_r_fm  = q_r_MeV * inv_hbarc;
-            for (int kqc = 0; kqc < Nq_quad; ++kqc) {
-                const double q_c_MeV = q_nodes_MeV[iqc * Nq_quad + kqc];
-                const double w_qc    = q_w_MeV   [iqc * Nq_quad + kqc];
-                const double q_c_fm  = q_c_MeV * inv_hbarc;
-                for (int kpr = 0; kpr < Np_quad; ++kpr) {
-                    const double p_r_MeV = p_nodes_MeV[ipr * Np_quad + kpr];
-                    const double w_pr    = p_w_MeV   [ipr * Np_quad + kpr];
-                    const double p_r_fm  = p_r_MeV * inv_hbarc;
-                    for (int kpc = 0; kpc < Np_quad; ++kpc) {
-                        const double p_c_MeV = p_nodes_MeV[ipc * Np_quad + kpc];
-                        const double w_pc    = p_w_MeV   [ipc * Np_quad + kpc];
-                        const double p_c_fm  = p_c_MeV * inv_hbarc;
-
-						tnf.W1_elements_for_channels(
-							evaluation_channels, p_r_fm, q_r_fm, p_c_fm, q_c_fm,
-                            pw_states, w1_values);
-                        const double radial_weight =
-                            (p_r_MeV * q_r_MeV * p_c_MeV * q_c_MeV)
-                            * (w_pr * w_qr * w_pc * w_qc);
-                        for (std::size_t index = 0; index < accum.size(); ++index) {
-                            accum[index] += radial_weight * w1_values[index];
-                        }
-                    }
-                }
-            }
-        }
-
-        const double bin_norm = p_inv_sqrtD[ipr] * q_inv_sqrtD[iqr]
-                              * p_inv_sqrtD[ipc] * q_inv_sqrtD[iqc];
-		for (std::size_t index = 0; index < evaluation_blocks.size(); ++index) {
-			m_data[evaluation_blocks[index] * per_block + cell]
-				= accum[index] * bin_norm * inv_hbarc5;
+	// [EN] Exact per-cell integration of every Hermitian-triangle block.
+	// integrate_w1_channel_blocks is the shared source of truth: the monolithic
+	// dense path here and the distributed per-block W1BlockExecutor call the same
+	// function, so cached W^(1) values are bitwise-identical regardless of which
+	// path produced them.  Each evaluation block occupies a contiguous per_block
+	// region of m_data (block-major layout), so we hand the helper direct pointers
+	// into m_data -- no copy, no value change.  The helper also performs the
+	// momentum-independent prepare_W1_channel warm-up once per channel.
+	// / [CN] 逐 cell 精确积分 Hermitian 三角块。与分布式 W1BlockExecutor 共用同一
+	// 函数，保证两条路径逐比特一致；直接写入 m_data，无拷贝、无值变化。
+	{
+		std::vector<double*> out_ptrs;
+		out_ptrs.reserve(evaluation_blocks.size());
+		for (const std::size_t blk : evaluation_blocks) {
+			out_ptrs.push_back(&m_data[blk * per_block]);
 		}
+		integrate_w1_channel_blocks(tnf, p_WP_array, m_Np, q_WP_array, m_Nq,
+		                            pw_states, run_parameters,
+		                            evaluation_channels, out_ptrs);
 	}
 
 	if (tnf.W1_is_exactly_hermitian()) {

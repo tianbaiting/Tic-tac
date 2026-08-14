@@ -46,8 +46,8 @@ chk "[[ '$restart_eval' -eq 0 && '$fresh_eval' -gt 0 ]]" "restart: completed sec
 echo "=== F  distributed: two disjoint shards build both active sectors ==="
 "$WORKER" build "$IN" cache_root="$HERE/shard_cache" --shard 0/2 >/dev/null 2>&1
 "$WORKER" build "$IN" cache_root="$HERE/shard_cache" --shard 1/2 >/dev/null 2>&1
-stored=$( "$WORKER" plan "$IN" cache_root="$HERE/shard_cache" 2>/dev/null | grep -oE 'stored: [0-9]+' | grep -oE '[0-9]+' )
-chk "[[ '$stored' -gt 0 ]]" "distributed shards populated the cache (stored=$stored blocks)"
+stored=$( "$WORKER" plan "$IN" cache_root="$HERE/shard_cache" 2>/dev/null | grep -oE 'present=[0-9]+' | grep -oE '[0-9]+' )
+chk "[[ '$stored' -gt 0 ]]" "distributed shards populated the cache (present=$stored blocks)"
 
 echo "=== D  verify the assembled database ==="
 vres=$( "$WORKER" verify "$IN" cache_root="$HERE/shard_cache" 2>&1 | grep -oE 'verify: [0-9]+ blocks checked, [0-9]+ missing' || true )

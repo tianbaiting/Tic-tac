@@ -58,6 +58,7 @@ The labels used below are:
 | Idaho-N3LO deuteron p-grid ladder | `deuteron_binding_only=true`; `output/validation/idaho_n3lo_deuteron_binding_ladder.json`; `python3 -m unittest tests/test_deuteron_binding_mode.py` | **Verified production-path result:** the fail-closed mode calls the ordinary `V_WP` builder and SWP diagonalizer but returns before P123.  Independent `p/q` Chebyshev controls preserve legacy inheritance exactly and isolate binding from `q` tuning.  A two-dimensional shape scan followed by the fixed `p_t=0.88,p_s=325` ladder gives binding magnitudes `2.14681,2.18846,2.20378,2.21107,2.21510,2.21844 MeV` at `Np=40,60,80,100,120,150`.  A common `1/Np^2` fit has `E_infinity=2.2242145 MeV`, `0.360 keV` below the reference, with at most `0.048 keV` residual.  `Np=82` is the lowest tested point inside the present 20-keV gate (`19.828 keV` error). |
 | Realistic-grid Ay feasibility | `output/validation/n2lo_3nf_physical_Ay_feasibility.json` | **Verified mixed result:** the candidate `Np=82,Nq=12,p=(0.88,325),q=(1,90)` places a bin midpoint at `Tlab=10.0453 MeV`.  An actual 2NF `J=1/2`, both-parity run builds schema-v2 exact-grid P123 caches in about 64 s and solves in about 152 s; all 16 amplitudes converge at `[24/24]` and `[32/32]`, with maximum order-to-order difference `1.28e-9 MeV`.  Exact-Hermitian reuse, restored 96-thread execution, and two bitwise-equivalent projection optimizations lower the complete-3NF W1 projection from about 164 to 19.4 h for only one 101-block low-order J-parity sector.  All 100 ordered channel pairs in each parity are nonzero at the scan points, so exact-zero pruning is unavailable.  This is a feasibility rejection, not an Ay result. |
 | W1 low-rank/streaming feasibility | `output/validation/n2lo_3nf_w1_low_rank_feasibility.json` | **Verified rejection for production use:** W1 is consumed element-wise while forming `W1*C`, so streaming changes memory rather than the number of costly W1 evaluations, and a post-build SVD pays the dense construction cost first.  At block tolerance `1e-4`, the schema-v9 `(4,3)` probe changes U by `7.49e-5` in relative L2 and up to `1.23e-3` pointwise.  At `1e-6`, U changes by `8.86e-7`, but factor storage is larger than dense at `(4,3)` and only about 5% smaller in the archived `(10,8)` structural probe.  No low-rank production path is enabled. |
+| Distributed/resumable exact W1 construction | `docs/w1_distributed_construction.md`; `tests/cpp/test_w1_distributed.cpp`; `tools/refactor_harness/run_w1_block_dist_acceptance.sh`; commits on `main` | **Verified implementation result (exact, no approximation):** the expensive W1 construction factors into independently-computable exact blocks (one per `(alpha_r, alpha_c)` channel pair, classified `evaluate`/`transpose_fill`), shared by a single `integrate_w1_channel_blocks` helper that both the monolithic `W1_PW_cache::build` and a per-block `W1BlockExecutor` call (bitwise-identical by construction).  Each block publishes via an atomic temp+rename shard with full `W1Key` (schema v9) provenance; a stale/corrupt shard is a clean miss.  Block-level `--worker-index/--worker-count` partitioning lets N workers (or N machines) attack one sector in parallel; resume skips completed blocks with zero recomputation.  Measured on the `input_j3nf_multiblock.txt` grid: the block-level 16-worker, 2-worker, and interrupted(7-block)+resumed builds all produce the **identical** W1 fingerprint `611ce32acac0a3395178cb6b5aed5eb3bcaaed2d9550d5d555b08eeebb0456df`, matching the monolithic sector-level build; the downstream solver U is bitwise-identical across both parities; 90/90 Hermitian reverse-block transpose pairs verify `bad=0`; `ctest` 17/17 pass including the new `w1_distributed` contract test.  Single-machine block-level scaling (1/4/16 workers: 23/22/19 s) is memory-bound (consistent with the existing 16→96-thread 1.12× ratio); the operational value is cross-machine distribution (cost model: ~19.4 h/sector ÷ N machines) and resumability.  This removes the operational blocker; the realistic Ay campaign is still not complete. |
 | Low-energy nd Ay preflight | `examples/audit_low_energy_Ay.py`; `output/validation/n2lo_3nf_low_energy_Ay_preflight.json`; `python3 -m unittest tests/test_low_energy_ay_audit.py` | **Verified negative acceptance result:** the fail-closed audit computes `Ay_max`, its angle, peak deficits, RMSE, uncertainty-weighted chi-square, maximum residual, and `R_Ay`, but permits an interpretation only after all physics gates pass.  The existing paired `Np=Nq=10`, `J_3N<=9/2` Idaho-N3LO artifacts match in numerical settings and have all requested J-parity U blocks, but use the old approximate 3NF, have `E_d=-0.108641 MeV`, contain 400 truncated 2NF and 51 truncated 3NF amplitudes, and provide none of the required `Np/Nq/W1/J2N/J3N/Pade` Ay ladders.  Their diagnostic `R_Ay=1.1595` is therefore explicitly withheld as a physical conclusion. |
 | Full Python discovery | `python3 -m unittest ...` including `tests/test_pade_honesty.py` | **Environment limitation:** collection fails because the local Python environment does not provide `pytest`; this is separate from the clean `unittest` regression set above. |
 
@@ -334,14 +335,24 @@ published raw-PWD, exact-contact-normalization, complete slow-C++-reference,
 factorized matrix-element implementation, and broad machine-readable matrix-table
 gates.  Representative W1 cell integration is also converged at radial order
 four.  Independent grids now supply a binding-qualified realistic starting
-point, and its 2NF P123/Padé path is measured to be viable.  The repository
-still fails the decisive complete-3NF realistic-grid and physical-validation
-gates because dense W1 construction is computationally prohibitive.  The
-low-energy Ay path has a machine-readable, fail-closed acceptance audit and a
-separate feasibility report; both reject interpretation of the existing
-diagnostic curves.  Converged radial/angular/J ladders and the paired result
-must precede the final comparison.  No existing Ay curve is yet admissible as
-a complete-N2LO result.
+point, and its 2NF P123/Padé path is measured to be viable.  The
+**operational** blocker to the complete-3NF realistic-grid W1 build is removed:
+W1 construction now factors into independently-computable exact blocks with
+atomic-shard persistence, full-provenance cache keys, block-level distribution
+across N workers/machines, and verified resumability (completed blocks are never
+recomputed; all construction paths produce an identical SHA-256 W1 fingerprint;
+downstream U is bitwise-identical) — see
+`docs/w1_distributed_construction.md`.  No low-rank, SVD, compression, or other
+physics approximation was introduced.  The repository still fails the decisive
+complete-3NF realistic-grid **execution** gate: the realistic `Np=82, Nq=12`
+W1 build has not been run to completion (its cost is a linear extrapolation
+~19.4 h per low-order J-parity sector, divisible across machines but not yet
+executed), and the higher-W1-order / J / parity / paired-2NF+3NF convergence
+ladders remain open.  The low-energy Ay path has a machine-readable, fail-closed
+acceptance audit and a separate feasibility report; both reject interpretation of
+the existing diagnostic curves.  Converged radial/angular/J ladders and the
+paired result must precede the final comparison.  No existing Ay curve is yet
+admissible as a complete-N2LO result.
 
 ## GLM-5.2 review disposition
 
