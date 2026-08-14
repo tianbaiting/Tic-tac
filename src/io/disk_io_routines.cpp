@@ -1,6 +1,8 @@
 #include "disk_io_routines.h"
 #include "set_run_parameters.h"
 
+#include <filesystem>   // std::filesystem::create_directories (run_parameters.txt output dir)
+
 template <typename T>
 std::string to_string_with_precision_and_sign(const T a_value, const int n = 6){
 	std::string sgn = "";
@@ -222,9 +224,15 @@ void store_complex_matrix(cdouble* matrix_array,
 }
 
 void store_run_parameters(run_params run_parameters){
-	
+
 	std::string file_path = run_parameters.output_folder + "/" + "run_parameters.txt";
-	
+
+	// Ensure the output directory exists so lightweight tools (e.g. the W1
+	// worker) do not fatally abort on a missing run_parameters.txt folder. The
+	// main solver always pre-creates its output folder, so this is a no-op there.
+	std::error_code ec;
+	std::filesystem::create_directories(run_parameters.output_folder, ec);
+
 	/* Open file */
 	std::ofstream output_file;
 	open_file(output_file, file_path, true);

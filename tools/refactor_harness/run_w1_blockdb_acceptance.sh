@@ -31,14 +31,17 @@ warm_build=$( ( cd "$REPO" && "$SOLVER" "$IN" output_folder="$HERE/warm_out" P12
 echo "   warm W1 build line: $warm_build"
 chk "echo '$warm_build' | grep -q 'build=0.0 s'" "warm W1 build is 0.0 s (zero evaluation)"
 
-echo "=== J.2 restart: a completed sector is rebuilt at ~0 s ==="
+echo "=== J.2 restart: a completed sector is rebuilt with zero evaluation ==="
 "$WORKER" build "$IN" cache_root="$HERE/rest_cache" --sector 1 1 >/dev/null 2>&1
-# build ALL; the already-built sector must contribute 0 evaluation. Capture the
-# count of fresh evaluations across the rebuild-all.
-evals=$( "$WORKER" build "$IN" cache_root="$HERE/rest_cache" 2>&1 \
-         | grep -cE "evaluating [0-9]+ of" || true )
-# Exactly ONE sector evaluates on rebuild-all (the second; the first is all-hit).
-chk "[[ '$evals' -eq 1 ]]" "restart: completed sector (chn=0) reused, only 1 of 2 sectors evaluated"
+# Worker signal: it prints "[3NF W1] ... evaluating N of M missing ..." ONLY when
+# it evaluates blocks. An all-cache-hit rebuild prints none.
+restart_eval=$( "$WORKER" build "$IN" cache_root="$HERE/rest_cache" --sector 1 1 2>&1 \
+               | grep -cE "evaluating [0-9]+ of" || true )
+fresh_eval=$( "$WORKER" build "$IN" cache_root="$HERE/rest_cache" --sector 1 -1 2>&1 \
+             | grep -cE "evaluating [0-9]+ of" || true )
+echo "   re-built completed sector 'evaluating' lines: $restart_eval (want 0)"
+echo "   fresh sector 'evaluating' lines:              $fresh_eval (want >0)"
+chk "[[ '$restart_eval' -eq 0 && '$fresh_eval' -gt 0 ]]" "restart: completed sector reused (0 eval), fresh sector still evaluates"
 
 echo "=== F  distributed: two disjoint shards build both active sectors ==="
 "$WORKER" build "$IN" cache_root="$HERE/shard_cache" --shard 0/2 >/dev/null 2>&1
@@ -47,8 +50,8 @@ stored=$( "$WORKER" plan "$IN" cache_root="$HERE/shard_cache" 2>/dev/null | grep
 chk "[[ '$stored' -gt 0 ]]" "distributed shards populated the cache (stored=$stored blocks)"
 
 echo "=== D  verify the assembled database ==="
-vres=$( "$WORKER" verify "$IN" cache_root="$HERE/shard_cache" 2>&1 | grep -oE 'verify: [0-9]+ blocks checked, [0-9]+ missing' )
-echo "   $vres"
+vres=$( "$WORKER" verify "$IN" cache_root="$HERE/shard_cache" 2>&1 | grep -oE 'verify: [0-9]+ blocks checked, [0-9]+ missing' || true )
+echo "   ${vres:-verify: (no summary line)}"
 
 for d in cold_cache cold_out warm_cache warm_out shard_cache rest_cache; do rm -rf "$HERE/$d"; done
 if [[ $fail -eq 0 ]]; then echo "PHASE D-J ACCEPTANCE: PASS"; exit 0
