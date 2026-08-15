@@ -1,0 +1,387 @@
+{
+  "schema": "tictac.realistic_w1_load_imbalance.v1",
+  "generated_on": "2026-08-15",
+  "source": "ESTIMATED_FROM_PILOT",
+  "n_evaluate_blocks": 56,
+  "cost_distribution": {
+    "min_seconds": 19.23,
+    "max_seconds": 675.21,
+    "mean_seconds": 288.77464285714285,
+    "median_seconds": 234.93,
+    "spread_ratio": 35.112324492979724
+  },
+  "static_modulo_partition": {
+    "4": {
+      "eta_load": 0.9647620456698588,
+      "imbalance_pct": 3.523795433014121,
+      "mean_load_seconds": 4042.8450000000003,
+      "max_load_seconds": 4190.51,
+      "min_load_seconds": 3922.84,
+      "threshold_30pct_exceeded": false
+    },
+    "8": {
+      "eta_load": 0.6503975250805989,
+      "imbalance_pct": 34.96024749194011,
+      "mean_load_seconds": 2021.4225,
+      "max_load_seconds": 3107.98,
+      "min_load_seconds": 814.86,
+      "threshold_30pct_exceeded": true
+    },
+    "16": {
+      "eta_load": 0.5984151677343723,
+      "imbalance_pct": 40.158483226562765,
+      "mean_load_seconds": 1010.7112500000001,
+      "max_load_seconds": 1688.98,
+      "min_load_seconds": 352.31,
+      "threshold_30pct_exceeded": true
+    },
+    "32": {
+      "eta_load": 0.37433750000000005,
+      "imbalance_pct": 62.566250000000004,
+      "mean_load_seconds": 505.35562500000003,
+      "max_load_seconds": 1350.0,
+      "min_load_seconds": 69.0,
+      "threshold_30pct_exceeded": true
+    }
+  },
+  "block_costs": [
+    {
+      "a_r": 0,
+      "a_c": 0,
+      "cost_seconds": 19.23,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 0,
+      "a_c": 1,
+      "cost_seconds": 68.98,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 0,
+      "a_c": 2,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 0,
+      "a_c": 3,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 0,
+      "a_c": 4,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 0,
+      "a_c": 5,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 0,
+      "a_c": 6,
+      "cost_seconds": 68.46,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 0,
+      "a_c": 7,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 0,
+      "a_c": 8,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 0,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 1,
+      "a_c": 1,
+      "cost_seconds": 288.03,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 1,
+      "a_c": 2,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 1,
+      "a_c": 3,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 1,
+      "a_c": 4,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 1,
+      "a_c": 5,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 1,
+      "a_c": 6,
+      "cost_seconds": 277.63,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 1,
+      "a_c": 7,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 1,
+      "a_c": 8,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 1,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 2,
+      "a_c": 2,
+      "cost_seconds": 70.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 2,
+      "a_c": 3,
+      "cost_seconds": 150.0,
+      "source": "ESTIMATED_TIER2_5"
+    },
+    {
+      "a_r": 2,
+      "a_c": 4,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 2,
+      "a_c": 5,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 2,
+      "a_c": 6,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 2,
+      "a_c": 7,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 2,
+      "a_c": 8,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 2,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 3,
+      "a_c": 3,
+      "cost_seconds": 70.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 3,
+      "a_c": 4,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 3,
+      "a_c": 5,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 3,
+      "a_c": 6,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 3,
+      "a_c": 7,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 3,
+      "a_c": 8,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 3,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 4,
+      "a_c": 4,
+      "cost_seconds": 65.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 4,
+      "a_c": 5,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 4,
+      "a_c": 6,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 4,
+      "a_c": 7,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 4,
+      "a_c": 8,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 4,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 5,
+      "a_c": 5,
+      "cost_seconds": 65.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 5,
+      "a_c": 6,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 5,
+      "a_c": 7,
+      "cost_seconds": 69.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 5,
+      "a_c": 8,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 5,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 6,
+      "a_c": 6,
+      "cost_seconds": 269.86,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 6,
+      "a_c": 7,
+      "cost_seconds": 278.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 6,
+      "a_c": 8,
+      "cost_seconds": 675.21,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 6,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 7,
+      "a_c": 7,
+      "cost_seconds": 270.0,
+      "source": "ESTIMATED_TIER3"
+    },
+    {
+      "a_r": 7,
+      "a_c": 8,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 7,
+      "a_c": 9,
+      "cost_seconds": 675.0,
+      "source": "ESTIMATED_TIER4"
+    },
+    {
+      "a_r": 8,
+      "a_c": 8,
+      "cost_seconds": 64.31,
+      "source": "MEASURED"
+    },
+    {
+      "a_r": 8,
+      "a_c": 9,
+      "cost_seconds": 200.0,
+      "source": "ESTIMATED_DEFAULT"
+    },
+    {
+      "a_r": 9,
+      "a_c": 9,
+      "cost_seconds": 65.0,
+      "source": "ESTIMATED_TIER2"
+    },
+    {
+      "a_r": 10,
+      "a_c": 10,
+      "cost_seconds": 31.67,
+      "source": "MEASURED"
+    }
+  ],
+  "conclusion": "Static modulo partition has material load imbalance; cost-weighted scheduling recommended",
+  "note": "If source=ESTIMATED_FROM_PILOT, costs are estimated from 9 measured pilot blocks using channel-property classification. The full 56-block build was not yet complete when this analysis was run."
+}

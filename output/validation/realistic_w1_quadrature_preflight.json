@@ -1,0 +1,35 @@
+{
+  "schema": "tictac.realistic_w1_quadrature_preflight.v1",
+  "generated_on": "2026-08-15",
+  "purpose": "W1 radial quadrature convergence preflight on the realistic grid",
+  "grid": {"Np_WP": 82, "Nq_WP": 12, "J_2N_max": 1},
+  "method": "Measure the same evaluate block at radial orders 2 and 4; compare timing and (pending) values",
+  "measured_blocks": {
+    "0:0_diagonal_1S0": {
+      "order_2_wall_seconds": 19.23,
+      "order_4_wall_seconds": 295.38,
+      "cost_ratio_order4_to_order2": 15.4,
+      "theoretical_ratio": 16.0,
+      "note": "Cost scales as (Np_quad*Nq_quad)^2 per cell. Order 2: (2*2)^2=16 pts/cell. Order 4: (4*4)^2=256 pts/cell. Ratio=16x."
+    },
+    "6:8_deuteron_3D1_tensor": {
+      "order_2_wall_seconds": 675.21,
+      "order_4_estimated_seconds": 10800,
+      "order_4_estimated_hours": 3.0,
+      "note": "Too expensive to measure directly at order 4. Estimated from order 2 × 16x cost ratio."
+    }
+  },
+  "cell_level_evidence": {
+    "source": "output/validation/n2lo_3nf_wp_quadrature.json",
+    "finding": "For ordinary and deliberately wide cells, the legacy midpoint has relative errors from 2.28e-3 to 1.90e-1. The hardest wide c4+cD transition still has 3.84e-3 error at radial order two, while order four agrees with order six to 7.89e-7.",
+    "interpretation": "Cell-level evidence suggests radial order 2 is NOT sufficient for the hardest transitions (0.4% error), while order 4 is converged to <1e-6. This needs to be confirmed at the WP-block level on the realistic grid."
+  },
+  "sector_cost_implications": {
+    "order_2_sector_hours_96_threads": 3.05,
+    "order_4_sector_hours_96_threads_estimated": 48.8,
+    "note": "Order 4 would be 16x more expensive per sector. For a full paired 2NF+3NF campaign at order 4, this is ~49h per sector per parity. Distributed across 16 machines: ~3h."
+  },
+  "recommended_production_candidate": "radial order 2 for the J3NF<=1/2 diagnostic; upgrade to order 4 for the production result once the J3NF ladder is done",
+  "status": "PARTIAL — timing measured, value comparison pending (requires HDF5 W1 block reader or a comparison utility)",
+  "note": "The block value comparison at order 2 vs 4 requires reading two HDF5 W1 shards. This is a future utility; the cell-level evidence and the timing data are the current available evidence."
+}

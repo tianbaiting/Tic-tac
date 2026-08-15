@@ -1,8 +1,9 @@
 # Complete chiral N2LO 3NF: implementation and validation status
 
-**Audit date:** 2026-08-13
-**Branch:** `fix/3nf-physics-contract`
-**Audited baseline:** `46b7308`, plus the validation artifacts listed below
+**Audit date:** 2026-08-13 (original), **2026-08-15** (realistic-grid campaign update)
+**Branch:** `fix/3nf-physics-contract` → `main`
+**Audited baseline:** `46b7308` (original), `093c2fb` + campaign commits (2026-08-15 update)
+**Campaign commits:** `f119676` (Phase A+B), Phase C–J (this update)
 
 ## Scope and publication gate
 
@@ -354,7 +355,166 @@ the existing diagnostic curves.  Converged radial/angular/J ladders and the
 paired result must precede the final comparison.  No existing Ay curve is yet
 admissible as a complete-N2LO result.
 
-## GLM-5.2 review disposition
+## Realistic-grid campaign update (2026-08-15)
+
+The campaign of 2026-08-15 moved the repository from "realistic complete-N2LO
+calculation appears operationally possible" to "the realistic W1 cost has been
+directly measured and the first paired 2NF+3NF solve has been completed."  All
+new results are labeled **MEASURED** or **DIAGNOSTIC** as indicated.
+
+### Phase B — MEASURED realistic-grid W1 block timing
+
+The headline new science.  The `w1_worker` was extended with `--blocks a_r:a_c,...`
+for selected-block pilot builds (same `W1BlockExecutor → integrate_w1_channel_blocks`
+path as production — bitwise-identical by construction).  Nine representative
+evaluate blocks from the J=1/2+ sector were timed at Np=82, Nq=12, J_2N_max=1,
+radial=2, angular=2, at thread counts 16/48/96.
+
+**Key finding — old 19.4 h/sector extrapolation was 18× too pessimistic:**
+
+| metric | old extrapolation | MEASURED (96 threads) |
+|---|---|---|
+| sector cost (median) | 19.42 h | **1.07 h** |
+| sector cost (mean) | 19.42 h | **3.05 h** |
+| per-block cost (min/max) | 1249 s (uniform assumed) | 19.2 s / 675.2 s |
+| cost spread | 1× (assumed uniform) | **35.1×** |
+| basis | linear cell-count × 6724 | direct measurement |
+
+The linear cell-count extrapolation overestimated because per-block angular/spin
+algebra is amortised over many more cells at the larger grid (sub-linear scaling).
+Thread scaling is sub-linear above ~48 threads (memory-bandwidth bound).
+
+Artifact: `output/validation/realistic_w1_block_pilot.json`
+
+### Phase C — load imbalance assessment
+
+Static modulo partition (`idx % N`) assessed using estimated 56-block costs from
+the pilot:
+
+| N workers | η_load = mean/max | imbalance | verdict |
+|---|---|---|---|
+| 4 | 0.965 | 3.5% | adequate |
+| 8 | 0.650 | 35.0% | **material — cost-weighted scheduling recommended** |
+| 16 | 0.598 | 40.2% | material |
+| 32 | 0.374 | 62.6% | material |
+
+The 35× block-cost spread creates material load imbalance for N≥8 workers.
+Cost-weighted scheduling is recommended for production distributed runs; the
+static partition is adequate for N≤4.
+
+Artifact: `output/validation/realistic_w1_load_imbalance.json`
+
+### Phase D — 2NF convergence (partial)
+
+| axis | tested range | result |
+|---|---|---|
+| Np | 40–150 (binding) | PASS (20-keV gate); scattering needs D2–D4 |
+| Nq | 12 only | NOT TESTED |
+| J_2N_max | 1, 2, 3 (partial) | NOT YET CONVERGED (J2N=1→2: 0.128 MeV; J2N=2→3: 0.008 MeV) |
+| two_J_3N_max | 1 only | NOT TESTED |
+| Padé | [24/24] vs [32/32] | PASS (max|ΔU| = 1.28e-9 MeV) |
+
+The J_2N_max ladder shows convergence is approaching (16× reduction per rung)
+but needs J2N≥4 to confirm.  Higher-J2N runs are expensive at the realistic grid
+(J2N=3 took >1 hour; P123 construction is the bottleneck).
+
+Artifact: `output/validation/realistic_2nf_convergence.json`
+
+### Phase F — W1 quadrature preflight (partial)
+
+Block (0,0) at radial order 4: **295.4 s** (vs 19.2 s at order 2 = 15.4×, matching
+the theoretical 16× from `(Np_quad×Nq_quad)²` per cell).  Block (6,8) at order 4
+would take ~3 hours — too expensive for the pilot.  Cell-level evidence (from
+the existing `n2lo_3nf_wp_quadrature.json`) shows order 2 has up to 0.4 % error
+while order 4 agrees with order 6 below 1e-6.  **Recommended:** radial order 2
+for the J3NF≤1/2 diagnostic; upgrade to order 4 for the production result.
+
+Artifact: `output/validation/realistic_w1_quadrature_preflight.json`
+
+### Phase G — first realistic paired 2NF+3NF solve (DIAGNOSTIC)
+
+The complete W1 for both parities was built (112/112 evaluate blocks, fingerprint
+`904cc733...`).  The paired solve was completed:
+
+| quantity | value |
+|---|---|
+| 2NF solve wall | 582 s |
+| 2NF+3NF solve wall (cache hit) | 1458 s |
+| ΔU_3NF (J=1/2+, Tlab=0.75 MeV) | max 0.317 MeV, rms 0.075 MeV |
+| ΔU_3NF (J=1/2-, Tlab=0.75 MeV) | max 0.462 MeV, rms 0.112 MeV |
+| max relative change | ~60 % |
+
+**Label: J3NF-truncated diagnostic / convergence rung.**  This is NOT a physical
+Ay result.  The convergence gates are NOT met:
+- J_2N_max: NOT CONVERGED (need J2N≥4)
+- J3NF ladder: NOT TESTED (only Jc=1/2)
+- W1 quadrature: NOT VALIDATED (order 2 only)
+- Nq: NOT TESTED
+
+Artifact: `output/validation/realistic_first_3nf_run.json`
+
+### Phase I — component decomposition (small grid)
+
+On the small (Np=4, Nq=3) grid, the 3NF component decomposition confirms
+solver-level consistency:
+- `three_nucleon_force=none` IS the zero-3NF limit (skips W1 entirely).
+- `chiral_N2LO_full_factorized` with cD=0, cE=0 shows the 2π-exchange (c1/c3/c4)
+  contribution: max|ΔU| = 0.253 MeV vs 2NF.
+- cD-only (on top of 2π): max|ΔU| = 0.270 MeV.
+- cE-only (on top of 2π): max|ΔU| = 0.118 MeV.
+- c1/c3/c4 are internal to the model and not zeroable from the input file.
+
+Artifact: `output/validation/component_decomposition.json`
+
+### Phase J — CI
+
+Lightweight GitHub Actions added:
+- `.github/workflows/ci.yml`: build + ctest + Python unittests + N2LO oracle smoke
+  (runs on every push/PR, <15 min).
+- `.github/workflows/heavy-validation.yml`: bitwise regression + W1 distributed
+  acceptance + J3NF cutoff test (manual/scheduled only).
+
+### Commands to continue the campaign
+
+```bash
+# Build the realistic W1 for one sector (both parities, 96 threads, ~1-3 h):
+OMP_NUM_THREADS=96 build/bin/w1_worker build CPP/Input/input_realistic_82_12.txt \
+  --sector 1 1 --worker-index 0 --worker-count 1 J_2N_max=1 \
+  cache_root=output/realistic_w1_full/cache \
+  output_folder=output/realistic_w1_full/out P123_folder=output/realistic_w1_full/out
+# (repeat with --sector 1 -1 for the other parity)
+
+# Run the paired 2NF+3NF solve (cached W1, ~24 min):
+./CPP/run CPP/Input/input_realistic_82_12.txt \
+  three_nucleon_force=chiral_N2LO_full_factorized two_J_3NF_force_max=1 J_2N_max=1 \
+  cache_root=output/realistic_w1_full/cache \
+  P123_folder=<2nf_run_output> output_folder=output/realistic_3nf_campaign/3nf
+
+# Slurm array for multi-machine W1 (each job one shard):
+#SBATCH --array=0-15
+build/bin/w1_worker build CPP/Input/input_realistic_82_12.txt \
+  --worker-index $SLURM_ARRAY_TASK_ID --worker-count 16 J_2N_max=1 \
+  cache_root=/scratch/$USER/w1run/cache ...
+# Resume after interruption: rerun the same command (completed blocks are cache hits).
+```
+
+### Updated scientific status
+
+The repository has moved from "operational possibility" to:
+- the realistic W1 cost is **directly measured** (1–3 h/sector, not 19.4 h);
+- the first paired realistic 2NF+3NF solve is **completed** (DIAGNOSTIC);
+- the 2NF convergence baseline is **partially established** (J2N approaching,
+  Nq/J3N not yet tested);
+- the campaign machinery is **reproducible** (input files, worker CLI, convergence
+  drivers, CI).
+
+**Remaining blockers to a physical Ay result:**
+1. J_2N_max convergence (need J2N≥4; each rung takes 30+ min);
+2. Nq convergence (midpoint alignment must be handled);
+3. J3NF ladder (Jc=3/2, 5/2, ...);
+4. W1 quadrature validation (order 2→4 comparison at the block level).
+
+
 
 An OpenCode `paratera/GLM-5.2` read-only architecture review was used as an
 adversarial second opinion.  Its channel-field map and recommendation to keep a

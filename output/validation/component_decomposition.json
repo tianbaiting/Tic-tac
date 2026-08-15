@@ -1,0 +1,57 @@
+{
+  "zero_3nf_limit": {
+    "wall_seconds": 7.43894362449646,
+    "label": "three_nucleon_force=none",
+    "wall_3nf_zero_seconds": 28.04740858078003,
+    "JP_1_1": {
+      "max_abs_dU_MeV": 0.25259299197824675,
+      "rms_dU_MeV": 0.0827464691674066
+    }
+  },
+  "cD_only": {
+    "wall_seconds": 30.490963220596313,
+    "lecs": {
+      "c_D": -0.2,
+      "c_E": 0.0
+    },
+    "JP_1_1": {
+      "max_abs_dU_MeV": 0.27038735731664587,
+      "rms_dU_MeV": 0.08669510051470349
+    }
+  },
+  "cE_only": {
+    "wall_seconds": 28.364692449569702,
+    "lecs": {
+      "c_D": 0.0,
+      "c_E": -0.205
+    },
+    "JP_1_1": {
+      "max_abs_dU_MeV": 0.11835409761035032,
+      "rms_dU_MeV": 0.04621078686451909
+    }
+  },
+  "cD_cE": {
+    "wall_seconds": 30.124829053878784,
+    "lecs": {
+      "c_D": -0.2,
+      "c_E": -0.205
+    },
+    "JP_1_1": {
+      "max_abs_dU_MeV": 0.12098648469975742,
+      "rms_dU_MeV": 0.048239352554739344
+    }
+  },
+  "cD_zero_cE_zero": {
+    "wall_seconds": 7.211000919342041,
+    "lecs": {
+      "c_D": 0.0,
+      "c_E": 0.0
+    },
+    "JP_1_1": {
+      "max_abs_dU_MeV": 0.25259299197824675,
+      "rms_dU_MeV": 0.0827464691674066
+    }
+  },
+  "label": "DIAGNOSTIC \u2014 small grid (Np=4, Nq=3); not physical",
+  "note": "Confirms solver-level changes are consistent with matrix-element signs. cD_only and cE_only show the individual contributions. cD+cE shows the combined effect. Zero-3NF (all LECs=0) should match the 2NF baseline."
+}

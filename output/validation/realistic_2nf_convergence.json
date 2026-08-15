@@ -1,0 +1,48 @@
+{
+  "schema": "tictac.realistic_2nf_convergence.v1",
+  "generated_on": "2026-08-15",
+  "purpose": "2NF-only convergence baseline on the realistic grid",
+  "grid_base": {"Np_WP": 82, "Nq_WP": 12, "p_chebyshev_t": 0.88, "p_chebyshev_s": 325, "q_chebyshev_t": 1.0, "q_chebyshev_s": 90},
+  "ladders": {
+    "J_2N_max": {
+      "tested_range": "1, 2, 3 (partial)",
+      "runs": [
+        {"label": "J2N=1", "wall_seconds": 582, "on_shell_Tlab_MeV": 0.7518},
+        {"label": "J2N=2", "wall_seconds": 1932, "on_shell_Tlab_MeV": 0.7518},
+        {"label": "J2N=3", "wall_seconds": 3600, "note": "timed out (P123 construction for higher J2N is expensive)"}
+      ],
+      "convergence": [
+        {"from": "J2N=1", "to": "J2N=2", "JP_1_2_plus_max_abs_dU_MeV": 0.12841, "JP_1_2_minus_max_abs_dU_MeV": 0.10807, "interpretation": "NOT CONVERGED at J2N=1"},
+        {"from": "J2N=2", "to": "J2N=3", "JP_1_2_plus_max_abs_dU_MeV": 0.00809, "interpretation": "Approaching convergence (16x reduction from J2N=1->2 step)"}
+      ],
+      "axis_status": "NOT YET CONVERGED (need J2N=4+ to confirm; J2N=3 partial data shows 0.008 MeV change from J2N=2)"
+    },
+    "two_J_3N_max": {
+      "tested_range": "1 only",
+      "note": "At two_J_3N_max=1, only J=1/2 sectors. Need 3, 5, 7 for convergence. NOT TESTED at higher J.",
+      "axis_status": "NOT TESTED"
+    },
+    "Nq": {
+      "tested_range": "12 only",
+      "note": "Need 8, 10, 14, 16. WARNING: changing Nq moves the on-shell midpoint. NOT TESTED.",
+      "axis_status": "NOT TESTED"
+    },
+    "Np": {
+      "source": "output/validation/idaho_n3lo_deuteron_binding_ladder.json",
+      "note": "Binding energy converges as 1/Np^2. Np=82 is within 20-keV gate. Binding convergence does NOT imply scattering convergence.",
+      "axis_status": "PASS (binding); scattering requires D2-D4"
+    },
+    "Pade": {
+      "source": "output/validation/n2lo_3nf_physical_Ay_feasibility.json",
+      "order_24_vs_32_max_abs_dU_mev": 1.28e-09,
+      "note": "16/16 amplitudes converged at [24/24] and [32/32]",
+      "axis_status": "PASS"
+    }
+  },
+  "summary_table": "axis                  result\n--------------------------------\nNp                    PASS (binding); scattering requires D2-D4\nNq                    NOT TESTED\nJ_2N_max             NOT YET CONVERGED (need J2N>=4)\ntwo_J_3N_max         NOT TESTED\nPade                  PASS",
+  "commands_to_continue": {
+    "j2n_ladder": "python3 tools/convergence/run_2nf_convergence.py (increase solver timeout to 7200s)",
+    "nq_ladder": "python3 tools/convergence/run_2nf_convergence.py (add Nq ladder, handle midpoint alignment)",
+    "j3n_ladder": "python3 examples/run_j3nf_convergence.py CPP/Input/input_realistic_82_12.txt --rungs 0,1,3,5,7"
+  }
+}
