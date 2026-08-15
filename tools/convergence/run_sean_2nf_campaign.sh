@@ -177,22 +177,29 @@ run_j3n_ladder() {
 
     for tj3 in 1 3 5 7 9 11 13 15 17; do
         local work="$base/J3N_${tj3}"
-        mkdir -p "$work"
+        mkdir -p "$work/out"
 
-        # For two_J_3N_max > 1, reuse P123 from lower two_J_3N_max runs
-        # (P123 is per-sector; lower-J sectors are unchanged)
-        local p123_dir="$work/out"
-        local prev_work=""
-        # Try to reuse P123 from previous rung
+        # Copy P123 files from previous rung (P123 is per-sector, reusable).
+        # IMPORTANT: do NOT copy U files — they must be regenerated for each
+        # two_J_3N_max because the solver produces U for ALL sectors up to two_J_3N_max.
         local prev_tj3=$((tj3 - 2))
         if [ "$prev_tj3" -ge 1 ] && [ -d "$base/J3N_${prev_tj3}/out" ]; then
-            # Copy existing P123 files to the new work dir
-            mkdir -p "$work/out"
-            cp -rn "$base/J3N_${prev_tj3}/out/"* "$work/out/" 2>/dev/null || true
+            cp -n "$base/J3N_${prev_tj3}/out/"P123_*.h5 "$work/out/" 2>/dev/null || true
         elif [ "$tj3" -eq 1 ] && [ -d "$CAMPAIGN/j2n_ladder/J2N_${j2n}/out" ]; then
-            # Start from the J2N ladder's J2N rung
-            mkdir -p "$work/out"
-            cp -rn "$CAMPAIGN/j2n_ladder/J2N_${j2n}/out/"* "$work/out/" 2>/dev/null || true
+            cp -n "$CAMPAIGN/j2n_ladder/J2N_${j2n}/out/"P123_*.h5 "$work/out/" 2>/dev/null || true
+        fi
+
+        # For the skip check: count expected sectors vs existing U files.
+        # At two_J_3N_max=tj3, the number of J^pi sectors is roughly tj3+1
+        # (both parities for each J=1/2, 3/2, ..., tj3/2).
+        # We check for U files with the correct Jmax in the filename.
+        local expected_jp_count=$(( (tj3 + 1) ))  # approximate
+        local actual_u_count=$(ls "$work/out"/U_PW_elements_*_Jmax_${j2n}_PSI_0.txt 2>/dev/null | wc -l)
+
+        if [ "$actual_u_count" -ge "$expected_jp_count" ]; then
+            log "J3N_${tj3}: SKIP ($actual_u_count U files already present)"
+            update_status "j3n_ladder" "J3N_${tj3}" "DONE" "{\"skipped\": true, \"u_files\": $actual_u_count}"
+            continue
         fi
 
         run_rung "j3n_ladder" "J3N_${tj3}" "$work" "$work/out" \
