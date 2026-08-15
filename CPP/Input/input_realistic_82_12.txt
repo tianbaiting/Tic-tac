@@ -1,0 +1,65 @@
+# Realistic candidate grid for the N2LO 3NF campaign.
+#   Np=82, Nq=12, p=(0.88,325), q=(1,90)
+#   Tlab bin midpoint ~ 10.045 MeV (idx 6)
+#   deuteron binding within 20-keV gate (see idaho_n3lo_deuteron_binding_ladder.json)
+#
+# Pilot/production input for J=1/2 sectors (two_J_3N_max=1).
+# W1 quadrature orders are overrides on the command line for the pilot.
+
+two_J_3N_max=1
+two_J_3NF_force_max=1
+J_2N_max=3
+Np_WP=82
+Nq_WP=12
+
+Nphi=48
+Nx=48
+Np_per_WP=8
+Nq_per_WP=8
+
+# W1 quadrature: start at order 2 (matches the 19.4h extrapolation baseline).
+# Phase F will compare 2/4/6 explicitly.
+Np_per_WP_W1=2
+Nq_per_WP_W1=2
+Nangle_3NF=2
+pade_max_order=24
+
+# Independent p/q Chebyshev controls (the realistic candidate):
+p_chebyshev_t=0.88
+p_chebyshev_s=325
+q_chebyshev_t=1.0
+q_chebyshev_s=90
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=12
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=Idaho_N3LO
+three_nucleon_force=chiral_N2LO_full_factorized
+c_D=-0.2
+c_E=-0.205
+Lambda_3NF=500
+
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+energy_input_file=CPP/Input/lab_energies.txt
+output_folder=output/realistic_82_12/out
+P123_folder=output/realistic_82_12/p123
+cache_root=output/realistic_82_12/cache

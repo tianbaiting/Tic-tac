@@ -26,10 +26,17 @@
 //
 // Commands:
 //   w1_worker plan    input.txt [--manifest path] [--sector J P] [--shard K/N]
-//   w1_worker build   input.txt [--sector J P] ( --shard K/N | --worker-index I --worker-count N )
+//   w1_worker build   input.txt [--sector J P] ( --shard K/N | --worker-index I --worker-count N | --blocks LIST )
 //   w1_worker status  input.txt [--manifest path]
 //   w1_worker assemble input.txt [--manifest path]
 //   w1_worker verify  input.txt [--sector J P] [--shard K/N]
+//
+// --blocks LIST: comma-separated a_r:a_c pairs (e.g. "0:0,1:3,8:9").  Requires
+//   --sector J P (exactly one sector).  Builds ONLY the listed evaluate-units in
+//   that sector, each via its own W1BlockExecutor::compute_block call (the SAME
+//   integrate_w1_channel_blocks path as production — bitwise-identical).  Prints
+//   one JSON line per block to stdout for machine-readable timing.  Intended for
+//   realistic-grid pilot measurements; NOT a second integration path.
 //
 // Sectors above two_J_3NF_force_max are pure-2NF and have NO W1 blocks; they are
 // never planned/built. Lower-J W1 built under one run is reused verbatim under a
@@ -91,6 +98,10 @@ struct WorkerArgs {
 	bool block_partition = false;
 	std::string manifest_path;
 	bool have_manifest = false;
+	// --blocks "a_r:a_c,a_r:a_c,..." : explicit list of evaluate-units to build.
+	// Requires --sector J P (exactly one sector). Empty = not selected.
+	std::vector<std::pair<int,int>> selected_blocks;
+	bool have_selected_blocks = false;
 };
 
 // Is this sector in this worker's sector-level shard?
@@ -144,6 +155,26 @@ int main(int argc, char** argv) {
 		} else if (a == "--manifest" && i + 1 < argc) {
 			args.manifest_path = argv[++i];
 			args.have_manifest = true;
+		} else if (a == "--blocks" && i + 1 < argc) {
+			// Parse "a_r:a_c,a_r:a_c,..." into a list of pairs.
+			std::string spec = argv[++i];
+			std::string token;
+			for (std::size_t p = 0, start = 0; p <= spec.size(); ++p) {
+				if (p == spec.size() || spec[p] == ',') {
+					token = spec.substr(start, p - start);
+					start = p + 1;
+					if (token.empty()) continue;
+					auto colon = token.find(':');
+					if (colon == std::string::npos) {
+						std::fprintf(stderr, "bad --blocks entry '%s' (need a_r:a_c)\n", token.c_str());
+						return 2;
+					}
+					int ar = std::atoi(token.c_str());
+					int ac = std::atoi(token.c_str() + colon + 1);
+					args.selected_blocks.emplace_back(ar, ac);
+				}
+			}
+			args.have_selected_blocks = !args.selected_blocks.empty();
 		}
 	}
 	if (args.block_partition) {
@@ -154,6 +185,20 @@ int main(int argc, char** argv) {
 		}
 		if (args.shard_n != 1) {
 			std::fprintf(stderr, "--shard and --worker-index/--worker-count are mutually exclusive\n");
+			return 2;
+		}
+	}
+	if (args.have_selected_blocks) {
+		if (!args.have_sector) {
+			std::fprintf(stderr, "--blocks requires --sector J P (exactly one sector)\n");
+			return 2;
+		}
+		if (args.block_partition) {
+			std::fprintf(stderr, "--blocks and --worker-index/--worker-count are mutually exclusive\n");
+			return 2;
+		}
+		if (args.shard_n != 1) {
+			std::fprintf(stderr, "--blocks and --shard are mutually exclusive\n");
 			return 2;
 		}
 	}
@@ -382,10 +427,83 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 
-	// ============================ build ============================
-	if (args.cmd == "build") {
-		if (args.block_partition) {
-			// Block-level: each worker integrates its evaluate-units.  To recover
+	// ============================ build: --blocks (selected pilot) ============
+	if (args.cmd == "build" && args.have_selected_blocks) {
+		// Build ONLY the explicitly-listed evaluate-units in the single selected
+		// sector. Each block goes through W1BlockExecutor::compute_block, which
+		// calls the SAME integrate_w1_channel_blocks as the monolithic and
+		// block-level paths -- bitwise-identical by construction.  Per-block
+		// wall time is printed as a JSON line for machine-readable pilot timing.
+		std::size_t built = 0, hits = 0, skipped_not_eval = 0, skipped_not_found = 0;
+		const int omp_threads = omp_get_max_threads();
+		for (const auto& s : sectors) {
+			if (!s.active) continue;
+			if (!(s.two_J == args.sel_two_J && s.parity == args.sel_P)) continue;
+			pw_3N_statespace sub = make_channel_view(pw, s.chn);
+			W1WorkPlan plan(sub, tnf->W1_is_exactly_hermitian());
+			const std::size_t per_block = static_cast<std::size_t>(fwp.Nq_WP) * fwp.Nq_WP
+			                            * fwp.Np_WP * fwp.Np_WP;
+			for (const auto& [ar, ac] : args.selected_blocks) {
+				const W1WorkUnit* u = plan.unit_for(ar, ac);
+				if (!u) { ++skipped_not_found; continue; }
+				if (u->role != W1UnitRole::evaluate) {
+					++skipped_not_eval;
+					std::printf("{\"block\":\"%d:%d\",\"status\":\"transpose_fill\",\"a_r\":%d,\"a_c\":%d}\n",
+					            ar, ac, ar, ac);
+					continue;
+				}
+				auto key = make_w1_key(*tnf, rp, sub, fwp.Np_WP, fwp.Nq_WP,
+				                       Np_quad, Nq_quad, ar, ac, p_hash, q_hash);
+				#if TICTAC_USE_NEW_CACHE_LAYER
+				W1Block blk;
+				if (tictac::cache::lookup_w1(key, &blk).hit) {
+					++hits;
+					std::printf("{\"block\":\"%d:%d\",\"status\":\"cache_hit\",\"a_r\":%d,\"a_c\":%d,"
+					            "\"payload_bytes\":%zu,\"Np\":%d,\"Nq\":%d}\n",
+					            ar, ac, ar, ac, blk.data.size()*sizeof(double),
+					            blk.Np, blk.Nq);
+					continue;
+				}
+				#endif
+				std::vector<double> buf(per_block, 0.0);
+				const double t0 = omp_get_wtime();
+				W1BlockExecutor::compute_block(*tnf, fwp.p_WP_array, fwp.Np_WP,
+				                               fwp.q_WP_array, fwp.Nq_WP, sub, rp,
+				                               ar, ac, buf.data());
+				const double t1 = omp_get_wtime();
+				#if TICTAC_USE_NEW_CACHE_LAYER
+				W1Block out{};
+				out.Nq = fwp.Nq_WP; out.Np = fwp.Np_WP;
+				out.a_r = ar; out.a_c = ac;
+				out.data = std::move(buf);
+				tictac::cache::store_w1(key, out);
+				#endif
+				++built;
+				std::printf("{\"block\":\"%d:%d\",\"status\":\"built\",\"a_r\":%d,\"a_c\":%d,"
+				            "\"wall_seconds\":%.6f,\"omp_threads\":%d,"
+				            "\"payload_bytes\":%zu,\"Np\":%d,\"Nq\":%d,"
+				            "\"two_J\":%d,\"parity\":%d,\"Nalpha\":%d,"
+				            "\"Np_WP\":%d,\"Nq_WP\":%d,\"Np_per_WP_W1\":%d,\"Nq_per_WP_W1\":%d,"
+				            "\"Nangle_3NF\":%d,\"signature_hash\":\"%s\"}\n",
+				            ar, ac, ar, ac, t1 - t0, omp_threads,
+				            per_block * sizeof(double), fwp.Np_WP, fwp.Nq_WP,
+				            s.two_J, s.parity, s.Nalpha,
+				            fwp.Np_WP, fwp.Nq_WP, Np_quad, Nq_quad,
+				            rp.Nangle_3NF, sig_hash.c_str());
+			}
+		}
+		std::fprintf(stderr, "[w1_worker] build --blocks: built=%zu hits=%zu "
+		             "skipped_not_eval=%zu skipped_not_found=%zu\n",
+		             built, hits, skipped_not_eval, skipped_not_found);
+		#if TICTAC_USE_NEW_CACHE_LAYER
+		tictac::cache::shutdown();
+		#endif
+		return 0;
+	}
+
+	// ============================ build: --worker-index (block-level) ========
+	if (args.cmd == "build" && args.block_partition) {
+		// Block-level: each worker integrates its evaluate-units.  To recover
 			// the cross-channel orbital-cache reuse that the monolithic
 			// W1_PW_cache::build enjoys, a worker batches ALL its owned missing
 			// channels in a sector into ONE integrate_w1_channel_blocks call (the
@@ -459,6 +577,8 @@ int main(int argc, char** argv) {
 			return 0;
 		}
 
+	// ============================ build: --shard (sector-level) ============
+	if (args.cmd == "build") {
 		// Sector-level (legacy --shard): build each owned sector monolithically
 		// via W1_PW_cache::build, which probes the cache per block (hits skipped),
 		// evaluates the Hermitian triangle, transpose-fills reverse blocks, and
