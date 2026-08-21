@@ -1,33 +1,54 @@
-name: Heavy validation (manual/scheduled)
+# =====================================================================
+# DISABLED: 这些验证改为在服务器本地运行,不再占用 GitHub Actions。
+# 本地运行方式见文件底部注释。
+# =====================================================================
+# name: Heavy validation (manual/scheduled)
+#
+# on:
+#   workflow_dispatch:
+#   schedule:
+#     - cron: '0 3 * * 0'  # weekly Sunday 03:00 UTC
+#
+# jobs:
+#   heavy-validation:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 120
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.12'
+#       - name: Install dependencies
+#         run: |
+#           sudo apt-get update
+#           sudo apt-get install -y build-essential cmake libhdf5-dev libgsl-dev liblapacke-dev libomp-dev
+#           pip install numpy scipy
+#       - name: Configure and build
+#         run: |
+#           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+#           cmake --build build -j4
+#       - name: Bitwise regression harness
+#         run: bash tools/refactor_harness/run_and_compare.sh
+#       - name: W1 distributed acceptance
+#         run: bash tools/refactor_harness/run_w1_block_dist_acceptance.sh
+#       - name: W1 block DB acceptance
+#         run: bash tools/refactor_harness/run_w1_blockdb_acceptance.sh
+#       - name: J3NF cutoff test
+#         run: bash tools/refactor_harness/run_j3nf_cutoff_test.sh
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 3 * * 0'  # weekly Sunday 03:00 UTC
+# 本地等效命令(服务器上执行):
+#   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+#   bash tools/refactor_harness/run_and_compare.sh
+#   bash tools/refactor_harness/run_w1_block_dist_acceptance.sh
+#   bash tools/refactor_harness/run_w1_blockdb_acceptance.sh
+#   bash tools/refactor_harness/run_j3nf_cutoff_test.sh
 
+# 保留一个永不执行的占位 job,使本文件仍是合法 workflow(避免 GitHub 报无效)
+name: Heavy validation (disabled)
+on: workflow_dispatch
 jobs:
-  heavy-validation:
+  disabled:
+    if: false
     runs-on: ubuntu-latest
-    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake libhdf5-dev libgsl-dev liblapacke-dev libomp-dev
-          pip install numpy scipy
-      - name: Configure and build
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j4
-      - name: Bitwise regression harness
-        run: bash tools/refactor_harness/run_and_compare.sh
-      - name: W1 distributed acceptance
-        run: bash tools/refactor_harness/run_w1_block_dist_acceptance.sh
-      - name: W1 block DB acceptance
-        run: bash tools/refactor_harness/run_w1_blockdb_acceptance.sh
-      - name: J3NF cutoff test
-        run: bash tools/refactor_harness/run_j3nf_cutoff_test.sh
+      - run: echo "Heavy validation disabled - run locally on server"

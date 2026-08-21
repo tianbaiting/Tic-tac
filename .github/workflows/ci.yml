@@ -1,48 +1,68 @@
-name: CI
+# =====================================================================
+# DISABLED: 这些验证改为在服务器本地运行,不再占用 GitHub Actions。
+# 本地运行方式见文件底部注释。
+# =====================================================================
+# name: CI
+#
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
+#
+# jobs:
+#   build-and-test:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 30
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.12'
+#       - name: Install dependencies
+#         run: |
+#           sudo apt-get update
+#           sudo apt-get install -y build-essential cmake libhdf5-dev libgsl-dev liblapacke-dev libomp-dev
+#           pip install numpy scipy
+#       - name: Configure
+#         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+#       - name: Build
+#         run: cmake --build build -j4
+#       - name: C++ tests
+#         run: ctest --test-dir build --output-on-failure
+#       - name: Python regression tests
+#         run: |
+#           python3 -m unittest tests/test_190mev_data_pipeline.py
+#           python3 -m unittest tests/test_2nf_miller_baseline.py
+#           python3 -m unittest tests/test_3nf_matrix_elements.py
+#           python3 -m unittest tests/test_3nf_physics.py
+#           python3 -m unittest tests/test_3nf_regression.py
+#           python3 -m unittest tests/test_coupling_coefficients.py
+#           python3 -m unittest tests/test_factorized_n2lo_pwd.py
+#           python3 -m unittest tests/test_factorized_scalar_pwd.py
+#           python3 -m unittest tests/test_full_vector_n2lo_oracle.py
+#           python3 -m unittest tests/test_n2lo_matrix_validation.py
+#           python3 -m unittest tests/test_pade_honesty.py
+#           python3 -m unittest tests/test_deuteron_binding_mode.py
+#           python3 -m unittest tests/test_tictac_package.py
+#           python3 -m unittest tests/test_unitarity_gating.py
+#       - name: N2LO oracle (fast)
+#         run: |
+#           build/tools/3nf_oracle/print_w1_element 0.0 0.0 0.0 0.0 500.0 > /dev/null
+#           echo "N2LO oracle smoke test passed"
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# 本地等效命令(服务器上执行):
+#   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+#   ctest --test-dir build --output-on-failure
+#   python3 -m unittest discover -s tests
+#   build/tools/3nf_oracle/print_w1_element 0.0 0.0 0.0 0.0 500.0 > /dev/null
 
+# 保留一个永不执行的占位 job,使本文件仍是合法 workflow(避免 GitHub 报无效)
+name: CI (disabled)
+on: workflow_dispatch
 jobs:
-  build-and-test:
+  disabled:
+    if: false
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake libhdf5-dev libgsl-dev liblapacke-dev libomp-dev
-          pip install numpy scipy
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-      - name: Build
-        run: cmake --build build -j4
-      - name: C++ tests
-        run: ctest --test-dir build --output-on-failure
-      - name: Python regression tests
-        run: |
-          python3 -m unittest tests/test_190mev_data_pipeline.py
-          python3 -m unittest tests/test_2nf_miller_baseline.py
-          python3 -m unittest tests/test_3nf_matrix_elements.py
-          python3 -m unittest tests/test_3nf_physics.py
-          python3 -m unittest tests/test_3nf_regression.py
-          python3 -m unittest tests/test_coupling_coefficients.py
-          python3 -m unittest tests/test_factorized_n2lo_pwd.py
-          python3 -m unittest tests/test_factorized_scalar_pwd.py
-          python3 -m unittest tests/test_full_vector_n2lo_oracle.py
-          python3 -m unittest tests/test_n2lo_matrix_validation.py
-          python3 -m unittest tests/test_pade_honesty.py
-          python3 -m unittest tests/test_deuteron_binding_mode.py
-          python3 -m unittest tests/test_tictac_package.py
-          python3 -m unittest tests/test_unitarity_gating.py
-      - name: N2LO oracle (fast)
-        run: |
-          build/tools/3nf_oracle/print_w1_element 0.0 0.0 0.0 0.0 500.0 > /dev/null
-          echo "N2LO oracle smoke test passed"
+      - run: echo "CI disabled - run locally on server"
