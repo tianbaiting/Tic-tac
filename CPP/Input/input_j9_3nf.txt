@@ -1,0 +1,53 @@
+# J<=9/2 (two_J_3N_max=9) run WITH chiral N2LO 3NF, mirroring the
+# ay_diagnosis_current_binary/j9 2NF-only run so the two are directly
+# comparable.  Nphi=24,Nx=24 and chebyshev s=100,t=1 match the j9 P123 cache
+# key, so the expensive P123 permutation operator is reused (cache hit); only
+# the 3NF W1 terms for J<=9/2 are newly computed.
+# LECs (Witala/Navratil convention): c_D=-0.20, c_E=-0.205, Lambda_3NF=500.
+two_J_3N_max=9
+J_2N_max=2
+Np_WP=10
+Nq_WP=10
+
+Nphi=24
+Nx=24
+Np_per_WP=8
+Nq_per_WP=8
+
+chebyshev_s=100
+chebyshev_t=1
+p_grid_type=chebyshev
+p_grid_filename=
+q_grid_type=chebyshev
+q_grid_filename=
+
+P123_omp_num_threads=4
+parallel_run=false
+channel_idx=-1
+P123_recovery=false
+
+tensor_force=true
+isospin_breaking_1S0=true
+midpoint_approx=false
+calculate_and_store_P123=true
+include_breakup_channels=false
+solve_faddeev=true
+solve_dense=false
+production_run=true
+
+potential_model=Idaho_N3LO
+parameter_walk=false
+parameter_file=none
+PSI_start=-1
+PSI_end=-1
+
+three_nucleon_force=chiral_N2LO_c1c3cDcE_approx
+c_D=-0.20
+c_E=-0.205
+Lambda_3NF=500.0
+w1_scale=1.0
+
+energy_input_file=CPP/Input/lab_energies_miller_gate2.txt
+output_folder=output/ay_diagnosis_current_binary/j9_3nf/solver_out
+P123_folder=cache/p123
+cache_root=cache
