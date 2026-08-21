@@ -115,7 +115,10 @@ run_rung() {
         "pade_max_order=24"
     )
     # Add P123 reuse if P123 files exist (read HDF5 directly)
-    if [ -n "$p123_exists" ]; then
+    # For the J3N ladder, we MUST build P123 for new sectors, so always use
+    # calculate_and_store_P123=true. The cache layer will hit for existing
+    # sectors and miss (then build) for new ones.
+    if [ -n "$p123_exists" ] && [ "$ladder" != "j3n_ladder" ]; then
         cmd_args+=("calculate_and_store_P123=false")
     fi
     cmd_args+=("${overrides[@]}")
